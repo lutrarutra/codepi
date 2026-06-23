@@ -1,0 +1,73 @@
+{
+  "name": "codepi",
+  "displayName": "CodePi",
+  "description": "A VSCode extension with React + TypeScript frontend and backend",
+  "version": "0.0.1",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "configuration": {
+      "title": "CodePi",
+      "properties": {
+        "codepi.apiKey": {
+          "type": "string",
+          "description": "API key for the AI provider (e.g. Anthropic API key)"
+        }
+      }
+    },
+    "commands": [
+      {
+        "command": "codepi.openPanel",
+        "title": "CodePi: Open Panel"
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "codepi-sidebar",
+          "title": "CodePi",
+          "icon": "$(hubot)"
+        }
+      ]
+    },
+    "views": {
+      "codepi-sidebar": [
+        {
+          "id": "codepi.sidebarView",
+          "name": "CodePi Explorer",
+          "type": "webview"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run package",
+    "compile": "npm run build:webview && npm run build:extension",
+    "watch": "concurrently -n webview,ext \"npm:watch:webview\" \"npm:watch:extension\"",
+    "build:extension": "node esbuild.mjs --production",
+    "watch:extension": "node esbuild.mjs",
+    "build:webview": "npm --prefix webview-ui run build",
+    "watch:webview": "npm --prefix webview-ui run dev",
+    "package": "npm run build:webview && npm run build:extension",
+    "lint": "eslint src --ext ts",
+    "test": "tsc -p ./tsconfig.json --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "@types/vscode": "^1.85.0",
+    "@typescript-eslint/eslint-plugin": "^7.0.0",
+    "@typescript-eslint/parser": "^7.0.0",
+    "concurrently": "^8.2.2",
+    "esbuild": "^0.20.0",
+    "eslint": "^8.56.0",
+    "typescript": "^5.3.0"
+  },
+  "dependencies": {
+    "@earendil-works/pi-coding-agent": "^0.80.1"
+  }
+}
