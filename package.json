@@ -4,8 +4,13 @@
   "description": "Pi coding agent for VSCode",
   "version": "0.1.0",
   "publisher": "pi-dev",
-  "engines": { "vscode": "^1.85.0" },
-  "categories": ["Chat", "Programming Languages"],
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Chat",
+    "Programming Languages"
+  ],
   "main": "./dist/extension.js",
   "contributes": {
     "configuration": {
@@ -36,7 +41,8 @@
     "lint": "tsc -p ./tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@earendil-works/pi-coding-agent": "^0.80.1"
+    "@earendil-works/pi-coding-agent": "^0.80.1",
+    "openai": "^7.0.0"
   },
   "devDependencies": {
     "@types/node": "^20.11.0",

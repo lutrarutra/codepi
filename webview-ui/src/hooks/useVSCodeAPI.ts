@@ -11,7 +11,7 @@ export function useVSCodeAPI(onMessage: (msg: ExtensionMessage) => void) {
 
 	useEffect(() => {
 		const handler = (e: MessageEvent<ExtensionMessage>) => {
-			console.log("[CodePi Webview] received:", e.data?.command);
+			console.log("[CodePi Webview] received message:", JSON.stringify(e.data));
 			onMessageRef.current(e.data);
 		};
 		window.addEventListener("message", handler);

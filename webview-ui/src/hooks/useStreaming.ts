@@ -181,8 +181,10 @@ export function useStreaming() {
 	});
 
 	const handleExtensionMessage = useCallback((msg: ExtensionMessage) => {
+		console.log("[CodePi Webview] dispatching:", msg.command);
 		switch (msg.command) {
 			case "agentStart":
+				console.log("[CodePi Webview] → creating new assistant message bubble");
 				dispatch({ type: "startAssistantMessage" });
 				break;
 			case "textDelta":
@@ -192,6 +194,7 @@ export function useStreaming() {
 				dispatch({ type: "thinkingDelta", delta: msg.delta });
 				break;
 			case "toolCallStart":
+				console.log("[CodePi Webview] → tool call start:", msg.toolName);
 				dispatch({
 					type: "toolCallStart",
 					toolCallId: msg.toolCallId,
@@ -216,10 +219,20 @@ export function useStreaming() {
 				break;
 			case "agentSettled":
 			case "agentEnd":
+				console.log(
+					"[CodePi Webview] → agent settled — marking message complete",
+				);
 				dispatch({ type: "agentSettled" });
 				break;
 			case "error":
+				console.log("[CodePi Webview] → showing error:", msg.text);
 				dispatch({ type: "error", text: msg.text });
+				break;
+			default:
+				console.log(
+					"[CodePi Webview] ⚠️ UNHANDLED command:",
+					(msg as { command: string }).command,
+				);
 				break;
 		}
 	}, []);

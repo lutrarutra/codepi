@@ -1,13 +1,24 @@
 import * as vscode from "vscode";
 import { createMcpServer } from "./mcp/server";
 import { registerCoreTools } from "./mcp/tools/index";
-import { createAgentRuntime } from "./agent/runtime";
+import { createChildAgentRuntime } from "./agent/child-runtime";
 import { PiEventRelay } from "./bridge/relay";
 import type { WebviewMessage } from "./bridge/protocol";
 
 let panel: vscode.WebviewPanel | undefined;
 let mcpServer: ReturnType<typeof createMcpServer> | undefined;
-let agentRuntime: Awaited<ReturnType<typeof createAgentRuntime>> | undefined;
+let agentRuntime:
+	| {
+			session: {
+				prompt(text: string): Promise<void>;
+				abort(): Promise<void>;
+				steer(text: string): Promise<void>;
+				followUp(text: string): Promise<void>;
+				isStreaming: boolean;
+			};
+			dispose(): Promise<void>;
+	  }
+	| undefined;
 let isBackendReady = false;
 const relay = new PiEventRelay();
 
@@ -58,7 +69,7 @@ export function activate(context: vscode.ExtensionContext) {
 		);
 
 		// Start backend — errors are posted to webview
-		startBackend().catch((err) => {
+		startBackend(context).catch((err) => {
 			const msg = err instanceof Error ? err.message : String(err);
 			panel?.webview.postMessage({
 				command: "error",
@@ -71,17 +82,16 @@ export function activate(context: vscode.ExtensionContext) {
 	context.subscriptions.push(disposable);
 }
 
-async function startBackend(): Promise<void> {
+async function startBackend(context: vscode.ExtensionContext): Promise<void> {
 	mcpServer = createMcpServer();
 	registerCoreTools(mcpServer);
 	await mcpServer.start();
 	console.log(`[CodePi] MCP server listening on port ${mcpServer.port}`);
 
-	agentRuntime = await createAgentRuntime(mcpServer, relay);
+	agentRuntime = createChildAgentRuntime(relay, context);
 	isBackendReady = true;
 	console.log("[CodePi] Agent runtime ready");
 
-	// Notify webview that backend is ready
 	panel?.webview.postMessage({ command: "agentEnd", willRetry: false });
 }
 
@@ -109,7 +119,15 @@ async function handleWebviewMessage(message: WebviewMessage): Promise<void> {
 	}
 
 	if (message.command === "prompt") {
-		console.log("[CodePi] Sending prompt to agent...");
+		const promptStartTime = Date.now();
+		console.log(
+			"[CodePi] Sending prompt to agent:",
+			message.text.slice(0, 200),
+		);
+		console.log(
+			"[CodePi] Session isStreaming:",
+			agentRuntime.session.isStreaming,
+		);
 		// If agent is already streaming, queue as steer
 		if (agentRuntime.session.isStreaming) {
 			agentRuntime.session.steer(message.text).catch((err: Error) => {
@@ -117,11 +135,22 @@ async function handleWebviewMessage(message: WebviewMessage): Promise<void> {
 			});
 		} else {
 			// Don't await — let abort work concurrently
-			agentRuntime.session
-				.prompt(message.text)
-				.then(() => console.log("[CodePi] Prompt completed"))
+			const TIMEOUT_MS = 120_000; // 2 minutes
+			const timeout = new Promise<never>((_, reject) =>
+				setTimeout(
+					() =>
+						reject(new Error(`Prompt timed out after ${TIMEOUT_MS / 1000}s`)),
+					TIMEOUT_MS,
+				),
+			);
+			Promise.race([agentRuntime.session.prompt(message.text), timeout])
+				.then(() => {
+					const elapsed = Date.now() - promptStartTime;
+					console.log("[CodePi] Prompt completed in", elapsed, "ms");
+				})
 				.catch((err: Error) => {
-					console.error("[CodePi] Agent error:", err);
+					const elapsed = Date.now() - promptStartTime;
+					console.error("[CodePi] Agent error after", elapsed, "ms:", err);
 					panel?.webview.postMessage({
 						command: "error",
 						text: err.message || String(err),

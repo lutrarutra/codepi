@@ -10,54 +10,13 @@ export class PiEventRelay {
 		this.webview = webview;
 	}
 
+	/** Subscribe to PI SDK events (only used by the direct SDK approach) */
 	attach(session: AgentSession): void {
 		this.unsubscribe = session.subscribe((event) => {
-			// Log all event types for debugging
-			if (event.type === "message_update") {
-				console.log(
-					"[CodePi relay] message_update:",
-					event.assistantMessageEvent.type,
-				);
-			} else {
-				console.log("[CodePi relay] event:", event.type);
-			}
-
 			switch (event.type) {
-				case "message_update": {
-					const e = event.assistantMessageEvent;
-					if (e.type === "text_delta" && "delta" in e) {
-						this.post({
-							command: "textDelta",
-							delta: (e as { delta: string }).delta,
-						});
-					} else if (e.type === "thinking_delta" && "delta" in e) {
-						this.post({
-							command: "thinkingDelta",
-							delta: (e as { delta: string }).delta,
-						});
-					} else if (e.type === "text_end") {
-						this.post({ command: "textEnd" });
-					} else if (e.type === "thinking_end") {
-						this.post({ command: "thinkingEnd" });
-					} else if (e.type === "toolcall_start" && "toolCall" in e) {
-						const tc = (
-							e as {
-								toolCall: {
-									id: string;
-									name: string;
-									arguments?: Record<string, unknown>;
-								};
-							}
-						).toolCall;
-						this.post({
-							command: "toolCallStart",
-							toolCallId: tc.id,
-							toolName: tc.name,
-							args: tc.arguments ?? {},
-						});
-					}
+				case "message_update":
+					this._handleMessageUpdate(event);
 					break;
-				}
 				case "tool_execution_start":
 					this.post({
 						command: "toolCallStart",
@@ -67,12 +26,7 @@ export class PiEventRelay {
 					});
 					break;
 				case "tool_execution_update": {
-					const content = (
-						event.partialResult as
-							| { content?: Array<{ text: string }> }
-							| undefined
-					)?.content;
-					const text = content?.[0]?.text ?? "";
+					const text = (event as any).partialResult?.content?.[0]?.text ?? "";
 					this.post({
 						command: "toolCallUpdate",
 						toolCallId: event.toolCallId,
@@ -81,10 +35,7 @@ export class PiEventRelay {
 					break;
 				}
 				case "tool_execution_end": {
-					const content = (
-						event.result as { content?: Array<{ text: string }> } | undefined
-					)?.content;
-					const text = content?.[0]?.text ?? "";
+					const text = (event as any).result?.content?.[0]?.text ?? "";
 					this.post({
 						command: "toolCallEnd",
 						toolCallId: event.toolCallId,
@@ -93,10 +44,70 @@ export class PiEventRelay {
 					});
 					break;
 				}
+				case "message_start": {
+					const msg = (
+						event as {
+							message?: {
+								role?: string;
+								content?: Array<{ type: string; thinking?: string }>;
+							};
+						}
+					).message;
+					if (msg?.role === "assistant" && msg.content) {
+						for (const block of msg.content) {
+							if (block.type === "thinking" && block.thinking) {
+								this.post({ command: "thinkingDelta", delta: block.thinking });
+							}
+						}
+					}
+					break;
+				}
+				case "message_end": {
+					const msg = (
+						event as {
+							message?: {
+								role?: string;
+								content?: Array<{
+									type: string;
+									text?: string;
+									thinking?: string;
+									id?: string;
+									name?: string;
+									arguments?: Record<string, unknown>;
+									input?: Record<string, unknown>;
+								}>;
+							};
+						}
+					).message;
+					if (msg?.role === "assistant" && msg.content) {
+						for (const block of msg.content) {
+							if (block.type === "thinking" && block.thinking) {
+								this.post({ command: "thinkingDelta", delta: block.thinking });
+								this.post({ command: "thinkingEnd" });
+							} else if (block.type === "text" && block.text) {
+								this.post({ command: "textDelta", delta: block.text });
+								this.post({ command: "textEnd" });
+							} else if (
+								(block.type === "toolCall" || block.type === "tool_use") &&
+								block.id &&
+								block.name
+							) {
+								this.post({
+									command: "toolCallStart",
+									toolCallId: block.id,
+									toolName: block.name,
+									args: block.arguments ?? block.input ?? {},
+								});
+							}
+						}
+					}
+					break;
+				}
 				case "agent_start":
 					this.post({ command: "agentStart" });
 					break;
 				case "agent_end":
+					console.log("[CodePi] Prompt completed");
 					this.post({ command: "agentEnd", willRetry: event.willRetry });
 					break;
 			}
@@ -108,7 +119,36 @@ export class PiEventRelay {
 		this.unsubscribe = undefined;
 	}
 
+	/** Forward a message to the webview */
+	postMessageSilent(msg: ExtensionMessage): void {
+		try {
+			this.webview?.postMessage(msg);
+		} catch {
+			/* ignore */
+		}
+	}
+
 	private post(msg: ExtensionMessage): void {
-		this.webview?.postMessage(msg);
+		this.postMessageSilent(msg);
+	}
+
+	private _handleMessageUpdate(event: any): void {
+		const e = event.assistantMessageEvent;
+		if (e.type === "text_delta" && "delta" in e) {
+			this.post({ command: "textDelta", delta: e.delta });
+		} else if (e.type === "thinking_delta" && "delta" in e) {
+			this.post({ command: "thinkingDelta", delta: e.delta });
+		} else if (e.type === "text_end") {
+			this.post({ command: "textEnd" });
+		} else if (e.type === "thinking_end") {
+			this.post({ command: "thinkingEnd" });
+		} else if (e.type === "toolcall_start" && "toolCall" in e) {
+			this.post({
+				command: "toolCallStart",
+				toolCallId: e.toolCall.id,
+				toolName: e.toolCall.name,
+				args: e.toolCall.arguments ?? {},
+			});
+		}
 	}
 }
