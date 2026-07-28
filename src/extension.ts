@@ -90,12 +90,17 @@ async function handleWebviewMessage(message: WebviewMessage): Promise<void> {
 		// Always handle abort, even if backend not ready
 		try {
 			await agentRuntime?.session.abort();
-		} catch { /* ignore */ }
+		} catch {
+			/* ignore */
+		}
 		return;
 	}
 
 	if (!isBackendReady || !agentRuntime) {
-		console.warn("[CodePi] Backend not ready yet, dropping message:", message.command);
+		console.warn(
+			"[CodePi] Backend not ready yet, dropping message:",
+			message.command,
+		);
 		panel?.webview.postMessage({
 			command: "error",
 			text: "Backend is still starting up. Please wait a moment and try again.",
@@ -105,13 +110,24 @@ async function handleWebviewMessage(message: WebviewMessage): Promise<void> {
 
 	if (message.command === "prompt") {
 		console.log("[CodePi] Sending prompt to agent...");
-		// Don't await — let abort work concurrently
-		agentRuntime.session.prompt(message.text)
-			.then(() => console.log("[CodePi] Prompt completed"))
-			.catch((err: Error) => {
-				console.error("[CodePi] Agent error:", err);
-				panel?.webview.postMessage({ command: "error", text: err.message || String(err) });
+		// If agent is already streaming, queue as steer
+		if (agentRuntime.session.isStreaming) {
+			agentRuntime.session.steer(message.text).catch((err: Error) => {
+				console.error("[CodePi] Steer error:", err);
 			});
+		} else {
+			// Don't await — let abort work concurrently
+			agentRuntime.session
+				.prompt(message.text)
+				.then(() => console.log("[CodePi] Prompt completed"))
+				.catch((err: Error) => {
+					console.error("[CodePi] Agent error:", err);
+					panel?.webview.postMessage({
+						command: "error",
+						text: err.message || String(err),
+					});
+				});
+		}
 	} else if (message.command === "steer") {
 		agentRuntime.session.steer(message.text).catch(() => {});
 	} else if (message.command === "followUp") {
