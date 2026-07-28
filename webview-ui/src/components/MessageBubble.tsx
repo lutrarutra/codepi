@@ -19,8 +19,10 @@ export function MessageBubble({ message }: Props) {
 				</span>
 			</div>
 			<div className="chat-bubble-text">
-				{message.text || (!message.complete ? "..." : "")}
-				{!message.complete && <span className="chat-typing-cursor">▊</span>}
+				{message.text || message.thinking || (!message.complete ? "..." : "")}
+				{!message.complete && !message.text && !message.thinking && (
+						<span className="chat-typing-cursor">▊</span>
+				)}
 			</div>
 			{message.toolCalls.length > 0 && (
 				<div className="chat-tool-calls">

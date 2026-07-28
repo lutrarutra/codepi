@@ -12,6 +12,13 @@ export class PiEventRelay {
 
 	attach(session: AgentSession): void {
 		this.unsubscribe = session.subscribe((event) => {
+			// Log all event types for debugging
+			if (event.type === "message_update") {
+				console.log("[CodePi relay] message_update:", event.assistantMessageEvent.type);
+			} else {
+				console.log("[CodePi relay] event:", event.type);
+			}
+
 			switch (event.type) {
 				case "message_update": {
 					const e = event.assistantMessageEvent;
