@@ -3,21 +3,21 @@ import * as esbuild from "esbuild";
 const isProduction = process.argv.includes("--production");
 
 const ctx = await esbuild.context({
-  entryPoints: ["src/extension.ts"],
-  bundle: true,
-  outfile: "dist/extension.js",
-  external: ["vscode"],
-  format: "cjs",
-  platform: "node",
-  target: "node18",
-  sourcemap: !isProduction,
-  minify: isProduction,
+	entryPoints: ["src/extension.ts"],
+	bundle: true,
+	outfile: "dist/extension.js",
+	external: ["vscode", "@earendil-works/pi-coding-agent"],
+	format: "cjs",
+	platform: "node",
+	target: "node18",
+	sourcemap: !isProduction,
+	minify: isProduction,
 });
 
 if (isProduction) {
-  await ctx.rebuild();
-  await ctx.dispose();
+	await ctx.rebuild();
+	await ctx.dispose();
 } else {
-  await ctx.watch();
-  console.log("watching...");
+	await ctx.watch();
+	console.log("watching...");
 }

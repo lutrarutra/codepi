@@ -1,35 +1,37 @@
 import * as path from "node:path";
 import * as os from "node:os";
 import * as vscode from "vscode";
-import {
-  createAgentSession,
-  DefaultResourceLoader,
-  AuthStorage,
-  ModelRegistry,
-  SessionManager,
-  type AgentSession,
-} from "@earendil-works/pi-coding-agent";
+import type { AgentSession } from "@earendil-works/pi-coding-agent";
 import type { ExtensionFactory } from "@earendil-works/pi-coding-agent";
 import { discoverMcpTools, callMcpTool } from "./tool-registry";
 import type { McpServer } from "../mcp/server";
 import type { PiEventRelay } from "../bridge/relay";
 
+// Lazy import — pi SDK is ESM-only, must use dynamic import from CJS bundle
+let _pi: any;
+async function getPi(): Promise<any> {
+  if (!_pi) {
+    _pi = await import("@earendil-works/pi-coding-agent");
+  }
+  return _pi;
+}
+
 export async function createAgentRuntime(
   mcpServer: McpServer,
   relay: PiEventRelay,
 ): Promise<{ session: AgentSession; dispose(): Promise<void> }> {
+  const pi = await getPi();
   const workspaceRoot = getWorkspaceRoot();
   const agentDir = path.join(os.homedir(), ".pi", "agent");
 
-  const authStorage = AuthStorage.create(path.join(agentDir, "auth.json"));
-  const modelRegistry = ModelRegistry.create(authStorage, path.join(agentDir, "models.json"));
+  const authStorage = pi.AuthStorage.create(path.join(agentDir, "auth.json"));
+  const modelRegistry = pi.ModelRegistry.create(authStorage, path.join(agentDir, "models.json"));
 
-  const mcpBridgeExtension: ExtensionFactory = (pi) => {
-    // Discover MCP tools asynchronously and register them
+  const mcpBridgeExtension: ExtensionFactory = (extPi) => {
     discoverMcpTools(mcpServer.port)
       .then((tools) => {
         for (const tool of tools) {
-          pi.registerTool({
+          extPi.registerTool({
             name: tool.name,
             label: tool.name,
             description: tool.description,
@@ -41,26 +43,26 @@ export async function createAgentRuntime(
           });
         }
       })
-      .catch((err) => {
+      .catch((err: Error) => {
         console.error("[CodePi] MCP tool discovery failed:", err);
       });
   };
 
-  const loader = new DefaultResourceLoader({
+  const loader = new pi.DefaultResourceLoader({
     cwd: workspaceRoot,
     agentDir,
     extensionFactories: [mcpBridgeExtension],
   });
   await loader.reload();
 
-  const { session } = await createAgentSession({
+  const { session } = await pi.createAgentSession({
     resourceLoader: loader,
     cwd: workspaceRoot,
     agentDir,
     authStorage,
     modelRegistry,
     noTools: "builtin",
-    sessionManager: SessionManager.create(workspaceRoot),
+    sessionManager: pi.SessionManager.create(workspaceRoot),
   });
 
   relay.attach(session);
@@ -75,6 +77,6 @@ export async function createAgentRuntime(
 }
 
 function getWorkspaceRoot(): string {
-  const ws = vscode.workspace.workspaceFolders?.[0];
-  return ws?.uri.fsPath ?? os.homedir();
+	const ws = vscode.workspace.workspaceFolders?.[0];
+	return ws?.uri.fsPath ?? os.homedir();
 }
