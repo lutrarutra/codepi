@@ -86,11 +86,16 @@ async function startBackend(): Promise<void> {
 }
 
 async function handleWebviewMessage(message: WebviewMessage): Promise<void> {
+	if (message.command === "abort") {
+		// Always handle abort, even if backend not ready
+		try {
+			await agentRuntime?.session.abort();
+		} catch { /* ignore */ }
+		return;
+	}
+
 	if (!isBackendReady || !agentRuntime) {
-		console.warn(
-			"[CodePi] Backend not ready yet, dropping message:",
-			message.command,
-		);
+		console.warn("[CodePi] Backend not ready yet, dropping message:", message.command);
 		panel?.webview.postMessage({
 			command: "error",
 			text: "Backend is still starting up. Please wait a moment and try again.",
@@ -98,27 +103,19 @@ async function handleWebviewMessage(message: WebviewMessage): Promise<void> {
 		return;
 	}
 
-	try {
-		switch (message.command) {
-			case "prompt":
-				console.log("[CodePi] Sending prompt to agent...");
-				await agentRuntime.session.prompt(message.text);
-				console.log("[CodePi] Prompt completed");
-				break;
-			case "steer":
-				await agentRuntime.session.steer(message.text);
-				break;
-			case "followUp":
-				await agentRuntime.session.followUp(message.text);
-				break;
-			case "abort":
-				await agentRuntime.session.abort();
-				break;
-		}
-	} catch (err) {
-		const msg = err instanceof Error ? err.message : String(err);
-		console.error("[CodePi] Agent error:", err);
-		panel?.webview.postMessage({ command: "error", text: msg });
+	if (message.command === "prompt") {
+		console.log("[CodePi] Sending prompt to agent...");
+		// Don't await — let abort work concurrently
+		agentRuntime.session.prompt(message.text)
+			.then(() => console.log("[CodePi] Prompt completed"))
+			.catch((err: Error) => {
+				console.error("[CodePi] Agent error:", err);
+				panel?.webview.postMessage({ command: "error", text: err.message || String(err) });
+			});
+	} else if (message.command === "steer") {
+		agentRuntime.session.steer(message.text).catch(() => {});
+	} else if (message.command === "followUp") {
+		agentRuntime.session.followUp(message.text).catch(() => {});
 	}
 }
 

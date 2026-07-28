@@ -72,6 +72,14 @@ export async function createAgentRuntime(
 		sessionManager: pi.SessionManager.create(workspaceRoot),
 	});
 
+	if (!session.model) {
+		throw new Error(
+			"No AI model available. Configure an API key by running `pi /login` in a terminal, " +
+			"or set the ANTHROPIC_API_KEY environment variable.",
+		);
+	}
+	console.log("[CodePi] Using model:", session.model.provider, session.model.id);
+
 	relay.attach(session);
 
 	return {
