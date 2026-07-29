@@ -105,6 +105,7 @@
   },
   "dependencies": {
     "@earendil-works/pi-coding-agent": "^0.80.1",
+    "@vscode/ripgrep-universal": "^1.18.0",
     "openai": "^7.0.0"
   },
   "devDependencies": {

@@ -26,9 +26,26 @@ export type ExtensionMessage =
 	| { command: "agentSettled" }
 	| { command: "error"; text: string }
 	// Session / model info
-	| { command: "sessionInfo"; tokensIn: number; tokensOut: number; totalCost: number; contextUsed: number; contextLimit: number; speed: number; cacheRate: number }
-	| { command: "modelInfo"; provider: string; modelId: string; thinkingLevel: string }
-	| { command: "modelList"; models: Array<{ provider: string; modelId: string }> }
+	| {
+			command: "sessionInfo";
+			tokensIn: number;
+			tokensOut: number;
+			totalCost: number;
+			contextUsed: number;
+			contextLimit: number;
+			speed: number;
+			cacheRate: number;
+	  }
+	| {
+			command: "modelInfo";
+			provider: string;
+			modelId: string;
+			thinkingLevel: string;
+	  }
+	| {
+			command: "modelList";
+			models: Array<{ provider: string; modelId: string }>;
+	  }
 	| { command: "toolsInfo"; tools: string[] }
 	| { command: "modeInfo"; mode: "ask" | "plan" | "agent" }
 	| { command: "backendReady" }
@@ -45,12 +62,65 @@ export type ExtensionMessage =
 			cacheHit: number;
 			duration: number;
 	  }
-	// History restoration when opening existing session
-	| { command: "restoreMessages"; messages: RestoredChatMessage[] }
 	// Question flow — tool call pending user answers
 	| { command: "askQuestion"; toolCallId: string; questions: Question[] }
 	// Todo list updates
-	| { command: "todoUpdate"; todos: TodoItem[] };
+	| { command: "todoUpdate"; todos: TodoItem[] }
+	// Replay events for session history (same pipeline as live chat)
+	| { command: "replayEvents"; events: ReplayEvent[] };
+
+/** Subset of ExtensionMessage used in replay — excludes replayEvents itself to avoid circular types. */
+export type ReplayEvent =
+	| { command: "agentStart" }
+	| { command: "segmentStart" }
+	| { command: "textDelta"; delta: string }
+	| { command: "textEnd" }
+	| { command: "thinkingDelta"; delta: string }
+	| { command: "thinkingEnd" }
+	| {
+			command: "toolCallStart";
+			toolCallId: string;
+			toolName: string;
+			args: Record<string, unknown>;
+	  }
+	| { command: "toolCallUpdate"; toolCallId: string; text: string }
+	| {
+			command: "toolCallEnd";
+			toolCallId: string;
+			result: string;
+			isError: boolean;
+	  }
+	| {
+			command: "segmentEnd";
+			tokensIn: number;
+			tokensOut: number;
+			thinkingTokens: number;
+			totalCost: number;
+			modelProvider: string;
+			modelId: string;
+			cacheHit: number;
+			duration: number;
+	  }
+	| { command: "agentEnd"; willRetry: boolean }
+	| { command: "error"; text: string }
+	| {
+			command: "sessionInfo";
+			tokensIn: number;
+			tokensOut: number;
+			totalCost: number;
+			contextUsed: number;
+			contextLimit: number;
+			speed: number;
+			cacheRate: number;
+	  }
+	| {
+			command: "modelInfo";
+			provider: string;
+			modelId: string;
+			thinkingLevel: string;
+	  }
+	| { command: "toolsInfo"; tools: string[] }
+	| { command: "modeInfo"; mode: "ask" | "plan" | "agent" };
 
 // ── Webview → Extension messages ─────────────────────────────────
 
@@ -68,27 +138,10 @@ export type WebviewMessage =
 	| { command: "listSessions" }
 	| { command: "copyToClipboard"; text: string }
 	// Question flow — user answers a pending question
-	| { command: "answerQuestion"; toolCallId: string; answers: Record<string, QuestionAnswer> | null }
+	| {
+			command: "answerQuestion";
+			toolCallId: string;
+			answers: Record<string, QuestionAnswer> | null;
+	  }
 	// Todo list user interactions
 	| { command: "todoChange"; todos: TodoItem[] };
-
-// ── Restored message format (for session history restoration) ──
-
-export interface RestoredContentBlock {
-	type: "text" | "thinking";
-	content: string;
-}
-
-export interface RestoredChatMessage {
-	id: string;
-	role: "user" | "assistant";
-	blocks: RestoredContentBlock[];
-	toolCalls: Array<{
-		toolCallId: string;
-		toolName: string;
-		args: Record<string, unknown>;
-		output: string;
-		isError: boolean;
-	}>;
-	timestamp: number;
-}

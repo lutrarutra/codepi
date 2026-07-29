@@ -3,6 +3,7 @@ src
 webview-ui/src
 webview-ui/node_modules
 node_modules
+!node_modules/@vscode/ripgrep-universal/**
 .git
 .gitignore
 tsconfig.json

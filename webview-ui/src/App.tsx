@@ -24,7 +24,17 @@ export default function AppWithErrorBoundary() {
 // ── Inner App ────────────────────────────────────────────────
 
 function App() {
-	const { state, handleExtensionMessage, addUserMessage, setMode, setThinkingLevel, clearPendingQuestion, addQuestionBlock, toggleTodoExpand } = useStreaming();
+	const {
+		state,
+		handleExtensionMessage,
+		addUserMessage,
+		setMode,
+		setThinkingLevel,
+		clearPendingQuestion,
+		addQuestionBlock,
+		toggleTodoExpand,
+		setTodos,
+	} = useStreaming();
 	const { post } = useVSCodeAPI(handleExtensionMessage);
 
 	const handleSend = useCallback(
@@ -88,45 +98,52 @@ function App() {
 
 	const handleTodoToggle = useCallback(
 		(id: number) => {
-			const newList = todoList.map(t => {
+			const newList = todoList.map((t) => {
 				if (t.id === id) {
-					if (t.status === "completed") return { ...t, status: "not-started" as const };
-					if (t.status === "in-progress") return { ...t, status: "completed" as const };
+					if (t.status === "completed")
+						return { ...t, status: "not-started" as const };
+					if (t.status === "in-progress")
+						return { ...t, status: "completed" as const };
 					return { ...t, status: "in-progress" as const };
 				}
 				// If marking as in-progress, demote any other in-progress
-				if (t.status === "in-progress") return { ...t, status: "not-started" as const };
+				if (t.status === "in-progress")
+					return { ...t, status: "not-started" as const };
 				return t;
 			});
+			setTodos(newList);
 			post({ command: "todoChange", todos: newList });
 		},
-		[post, todoList],
+		[post, todoList, setTodos],
 	);
 
 	const handleClearTodos = useCallback(() => {
+		setTodos([]);
 		post({ command: "todoChange", todos: [] });
-	}, [post]);
+	}, [post, setTodos]);
 
 	const handleMoveUp = useCallback(
 		(id: number) => {
-			const idx = todoList.findIndex(t => t.id === id);
+			const idx = todoList.findIndex((t) => t.id === id);
 			if (idx <= 0) return;
 			const newList = [...todoList];
 			[newList[idx - 1], newList[idx]] = [newList[idx], newList[idx - 1]];
+			setTodos(newList);
 			post({ command: "todoChange", todos: newList });
 		},
-		[post, todoList],
+		[post, todoList, setTodos],
 	);
 
 	const handleMoveDown = useCallback(
 		(id: number) => {
-			const idx = todoList.findIndex(t => t.id === id);
+			const idx = todoList.findIndex((t) => t.id === id);
 			if (idx < 0 || idx >= todoList.length - 1) return;
 			const newList = [...todoList];
 			[newList[idx], newList[idx + 1]] = [newList[idx + 1], newList[idx]];
+			setTodos(newList);
 			post({ command: "todoChange", todos: newList });
 		},
-		[post, todoList],
+		[post, todoList, setTodos],
 	);
 
 	const si = state.sessionInfo;
@@ -196,13 +213,41 @@ function App() {
 					<div className="stats-bar">
 						<span className="stat-item stat-up">↑{fmt(si.tokensIn)}</span>
 						<span className="stat-item stat-down">↓{fmt(si.tokensOut)}</span>
-						{si.totalCost > 0 && <span className="stat-item stat-cost">${si.totalCost.toFixed(3)}</span>}
-						{si.contextLimit > 0 && <span className="stat-item stat-ctx">{ctxPct}%/{fmt(ctxLimit)}</span>}
-						{si.speed > 0 && <span className="stat-item stat-speed">{fmt(si.speed)} t/s</span>}
-						{si.cacheRate > 0 && <span className="stat-item stat-cache" data-tip={`Cache: ${(si.cacheRate * 100).toFixed(1)}%`}>
-							<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg>
-							{(si.cacheRate * 100).toFixed(0)}%
-						</span>}
+						{si.totalCost > 0 && (
+							<span className="stat-item stat-cost">
+								${si.totalCost.toFixed(3)}
+							</span>
+						)}
+						{si.contextLimit > 0 && (
+							<span className="stat-item stat-ctx">
+								{ctxPct}%/{fmt(ctxLimit)}
+							</span>
+						)}
+						{si.speed > 0 && (
+							<span className="stat-item stat-speed">{fmt(si.speed)} t/s</span>
+						)}
+						{si.cacheRate > 0 && (
+							<span
+								className="stat-item stat-cache"
+								data-tip={`Cache: ${(si.cacheRate * 100).toFixed(1)}%`}
+							>
+								<svg
+									width="10"
+									height="10"
+									viewBox="0 0 24 24"
+									fill="none"
+									stroke="currentColor"
+									stroke-width="2"
+									stroke-linecap="round"
+									stroke-linejoin="round"
+								>
+									<circle cx="12" cy="12" r="10" />
+									<circle cx="12" cy="12" r="6" />
+									<circle cx="12" cy="12" r="2" />
+								</svg>
+								{(si.cacheRate * 100).toFixed(0)}%
+							</span>
+						)}
 					</div>
 				)}
 			</div>

@@ -6,7 +6,11 @@ const ctx = await esbuild.context({
 	entryPoints: ["src/extension.ts"],
 	bundle: true,
 	outfile: "dist/extension.js",
-	external: ["vscode", "@earendil-works/pi-coding-agent"],
+	external: [
+		"vscode",
+		"@earendil-works/pi-coding-agent",
+		"@vscode/ripgrep-universal",
+	],
 	format: "cjs",
 	platform: "node",
 	target: "node18",
