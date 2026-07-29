@@ -1,6 +1,8 @@
 import { useState, useRef, useCallback, useEffect, useMemo, type KeyboardEvent } from "react";
 import { createPortal } from "react-dom";
 import type { ModelOption } from "../types";
+import { ModePicker } from "./ModePicker";
+import { ThinkingLevelPicker, type ThinkingLevel } from "./ThinkingLevelPicker";
 
 interface Props {
 	streaming: boolean;
@@ -9,6 +11,10 @@ interface Props {
 	modelName: string;
 	availableModels: ModelOption[];
 	onModelSelect: (provider: string, modelId: string) => void;
+	mode: "ask" | "plan" | "agent";
+	onModeChange: (mode: "ask" | "plan" | "agent") => void;
+	thinkingLevel: string;
+	onThinkingLevelChange: (level: string) => void;
 }
 
 // ── Pinning (stored in localStorage) ──────────────────────────
@@ -34,7 +40,7 @@ function togglePinned(key: string): Set<string> {
 
 // ── Model Dropdown Component ──────────────────────────────────
 
-function ModelDropdown({
+export function ModelDropdown({
 	models,
 	currentModel,
 	onSelect,
@@ -232,6 +238,10 @@ export function InputArea({
 	modelName,
 	availableModels,
 	onModelSelect,
+	mode,
+	onModeChange,
+	thinkingLevel,
+	onThinkingLevelChange,
 }: Props) {
 	const [input, setInput] = useState("");
 	const [modelOpen, setModelOpen] = useState(false);
@@ -263,14 +273,12 @@ export function InputArea({
 		}
 	}
 
+	const shortName = modelName?.split("/").pop() || "model";
+
 	const openModelSelector = useCallback(() => {
-		if (badgeRef.current) {
-			setModelAnchor(badgeRef.current.getBoundingClientRect());
-		}
+		if (badgeRef.current) setModelAnchor(badgeRef.current.getBoundingClientRect());
 		setModelOpen(true);
 	}, []);
-
-	const shortName = modelName?.split("/").pop() || "model";
 
 	return (
 		<div className="input-wrapper">
@@ -300,10 +308,12 @@ export function InputArea({
 					)}
 				</div>
 				<div className="chat-input-toolbar">
+					<ModePicker mode={mode} onModeChange={onModeChange} disabled={streaming} />
 					<button ref={badgeRef} className="model-badge-btn" onClick={openModelSelector}>
 						<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>
 						<span className="model-badge-name">{shortName}</span>
 					</button>
+					<ThinkingLevelPicker level={thinkingLevel as ThinkingLevel} onLevelChange={onThinkingLevelChange} disabled={streaming} />
 					<button className="chat-input-toolbar-btn right">
 						{streaming ? "Generating..." : "Auto"}
 					</button>

@@ -3,7 +3,7 @@
   "displayName": "CodePi",
   "description": "Pi coding agent for VSCode",
   "version": "0.1.0",
-  "publisher": "pi-dev",
+  "publisher": "lutrarutra",
   "engines": {
     "vscode": "^1.85.0"
   },
@@ -23,12 +23,75 @@
         }
       }
     },
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "codepi-sessions",
+          "title": "PI",
+          "icon": "./media/pi-icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "codepi-sessions": [
+        {
+          "id": "codepi.sessionsList",
+          "name": "Sessions"
+        }
+      ]
+    },
     "commands": [
       {
         "command": "codepi.openPanel",
         "title": "CodePi: Open Chat"
+      },
+      {
+        "command": "codepi.openSession",
+        "title": "Open Session"
+      },
+      {
+        "command": "codepi.renameSession",
+        "title": "Rename Session"
+      },
+      {
+        "command": "codepi.deleteSession",
+        "title": "Delete Session"
+      },
+      {
+        "command": "codepi.newSession",
+        "title": "New Session",
+        "icon": "$(plus)"
+      },
+      {
+        "command": "codepi.refreshSessions",
+        "title": "Refresh Sessions",
+        "icon": "$(refresh)"
       }
-    ]
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "codepi.newSession",
+          "when": "view == codepi.sessionsList",
+          "group": "navigation"
+        },
+        {
+          "command": "codepi.refreshSessions",
+          "when": "view == codepi.sessionsList",
+          "group": "navigation"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "codepi.renameSession",
+          "when": "view == codepi.sessionsList && viewItem == session"
+        },
+        {
+          "command": "codepi.deleteSession",
+          "when": "view == codepi.sessionsList && viewItem == session"
+        }
+      ]
+    }
   },
   "scripts": {
     "vscode:prepublish": "npm run build",

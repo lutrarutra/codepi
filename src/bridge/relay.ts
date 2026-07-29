@@ -16,6 +16,8 @@ export class PiEventRelay {
 	private contextUsed = 0;
 	private lastMsgId = 0;
 	private interactionStart = 0;
+	private cacheRateSum = 0; // sum of cacheHitRate × outputTokens (weighted)
+	private cacheRateWeight = 0; // total output tokens for cache rate weights
 
 	setWebview(webview: vscode.Webview): void {
 		this.webview = webview;
@@ -55,6 +57,12 @@ export class PiEventRelay {
 							this.tokensOut += msg.usage.output ?? 0;
 							this.totalCost += msg.usage.cost?.total ?? 0;
 							this.contextUsed = msg.usage.totalTokens ?? this.contextUsed;
+							const input = msg.usage.input ?? 0;
+							const cacheHit = msg.usage.cacheHitRate ?? 0;
+							if (input > 0) {
+								this.cacheRateSum += cacheHit * input;
+								this.cacheRateWeight += input;
+							}
 							const elapsed = this.lastAssistantStart > 0 ? (Date.now() - this.lastAssistantStart) / 1000 : 1;
 							this.speed = elapsed > 0.5 && msg.usage.output > 0 ? Math.round(msg.usage.output / elapsed) : this.speed;
 						}
@@ -78,12 +86,18 @@ export class PiEventRelay {
 					break;
 				}
 				case "tool_execution_start":
-					this.post({
-						command: "toolCallStart",
-						toolCallId: event.toolCallId,
-						toolName: event.toolName,
-						args: (event as any).args ?? {},
-					});
+					// toolCallStart already posted via _handleMessageUpdate's toolcall_start
+					// If this is ask_user_question, forward the questions to webview
+					if (event.toolName === "ask_user_question") {
+						const args = (event as any).args ?? {};
+						if (args.questions && args.questions.length > 0) {
+							this.post({
+								command: "askQuestion",
+								toolCallId: event.toolCallId,
+								questions: args.questions,
+							});
+						}
+					}
 					break;
 				case "tool_execution_update": {
 					const text =
@@ -165,6 +179,7 @@ export class PiEventRelay {
 	}
 
 	private _emitSessionInfo(): void {
+		const avgCacheRate = this.cacheRateWeight > 0 ? this.cacheRateSum / this.cacheRateWeight : 0;
 		this.post({
 			command: "sessionInfo",
 			tokensIn: this.tokensIn,
@@ -173,6 +188,7 @@ export class PiEventRelay {
 			contextUsed: this.contextUsed,
 			contextLimit: this._session?.model?.contextWindow ?? 0,
 			speed: this.speed,
+			cacheRate: avgCacheRate,
 		});
 	}
 

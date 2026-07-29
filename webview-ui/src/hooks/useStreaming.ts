@@ -1,5 +1,10 @@
 import { useReducer, useCallback } from "react";
-import type { ChatMessage, ContentBlock, ExtensionMessage, SessionStats, ModelOption } from "../types";
+import type { ChatMessage, ContentBlock, ExtensionMessage, SessionStats, ModelOption, RestoredChatMessage } from "../types";
+
+export interface PendingQuestion {
+	toolCallId: string;
+	questions: import("../types").Question[];
+}
 
 export interface ChatState {
 	messages: ChatMessage[];
@@ -10,7 +15,10 @@ export interface ChatState {
 	availableModels: ModelOption[];
 	availableTools: string[];
 	mode: "ask" | "plan" | "agent";
+	thinkingLevel: string;
 	error: string | null;
+	/** Pending question carousel awaiting user answers */
+	pendingQuestion: PendingQuestion | null;
 }
 
 type Action =
@@ -31,7 +39,12 @@ type Action =
 	| { type: "toolsInfo"; tools: string[] }
 	| { type: "modelList"; models: ModelOption[] }
 	| { type: "setMode"; mode: "ask" | "plan" | "agent" }
-	| { type: "backendReady" };
+	| { type: "setThinkingLevel"; level: string }
+	| { type: "pendingQuestion"; toolCallId: string; questions: import("../types").Question[] }
+	| { type: "addQuestionBlock"; questions: import("../types").Question[]; answers: Record<string, import("../types").QuestionAnswer> }
+	| { type: "clearPendingQuestion" }
+	| { type: "backendReady" }
+	| { type: "restoreMessages"; messages: RestoredChatMessage[] };
 
 let nextId = 1;
 
@@ -171,7 +184,35 @@ function chatReducer(state: ChatState, action: Action): ChatState {
 		case "toolsInfo": return { ...state, availableTools: action.tools };
 		case "backendReady": return { ...state, backendReady: true };
 		case "setMode": return { ...state, mode: action.mode };
-		default: return state;
+		case "setThinkingLevel": return { ...state, thinkingLevel: action.level };
+		case "pendingQuestion": return { ...state, pendingQuestion: { toolCallId: action.toolCallId, questions: action.questions } };
+		case "addQuestionBlock": {
+			const msgs = [...state.messages];
+			const m = msgs[msgs.length - 1];
+			if (m && m.role === "assistant") {
+				msgs[msgs.length - 1] = {
+					...m,
+					blocks: [
+						...m.blocks,
+						{ type: "qa_block", questions: action.questions, answers: action.answers } as any,
+					],
+				};
+			}
+			return { ...state, messages: msgs };
+		}
+		case "clearPendingQuestion": return { ...state, pendingQuestion: null };
+		case "restoreMessages":
+			return {
+				...state,
+				messages: action.messages.map((m) => ({
+					id: m.id,
+					role: m.role,
+					blocks: m.blocks,
+					toolCalls: m.toolCalls.map((tc) => ({ ...tc, running: false })),
+					complete: true,
+					timestamp: m.timestamp,
+				})),
+			};
 	}
 }
 
@@ -180,11 +221,13 @@ export function useStreaming() {
 		messages: [],
 		streaming: false,
 		backendReady: false,
-		sessionInfo: { tokensIn: 0, tokensOut: 0, totalCost: 0, contextUsed: 0, contextLimit: 0, speed: 0 },
+		sessionInfo: { tokensIn: 0, tokensOut: 0, totalCost: 0, contextUsed: 0, contextLimit: 0, speed: 0, cacheRate: 0 },
 		modelInfo: { provider: "", modelId: "", thinkingLevel: "medium" },
 		availableModels: [],
 		availableTools: [],
 		mode: "agent",
+		thinkingLevel: "medium",
+		pendingQuestion: null,
 		error: null,
 	});
 
@@ -202,16 +245,27 @@ export function useStreaming() {
 			case "agentSettled":
 			case "agentEnd": dispatch({ type: "agentEnd" }); break;
 			case "error": dispatch({ type: "error", text: msg.text }); break;
-			case "sessionInfo": dispatch({ type: "sessionInfo", info: { tokensIn: msg.tokensIn, tokensOut: msg.tokensOut, totalCost: (msg as any).totalCost ?? 0, contextUsed: msg.contextUsed, contextLimit: msg.contextLimit, speed: msg.speed } }); break;
-			case "modelInfo": dispatch({ type: "modelInfo", provider: msg.provider, modelId: msg.modelId, thinkingLevel: msg.thinkingLevel }); break;
+			case "sessionInfo": dispatch({ type: "sessionInfo", info: { tokensIn: msg.tokensIn, tokensOut: msg.tokensOut, totalCost: (msg as any).totalCost ?? 0, contextUsed: msg.contextUsed, contextLimit: msg.contextLimit, speed: msg.speed, cacheRate: msg.cacheRate } }); break;
+			case "modelInfo": dispatch({ type: "modelInfo", provider: msg.provider, modelId: msg.modelId, thinkingLevel: msg.thinkingLevel }); dispatch({ type: "setThinkingLevel", level: msg.thinkingLevel }); break;
 			case "toolsInfo": dispatch({ type: "toolsInfo", tools: msg.tools }); break;
+			case "askQuestion": dispatch({ type: "pendingQuestion", toolCallId: msg.toolCallId, questions: msg.questions }); break;
+			case "modeInfo": dispatch({ type: "setMode", mode: msg.mode }); break;
 			case "modelList": dispatch({ type: "modelList", models: msg.models }); break;
 			case "backendReady": dispatch({ type: "backendReady" }); break;
+			case "restoreMessages": dispatch({ type: "restoreMessages", messages: msg.messages }); break;
 		}
 	}, []);
 
 	const addUserMessage = useCallback((text: string) => { dispatch({ type: "addUserMessage", text }); }, []);
 	const setMode = useCallback((mode: "ask" | "plan" | "agent") => { dispatch({ type: "setMode", mode }); }, []);
+	const setThinkingLevel = useCallback((level: string) => { dispatch({ type: "setThinkingLevel", level }); }, []);
+	const clearPendingQuestion = useCallback(() => { dispatch({ type: "clearPendingQuestion" }); }, []);
+	const addQuestionBlock = useCallback(
+		(questions: import("../types").Question[], answers: Record<string, import("../types").QuestionAnswer>) => {
+			dispatch({ type: "addQuestionBlock", questions, answers });
+		},
+		[],
+	);
 
-	return { state, handleExtensionMessage, addUserMessage, setMode };
+	return { state, handleExtensionMessage, addUserMessage, setMode, setThinkingLevel, clearPendingQuestion, addQuestionBlock };
 }

@@ -1,13 +1,13 @@
 import { useRef, useEffect, useState, useCallback } from "react";
-import type { ChatMessage, ModelOption } from "../types";
+import type { ChatMessage } from "../types";
 import { MessageBubble } from "./MessageBubble";
 
 interface Props {
 	messages: ChatMessage[];
 	streaming: boolean;
 	modelId: string;
-	availableModels: ModelOption[];
 	availableTools: string[];
+	mode: "ask" | "plan" | "agent";
 }
 
 function groupInteractions(msgs: ChatMessage[]): ChatMessage[][] {
@@ -49,7 +49,7 @@ function modelLabel(group: ChatMessage[]): string {
 	return "";
 }
 
-export function ChatView({ messages, streaming, modelId, availableModels, availableTools }: Props) {
+export function ChatView({ messages, streaming, modelId, availableTools, mode }: Props) {
 	const containerRef = useRef<HTMLDivElement>(null);
 	const [userScrolledUp, setUserScrolledUp] = useState(false);
 	const [collapsed, setCollapsed] = useState<Set<number>>(new Set());
@@ -111,15 +111,13 @@ export function ChatView({ messages, streaming, modelId, availableModels, availa
                         </svg>
 						<div className="welcome-info">
 							<div className="welcome-info-item">
+								<span className="welcome-info-key">mode</span>
+								<span className="welcome-info-val" style={{ color: "var(--accent)" }}>{mode.charAt(0).toUpperCase() + mode.slice(1)}</span>
+							</div>
+							<div className="welcome-info-item">
 								<span className="welcome-info-key">model</span>
 								<span className="welcome-info-val">{shortModel}</span>
 							</div>
-							{availableModels.length > 0 && (
-								<div className="welcome-info-item">
-									<span className="welcome-info-key">models</span>
-									<span className="welcome-info-val">{availableModels.length}</span>
-								</div>
-							)}
 							{availableTools.length > 0 && (
 								<div className="welcome-info-item">
 									<span className="welcome-info-key">tools</span>

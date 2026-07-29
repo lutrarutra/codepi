@@ -1,4 +1,7 @@
 import * as vscode from "vscode";
+import { askUserQuestionTool } from "./ask-user-question";
+export { resolveQuestion, rejectQuestion, getPendingQuestions } from "./ask-user-question";
+export type { Question, QuestionOption, QuestionAnswer, AskQuestionsParams } from "./ask-user-question";
 
 /**
  * VS Code workspace tool definitions.
@@ -78,10 +81,24 @@ export const writeFileTool: VscodeTool = {
 		required: ["path", "content"],
 	},
 	async execute(_toolCallId, params) {
+		if (writeMode === "disabled") {
+			return {
+				content: [{ type: "text" as const, text: "Writing files is not available in Ask mode. Switch to Agent or Plan mode to write files." }],
+				isError: true,
+				details: {},
+			};
+		}
 		const { path: filePath, content } = params as {
 			path: string;
 			content: string;
 		};
+		if (writeMode === "plan" && !filePath.endsWith(".md")) {
+			return {
+				content: [{ type: "text" as const, text: `Cannot write to ${filePath}. In Plan mode, you can only create/edit markdown (.md) files for planning.` }],
+				isError: true,
+				details: {},
+			};
+		}
 		const uri = resolveUri(filePath);
 		const data = new TextEncoder().encode(content);
 		await vscode.workspace.fs.writeFile(uri, data);
@@ -231,7 +248,23 @@ export const vscodeTools: VscodeTool[] = [
 	writeFileTool,
 	listDirTool,
 	searchTool,
+	askUserQuestionTool,
 ];
+
+// ── Mode-controlled write tool behavior ──────────────────────
+
+/**
+ * Current write mode for the tools. Set by the extension when changing modes.
+ * - "agent": full write access
+ * - "plan": only .md files allowed
+ * - "disabled": no writes allowed (Ask mode)
+ */
+export let writeMode: "agent" | "plan" | "disabled" = "agent";
+
+/** Set the write mode for the tools (called by extension on mode change). */
+export function setWriteMode(mode: "ask" | "plan" | "agent"): void {
+	writeMode = mode === "ask" ? "disabled" : mode;
+}
 
 // ── helpers ────────────────────────────────────────────────────────
 

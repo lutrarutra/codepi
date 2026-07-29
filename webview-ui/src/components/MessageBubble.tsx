@@ -66,6 +66,9 @@ export function MessageBubble({ message }: Props) {
 						</div>
 					);
 				}
+				if (block.type === "qa_block") {
+					return <InlineQABlock key={i} block={block} />;
+				}
 				return (
 					<div key={i} className="markdown-content">
 						<ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeHighlight]}
@@ -88,6 +91,7 @@ export function MessageBubble({ message }: Props) {
 			{message.toolCalls.length > 0 && message.interaction && message.complete && (
 				<InteractionSummary stats={message.interaction} toolCalls={message.toolCalls} />
 			)}
+
 
 			{!message.complete && !hasContent && (
 				<div className="typing-indicator"><span className="typing-dot" /><span className="typing-dot" /><span className="typing-dot" /></div>
@@ -159,6 +163,119 @@ function segLabel(i: number, total: number): string {
 	return `${i + 1} of ${total}`;
 }
 
+// ── Inline Q&A Block (rendered directly from message content) ─
+
+function InlineQABlock({ block }: { block: { questions: any[]; answers: Record<string, any> } }) {
+	const [open, setOpen] = useState(false);
+	const { questions, answers } = block;
+
+	if (!questions || questions.length === 0) return null;
+
+	return (
+		<div className="question-summary">
+			<button className="question-summary-header" onClick={() => setOpen(!open)}>
+				<span className="question-summary-label">Questions & Answers</span>
+				<span className="question-summary-count">{questions.length} question{questions.length > 1 ? "s" : ""}</span>
+				<span className={`question-summary-chevron ${open ? "open" : ""}`}>
+					<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+				</span>
+			</button>
+			{open && (
+				<div className="question-summary-body">
+					{questions.map((q: any, i: number) => {
+						const a = answers[q.header];
+						return (
+							<div key={i} className="qa-item">
+								<div className="qa-question">
+									<span className="qa-index">Q{i + 1}</span>
+									<span className="qa-header-tag">{q.header}</span>
+									<span className="qa-text">{q.question}</span>
+								</div>
+								{a && !a.skipped ? (
+									<div className="qa-answer">
+										<span className="qa-label">Answer:</span>
+										{q.options && q.options.length > 0 && (
+											<div className="qa-options-list">
+												{q.options.map((opt: any, k: number) => {
+													const chosen = a.selected?.includes(opt.label);
+													return (
+														<div key={k} className={`qa-option-row ${chosen ? "chosen" : ""}`}>
+															<span className="qa-option-marker">
+																{q.multiSelect ? (chosen ? "☑" : "□") : (chosen ? "●" : "○")}
+															</span>
+															<span className="qa-option-label">{opt.label}</span>
+														</div>
+													);
+												})}
+											</div>
+										)}
+										{a.freeText && <div className="qa-freetext">{a.freeText}</div>}
+									</div>
+								) : (
+									<div className="qa-answer">
+										<span className="qa-skipped">Skipped</span>
+									</div>
+								)}
+							</div>
+						);
+					})}
+				</div>
+			)}
+		</div>
+	);
+}
+
+// ── Question Tool Call Detail ────────────────────────────────
+
+function QuestionToolCallDetail({ toolCall }: { toolCall: ToolCallState }) {
+	const questions = (toolCall.args as any)?.questions ?? [];
+	let answers: Record<string, { selected: string[]; freeText: string | null; skipped: boolean }> = {};
+	try {
+		const parsed = JSON.parse(toolCall.output);
+		answers = parsed.answers ?? {};
+	} catch {
+		/* not ready yet */
+	}
+
+	return (
+		<div className="tool-call-qa">
+			{questions.map((q: any, i: number) => {
+				const a = answers[q.header];
+				return (
+					<div key={i} className="qa-item">
+						<div className="qa-question">
+							<span className="qa-index">Q{i + 1}</span>
+							<span className="qa-header-tag">{q.header}</span>
+							<span className="qa-text">{q.question}</span>
+						</div>
+						{a && !a.skipped ? (
+							<div className="qa-answer">
+								<span className="qa-label">Answer:</span>
+								{a.selected && a.selected.length > 0 && (
+									<div className="qa-selected">
+										{a.selected.map((s: string, j: number) => (
+											<span key={j} className="qa-selected-item">{s}</span>
+										))}
+									</div>
+								)}
+								{a.freeText && <div className="qa-freetext">{a.freeText}</div>}
+							</div>
+						) : (
+							<div className="qa-answer">
+								<span className="qa-skipped">Skipped</span>
+							</div>
+						)}
+					</div>
+				);
+			})}
+		</div>
+	);
+}
+
+// ── Question Summary (collapsible, shown inline in message) ──
+
+// ── Interaction Summary ──────────────────────────────────────
+
 function InteractionSummary({ stats, toolCalls: tcs }: { stats: NonNullable<ChatMessage["interaction"]>; toolCalls: ToolCallState[] }) {
 	const [open, setOpen] = useState(false);
 	const [expandedTool, setExpandedTool] = useState<string | null>(null);
@@ -200,12 +317,16 @@ function InteractionSummary({ stats, toolCalls: tcs }: { stats: NonNullable<Chat
 							{expandedTool && (
 								<div className="tool-call-list">
 									{tcs.filter(tc => tc.toolName === expandedTool).map(tc => (
-										<div key={tc.toolCallId} className="tool-call-compact">
-											<span className={`tool-call-dot ${tc.running ? "running" : tc.isError ? "error" : "ok"}`} />
-											<span className="tool-call-params-preview" title={JSON.stringify(tc.args)}>
-												{tc.args ? Object.entries(tc.args).map(([k, v]) => `${k}=${String(v).substring(0, 40)}`).join(", ") : "—"}
-											</span>
-										</div>
+										tc.toolName === "ask_user_question"
+											? <QuestionToolCallDetail key={tc.toolCallId} toolCall={tc} />
+											: (
+												<div key={tc.toolCallId} className="tool-call-compact">
+													<span className={`tool-call-dot ${tc.running ? "running" : tc.isError ? "error" : "ok"}`} />
+													<span className="tool-call-params-preview" title={JSON.stringify(tc.args)}>
+														{tc.args ? Object.entries(tc.args).map(([k, v]) => `${k}=${String(v).substring(0, 40)}`).join(", ") : "—"}
+													</span>
+												</div>
+											)
 									))}
 								</div>
 							)}
