@@ -20,7 +20,9 @@ export type ExtensionMessage =
 	| { command: "segmentEnd"; tokensIn: number; tokensOut: number; thinkingTokens: number; totalCost: number; modelProvider: string; modelId: string; cacheHit: number; duration: number }
 	| { command: "restoreMessages"; messages: RestoredChatMessage[] }
 	// Question flow — tool call pending user answers
-	| { command: "askQuestion"; toolCallId: string; questions: Question[] };
+	| { command: "askQuestion"; toolCallId: string; questions: Question[] }
+	// Todo list updates from extension
+	| { command: "todoUpdate"; todos: TodoItem[] };
 
 export type WebviewMessage =
 	| { command: "prompt"; text: string }
@@ -36,7 +38,9 @@ export type WebviewMessage =
 	| { command: "listSessions" }
 	| { command: "copyToClipboard"; text: string }
 	// Question flow — user answers a pending question
-	| { command: "answerQuestion"; toolCallId: string; answers: Record<string, QuestionAnswer> | null };
+	| { command: "answerQuestion"; toolCallId: string; answers: Record<string, QuestionAnswer> | null }
+	// Todo list user interactions
+	| { command: "todoChange"; todos: TodoItem[] };
 
 export interface ToolCallState {
 	toolCallId: string;
@@ -110,6 +114,14 @@ export interface QuestionAnswer {
 	selected: string[];
 	freeText: string | null;
 	skipped: boolean;
+}
+
+// ── Todo types ───────────────────────────────────────────────
+
+export interface TodoItem {
+	id: number;
+	title: string;
+	status: "not-started" | "in-progress" | "completed";
 }
 
 // ── Session history restoration ────────────────────────────────

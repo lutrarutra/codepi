@@ -2022,3 +2022,206 @@ body {
   cursor: pointer;
   font-size: 12px;
 }
+
+/* ── Todo List Widget (above chat input) ──────────────────── */
+
+.todo-list-widget {
+  display: none;
+  padding: 3px 3px 2px 3px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  border-bottom: none;
+  border-radius: 4px 4px 0 0;
+  flex-direction: column;
+  gap: 2px;
+  overflow: hidden;
+}
+
+.todo-list-widget.has-todos {
+  display: flex;
+}
+
+.todo-list-expand {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+  justify-content: space-between;
+  width: 100%;
+  background: transparent;
+  border: none;
+  color: var(--text);
+  padding: 0;
+  font: inherit;
+  font-size: 12px;
+  line-height: 20px;
+  text-align: left;
+}
+
+.todo-list-expand:focus {
+  outline: none;
+}
+
+.todo-list-title-section {
+  padding-left: 3px;
+  display: flex;
+  align-items: center;
+  flex: 1;
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 20px;
+}
+
+.todo-expand-icon {
+  flex-shrink: 0;
+  margin-right: 3px;
+  display: flex;
+  align-items: center;
+}
+
+.todo-list-title {
+  font-weight: normal;
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  gap: 3px;
+}
+
+.todo-title-icon {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.todo-clear-button-container {
+  padding-right: 2px;
+  display: flex;
+  align-items: center;
+  height: 18px;
+  opacity: 0.8;
+}
+
+.todo-clear-button-container:hover {
+  opacity: 1;
+}
+
+.todo-clear-button {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  height: 16px;
+  width: 16px;
+  padding: 0;
+  border-radius: 2px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.todo-clear-button:hover {
+  background: var(--hover-bg);
+  color: var(--text);
+}
+
+.todo-list-container {
+  margin-top: 2px;
+  max-height: calc(6 * 24px);
+  overflow-y: auto;
+}
+
+.todo-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 4px;
+  border-radius: 2px;
+  font-size: 12px;
+  line-height: 20px;
+}
+
+.todo-item:hover {
+  background: var(--hover-bg);
+}
+
+.todo-status-toggle {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.todo-status-toggle:focus {
+  outline: none;
+}
+
+.todo-item-title {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text);
+}
+
+.todo-item-title.done {
+  text-decoration: line-through;
+  color: var(--text-muted);
+}
+
+.todo-item-status {
+  font-size: 9px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  display: none;
+}
+
+.todo-item:hover .todo-item-status {
+  display: inline;
+}
+
+.todo-item-actions {
+  display: flex;
+  gap: 1px;
+  opacity: 0;
+  transition: opacity 0.1s;
+}
+
+.todo-item:hover .todo-item-actions {
+  opacity: 1;
+}
+
+.todo-move-btn {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 1px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+  border-radius: 2px;
+}
+
+.todo-move-btn:hover {
+  background: var(--hover-bg);
+  color: var(--text);
+}
+
+.todo-move-btn:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
+.todo-move-btn:disabled:hover {
+  background: transparent;
+  color: var(--text-muted);
+}

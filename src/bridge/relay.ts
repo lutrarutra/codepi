@@ -87,7 +87,6 @@ export class PiEventRelay {
 				}
 				case "tool_execution_start":
 					// toolCallStart already posted via _handleMessageUpdate's toolcall_start
-					// If this is ask_user_question, forward the questions to webview
 					if (event.toolName === "ask_user_question") {
 						const args = (event as any).args ?? {};
 						if (args.questions && args.questions.length > 0) {
@@ -95,6 +94,16 @@ export class PiEventRelay {
 								command: "askQuestion",
 								toolCallId: event.toolCallId,
 								questions: args.questions,
+							});
+						}
+					}
+					// For todo tool, sync the full list from args to webview
+					if (event.toolName === "todo") {
+						const args = (event as any).args ?? {};
+						if (args.todoList && Array.isArray(args.todoList)) {
+							this.post({
+								command: "todoUpdate",
+								todos: args.todoList,
 							});
 						}
 					}
@@ -117,6 +126,16 @@ export class PiEventRelay {
 						result: text,
 						isError: event.isError,
 					});
+					// For todo tool, sync the confirmed list from result details
+					if (event.toolName === "todo") {
+						const details = (event as any).result?.details;
+						if (details?.todoList && Array.isArray(details.todoList)) {
+							this.post({
+								command: "todoUpdate",
+								todos: details.todoList,
+							});
+						}
+					}
 					break;
 				}
 				case "agent_start":

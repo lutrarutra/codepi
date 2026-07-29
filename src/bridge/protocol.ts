@@ -1,4 +1,5 @@
 import type { Question, QuestionAnswer } from "../tools/ask-user-question";
+import type { TodoItem } from "../tools/todo";
 
 // ── Extension → Webview messages ─────────────────────────────────
 
@@ -47,7 +48,9 @@ export type ExtensionMessage =
 	// History restoration when opening existing session
 	| { command: "restoreMessages"; messages: RestoredChatMessage[] }
 	// Question flow — tool call pending user answers
-	| { command: "askQuestion"; toolCallId: string; questions: Question[] };
+	| { command: "askQuestion"; toolCallId: string; questions: Question[] }
+	// Todo list updates
+	| { command: "todoUpdate"; todos: TodoItem[] };
 
 // ── Webview → Extension messages ─────────────────────────────────
 
@@ -65,7 +68,9 @@ export type WebviewMessage =
 	| { command: "listSessions" }
 	| { command: "copyToClipboard"; text: string }
 	// Question flow — user answers a pending question
-	| { command: "answerQuestion"; toolCallId: string; answers: Record<string, QuestionAnswer> | null };
+	| { command: "answerQuestion"; toolCallId: string; answers: Record<string, QuestionAnswer> | null }
+	// Todo list user interactions
+	| { command: "todoChange"; todos: TodoItem[] };
 
 // ── Restored message format (for session history restoration) ──
 

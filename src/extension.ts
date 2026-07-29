@@ -2,7 +2,7 @@ import * as vscode from "vscode";
 import * as path from "node:path";
 import * as os from "node:os";
 import { PiEventRelay } from "./bridge/relay";
-import { vscodeTools, setWriteMode, resolveQuestion } from "./tools/index";
+import { vscodeTools, setWriteMode, resolveQuestion, getTodoList, setTodoList, clearTodoList, reconstructFromEntries } from "./tools/index";
 import { SessionTreeProvider, SessionTreeItem } from "./views/session-tree";
 import type { WebviewMessage } from "./bridge/protocol";
 import type { AgentSession } from "@earendil-works/pi-coding-agent";
@@ -132,6 +132,8 @@ export function activate(context: vscode.ExtensionContext) {
 // ── Panel Creation ───────────────────────────────────────────
 
 async function createNewSessionPanel(context: vscode.ExtensionContext): Promise<void> {
+	clearTodoList();
+
 	const pi = await getPi();
 	const workspaceRoot = getWorkspaceRoot();
 
@@ -407,6 +409,17 @@ async function startBackend(state: PanelState): Promise<void> {
 		} catch (err) {
 			console.error("[CodePi] Error restoring session messages:", err);
 		}
+
+		// Reconstruct todo list from session entries
+		try {
+			reconstructFromEntries(entries);
+			const todos = getTodoList();
+			if (todos.length > 0) {
+				state.panel.webview.postMessage({ command: "todoUpdate", todos });
+			}
+		} catch (err) {
+			console.error("[CodePi] Error reconstructing todos:", err);
+		}
 	}
 
 	state.isBackendReady = true;
@@ -438,6 +451,12 @@ async function handleWebviewMessage(message: WebviewMessage, state: PanelState):
 
 	if (message.command === "answerQuestion") {
 		resolveQuestion(message.toolCallId, message.answers ?? {});
+		return;
+	}
+
+	// Todo list user interaction — silent update, no prompt trigger
+	if (message.command === "todoChange") {
+		setTodoList(message.todos);
 		return;
 	}
 
@@ -524,8 +543,13 @@ async function handleWebviewMessage(message: WebviewMessage, state: PanelState):
 			if (allTools) {
 				(state as any)._allSdkTools = allTools;
 				if (newMode === "ask") {
-					state.session.agent.state.tools = allTools.filter((t: any) => t.name !== "write");
-					state.panel.webview.postMessage({ command: "toolsInfo", tools: ["read", "list_dir", "search"] });
+					state.session.agent.state.tools = allTools.filter(
+						(t: any) => t.name !== "write" && t.name !== "todo",
+					);
+					state.panel.webview.postMessage({
+						command: "toolsInfo",
+						tools: ["read", "list_dir", "search", "ask_user_question"],
+					});
 				} else {
 					state.session.agent.state.tools = allTools;
 					state.panel.webview.postMessage({ command: "toolsInfo", tools: ["read", "write", "list_dir", "search"] });

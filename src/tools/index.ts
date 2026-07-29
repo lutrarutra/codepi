@@ -2,6 +2,9 @@ import * as vscode from "vscode";
 import { askUserQuestionTool } from "./ask-user-question";
 export { resolveQuestion, rejectQuestion, getPendingQuestions } from "./ask-user-question";
 export type { Question, QuestionOption, QuestionAnswer, AskQuestionsParams } from "./ask-user-question";
+import { todoTool } from "./todo";
+export { getTodoList, setTodoList, clearTodoList, reconstructFromEntries } from "./todo";
+export type { TodoItem, TodoDetails } from "./todo";
 
 /**
  * VS Code workspace tool definitions.
@@ -249,6 +252,7 @@ export const vscodeTools: VscodeTool[] = [
 	listDirTool,
 	searchTool,
 	askUserQuestionTool,
+	todoTool,
 ];
 
 // ── Mode-controlled write tool behavior ──────────────────────

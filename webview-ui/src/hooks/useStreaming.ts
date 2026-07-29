@@ -19,6 +19,9 @@ export interface ChatState {
 	error: string | null;
 	/** Pending question carousel awaiting user answers */
 	pendingQuestion: PendingQuestion | null;
+	/** Todo list synced from the agent's todo tool */
+	todos: import("../types").TodoItem[];
+	todosExpanded: boolean;
 }
 
 type Action =
@@ -43,6 +46,8 @@ type Action =
 	| { type: "pendingQuestion"; toolCallId: string; questions: import("../types").Question[] }
 	| { type: "addQuestionBlock"; questions: import("../types").Question[]; answers: Record<string, import("../types").QuestionAnswer> }
 	| { type: "clearPendingQuestion" }
+	| { type: "todoUpdate"; todos: import("../types").TodoItem[] }
+	| { type: "toggleTodoExpand" }
 	| { type: "backendReady" }
 	| { type: "restoreMessages"; messages: RestoredChatMessage[] };
 
@@ -201,6 +206,8 @@ function chatReducer(state: ChatState, action: Action): ChatState {
 			return { ...state, messages: msgs };
 		}
 		case "clearPendingQuestion": return { ...state, pendingQuestion: null };
+		case "todoUpdate": return { ...state, todos: action.todos };
+		case "toggleTodoExpand": return { ...state, todosExpanded: !state.todosExpanded };
 		case "restoreMessages":
 			return {
 				...state,
@@ -229,6 +236,8 @@ export function useStreaming() {
 		thinkingLevel: "medium",
 		pendingQuestion: null,
 		error: null,
+		todos: [],
+		todosExpanded: false,
 	});
 
 	const handleExtensionMessage = useCallback((msg: ExtensionMessage) => {
@@ -249,6 +258,7 @@ export function useStreaming() {
 			case "modelInfo": dispatch({ type: "modelInfo", provider: msg.provider, modelId: msg.modelId, thinkingLevel: msg.thinkingLevel }); dispatch({ type: "setThinkingLevel", level: msg.thinkingLevel }); break;
 			case "toolsInfo": dispatch({ type: "toolsInfo", tools: msg.tools }); break;
 			case "askQuestion": dispatch({ type: "pendingQuestion", toolCallId: msg.toolCallId, questions: msg.questions }); break;
+			case "todoUpdate": dispatch({ type: "todoUpdate", todos: msg.todos }); break;
 			case "modeInfo": dispatch({ type: "setMode", mode: msg.mode }); break;
 			case "modelList": dispatch({ type: "modelList", models: msg.models }); break;
 			case "backendReady": dispatch({ type: "backendReady" }); break;
@@ -266,6 +276,7 @@ export function useStreaming() {
 		},
 		[],
 	);
+	const toggleTodoExpand = useCallback(() => { dispatch({ type: "toggleTodoExpand" }); }, []);
 
-	return { state, handleExtensionMessage, addUserMessage, setMode, setThinkingLevel, clearPendingQuestion, addQuestionBlock };
+	return { state, handleExtensionMessage, addUserMessage, setMode, setThinkingLevel, clearPendingQuestion, addQuestionBlock, toggleTodoExpand };
 }

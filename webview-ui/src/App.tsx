@@ -5,6 +5,7 @@ import { ChatView } from "./components/ChatView";
 import { InputArea } from "./components/InputArea";
 import { QuestionCarousel } from "./components/QuestionCarousel";
 import { ErrorBoundary } from "./components/ErrorBoundary";
+import TodoListWidget from "./components/TodoListWidget";
 
 function fmt(n: number): string {
 	if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
@@ -23,7 +24,7 @@ export default function AppWithErrorBoundary() {
 // ── Inner App ────────────────────────────────────────────────
 
 function App() {
-	const { state, handleExtensionMessage, addUserMessage, setMode, setThinkingLevel, clearPendingQuestion, addQuestionBlock } = useStreaming();
+	const { state, handleExtensionMessage, addUserMessage, setMode, setThinkingLevel, clearPendingQuestion, addQuestionBlock, toggleTodoExpand } = useStreaming();
 	const { post } = useVSCodeAPI(handleExtensionMessage);
 
 	const handleSend = useCallback(
@@ -81,6 +82,53 @@ function App() {
 		[post, clearPendingQuestion],
 	);
 
+	// ── Todo handlers ─────────────────────────────────────────────
+
+	const todoList = state.todos;
+
+	const handleTodoToggle = useCallback(
+		(id: number) => {
+			const newList = todoList.map(t => {
+				if (t.id === id) {
+					if (t.status === "completed") return { ...t, status: "not-started" as const };
+					if (t.status === "in-progress") return { ...t, status: "completed" as const };
+					return { ...t, status: "in-progress" as const };
+				}
+				// If marking as in-progress, demote any other in-progress
+				if (t.status === "in-progress") return { ...t, status: "not-started" as const };
+				return t;
+			});
+			post({ command: "todoChange", todos: newList });
+		},
+		[post, todoList],
+	);
+
+	const handleClearTodos = useCallback(() => {
+		post({ command: "todoChange", todos: [] });
+	}, [post]);
+
+	const handleMoveUp = useCallback(
+		(id: number) => {
+			const idx = todoList.findIndex(t => t.id === id);
+			if (idx <= 0) return;
+			const newList = [...todoList];
+			[newList[idx - 1], newList[idx]] = [newList[idx], newList[idx - 1]];
+			post({ command: "todoChange", todos: newList });
+		},
+		[post, todoList],
+	);
+
+	const handleMoveDown = useCallback(
+		(id: number) => {
+			const idx = todoList.findIndex(t => t.id === id);
+			if (idx < 0 || idx >= todoList.length - 1) return;
+			const newList = [...todoList];
+			[newList[idx], newList[idx + 1]] = [newList[idx + 1], newList[idx]];
+			post({ command: "todoChange", todos: newList });
+		},
+		[post, todoList],
+	);
+
 	const si = state.sessionInfo;
 	const ctxLimit = si.contextLimit || 200_000;
 	const ctxPct = Math.min(100, Math.round((si.contextUsed / ctxLimit) * 100));
@@ -117,6 +165,17 @@ function App() {
 						/>
 					)}
 				</div>
+
+				{/* Todo list — collapsible above input */}
+				<TodoListWidget
+					todos={state.todos}
+					expanded={state.todosExpanded}
+					onToggleExpand={toggleTodoExpand}
+					onTodoToggle={handleTodoToggle}
+					onClear={handleClearTodos}
+					onMoveUp={handleMoveUp}
+					onMoveDown={handleMoveDown}
+				/>
 
 				{/* Input — hidden while questions are pending */}
 				{!state.pendingQuestion && (
