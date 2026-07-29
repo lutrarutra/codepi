@@ -3,23 +3,20 @@ export type ExtensionMessage =
 	| { command: "textEnd" }
 	| { command: "thinkingDelta"; delta: string }
 	| { command: "thinkingEnd" }
-	| {
-			command: "toolCallStart";
-			toolCallId: string;
-			toolName: string;
-			args: Record<string, unknown>;
-	  }
+	| { command: "toolCallStart"; toolCallId: string; toolName: string; args: Record<string, unknown> }
 	| { command: "toolCallUpdate"; toolCallId: string; text: string }
-	| {
-			command: "toolCallEnd";
-			toolCallId: string;
-			result: string;
-			isError: boolean;
-	  }
+	| { command: "toolCallEnd"; toolCallId: string; result: string; isError: boolean }
 	| { command: "agentStart" }
 	| { command: "agentEnd"; willRetry: boolean }
 	| { command: "agentSettled" }
-	| { command: "error"; text: string };
+	| { command: "error"; text: string }
+	| { command: "sessionInfo"; tokensIn: number; tokensOut: number; totalCost: number; contextUsed: number; contextLimit: number; speed: number }
+	| { command: "modelInfo"; provider: string; modelId: string; thinkingLevel: string }
+	| { command: "modelList"; models: Array<{ provider: string; modelId: string }> }
+	| { command: "toolsInfo"; tools: string[] }
+	| { command: "backendReady" }
+	| { command: "segmentStart" }
+	| { command: "segmentEnd"; tokensIn: number; tokensOut: number; thinkingTokens: number; totalCost: number; modelProvider: string; modelId: string; cacheHit: number; duration: number };
 
 export type WebviewMessage =
 	| { command: "prompt"; text: string }
@@ -28,20 +25,12 @@ export type WebviewMessage =
 	| { command: "abort" }
 	| { command: "setModel"; provider: string; modelId: string }
 	| { command: "setThinkingLevel"; level: string }
+	| { command: "setMode"; mode: "ask" | "plan" | "agent" }
 	| { command: "newSession" }
 	| { command: "resumeSession"; id: string }
 	| { command: "listModels" }
-	| { command: "listSessions" };
-
-export interface ChatMessage {
-	id: number;
-	role: "user" | "assistant";
-	text: string;
-	thinking: string;
-	toolCalls: ToolCallState[];
-	complete: boolean;
-	timestamp: number;
-}
+	| { command: "listSessions" }
+	| { command: "copyToClipboard"; text: string };
 
 export interface ToolCallState {
 	toolCallId: string;
@@ -50,4 +39,45 @@ export interface ToolCallState {
 	output: string;
 	isError: boolean;
 	running: boolean;
+}
+
+export interface InteractionStats {
+	interactionId: string;
+	tokensIn: number;
+	tokensOut: number;
+	thinkingTokens: number;
+	responseTokens: number;
+	totalCost: number;
+	modelProvider: string;
+	modelId: string;
+	cacheHit: number;
+	duration: number;
+}
+
+export type ContentBlock =
+	| { type: "thinking"; content: string }
+	| { type: "text"; content: string };
+
+export interface ChatMessage {
+	id: string;
+	role: "user" | "assistant";
+	blocks: ContentBlock[];
+	toolCalls: ToolCallState[];
+	interaction?: InteractionStats;
+	complete: boolean;
+	timestamp: number;
+}
+
+export interface SessionStats {
+	tokensIn: number;
+	tokensOut: number;
+	totalCost: number;
+	contextUsed: number;
+	contextLimit: number;
+	speed: number;
+}
+
+export interface ModelOption {
+	provider: string;
+	modelId: string;
 }

@@ -5,28 +5,89 @@ import type { ExtensionMessage } from "./protocol";
 export class PiEventRelay {
 	private webview: vscode.Webview | undefined;
 	private unsubscribe: (() => void) | undefined;
+	private _session: AgentSession | undefined;
+
+	// Tracking stats
+	private tokensIn = 0;
+	private tokensOut = 0;
+	private totalCost = 0;
+	private speed = 0;
+	private lastAssistantStart = 0;
+	private contextUsed = 0;
+	private lastMsgId = 0;
+	private interactionStart = 0;
 
 	setWebview(webview: vscode.Webview): void {
 		this.webview = webview;
 	}
 
-	/** Subscribe to PI SDK events (only used by the direct SDK approach) */
+	/** Subscribe to PI SDK events. */
 	attach(session: AgentSession): void {
+		this._session = session;
 		this.unsubscribe = session.subscribe((event) => {
 			switch (event.type) {
 				case "message_update":
 					this._handleMessageUpdate(event);
 					break;
+				case "message_start": {
+					const msg = (event as any).message;
+					if (msg?.role === "assistant") {
+						this.interactionStart = Date.now();
+						this.lastAssistantStart = Date.now();
+						// Signal a new segment within this interaction
+						this.post({ command: "segmentStart" });
+						// Emit pre-existing thinking blocks for restored sessions
+						if (msg.content) {
+							for (const block of msg.content) {
+								if (block.type === "thinking" && block.thinking) {
+									this.post({ command: "thinkingDelta", delta: block.thinking });
+								}
+							}
+						}
+					}
+					break;
+				}
+				case "message_end": {
+					const msg = (event as any).message;
+					if (msg?.role === "assistant") {
+						if (msg.usage) {
+							this.tokensIn += msg.usage.input ?? 0;
+							this.tokensOut += msg.usage.output ?? 0;
+							this.totalCost += msg.usage.cost?.total ?? 0;
+							this.contextUsed = msg.usage.totalTokens ?? this.contextUsed;
+							const elapsed = this.lastAssistantStart > 0 ? (Date.now() - this.lastAssistantStart) / 1000 : 1;
+							this.speed = elapsed > 0.5 && msg.usage.output > 0 ? Math.round(msg.usage.output / elapsed) : this.speed;
+						}
+						this._emitSessionInfo();
+
+						// Finalize current segment and emit per-turn stats
+						const interactionId = `int-${++this.lastMsgId}`;
+						const duration = this.interactionStart > 0 ? (Date.now() - this.interactionStart) / 1000 : 0;
+						this.post({
+							command: "segmentEnd",
+							tokensIn: msg.usage?.input ?? 0,
+							tokensOut: msg.usage?.output ?? 0,
+							thinkingTokens: msg.usage?.thinking ?? 0,
+							totalCost: msg.usage?.cost?.total ?? 0,
+							modelProvider: String(this._session?.model?.provider ?? ""),
+							modelId: String(this._session?.model?.id ?? ""),
+							cacheHit: msg.usage?.cacheHitRate ?? 0,
+							duration,
+						});
+					}
+					break;
+				}
 				case "tool_execution_start":
 					this.post({
 						command: "toolCallStart",
 						toolCallId: event.toolCallId,
 						toolName: event.toolName,
-						args: (event as { args?: Record<string, unknown> }).args ?? {},
+						args: (event as any).args ?? {},
 					});
 					break;
 				case "tool_execution_update": {
-					const text = (event as any).partialResult?.content?.[0]?.text ?? "";
+					const text =
+						(event as any).partialResult?.content?.[0]?.text ?? "";
 					this.post({
 						command: "toolCallUpdate",
 						toolCallId: event.toolCallId,
@@ -44,82 +105,42 @@ export class PiEventRelay {
 					});
 					break;
 				}
-				case "message_start": {
-					const msg = (
-						event as {
-							message?: {
-								role?: string;
-								content?: Array<{ type: string; thinking?: string }>;
-							};
-						}
-					).message;
-					if (msg?.role === "assistant" && msg.content) {
-						for (const block of msg.content) {
-							if (block.type === "thinking" && block.thinking) {
-								this.post({ command: "thinkingDelta", delta: block.thinking });
-							}
-						}
-					}
-					break;
-				}
-				case "message_end": {
-					const msg = (
-						event as {
-							message?: {
-								role?: string;
-								content?: Array<{
-									type: string;
-									text?: string;
-									thinking?: string;
-									id?: string;
-									name?: string;
-									arguments?: Record<string, unknown>;
-									input?: Record<string, unknown>;
-								}>;
-							};
-						}
-					).message;
-					if (msg?.role === "assistant" && msg.content) {
-						for (const block of msg.content) {
-							if (block.type === "thinking" && block.thinking) {
-								this.post({ command: "thinkingDelta", delta: block.thinking });
-								this.post({ command: "thinkingEnd" });
-							} else if (block.type === "text" && block.text) {
-								this.post({ command: "textDelta", delta: block.text });
-								this.post({ command: "textEnd" });
-							} else if (
-								(block.type === "toolCall" || block.type === "tool_use") &&
-								block.id &&
-								block.name
-							) {
-								this.post({
-									command: "toolCallStart",
-									toolCallId: block.id,
-									toolName: block.name,
-									args: block.arguments ?? block.input ?? {},
-								});
-							}
-						}
-					}
-					break;
-				}
 				case "agent_start":
 					this.post({ command: "agentStart" });
 					break;
 				case "agent_end":
 					console.log("[CodePi] Prompt completed");
-					this.post({ command: "agentEnd", willRetry: event.willRetry });
+					this.post({
+						command: "agentEnd",
+						willRetry: event.willRetry,
+					});
 					break;
 			}
 		});
+
+		// Emit initial model info and session info
+		this._emitModelInfo(session);
 	}
 
 	detach(): void {
 		this.unsubscribe?.();
 		this.unsubscribe = undefined;
+		this._session = undefined;
 	}
 
-	/** Forward a message to the webview */
+	/** Emit model info on demand (e.g. after model switch). */
+	emitModelInfo(): void {
+		if (this._session) {
+			this._emitModelInfo(this._session);
+		}
+	}
+
+	/** Emit session info on demand. */
+	emitSessionInfo(): void {
+		this._emitSessionInfo();
+	}
+
+	/** Forward a message to the webview. */
 	postMessageSilent(msg: ExtensionMessage): void {
 		try {
 			this.webview?.postMessage(msg);
@@ -130,6 +151,29 @@ export class PiEventRelay {
 
 	private post(msg: ExtensionMessage): void {
 		this.postMessageSilent(msg);
+	}
+
+	private _emitModelInfo(session: AgentSession): void {
+		if (session.model) {
+			this.post({
+				command: "modelInfo",
+				provider: session.model.provider ?? "",
+				modelId: session.model.id ?? "",
+				thinkingLevel: session.thinkingLevel ?? "medium",
+			});
+		}
+	}
+
+	private _emitSessionInfo(): void {
+		this.post({
+			command: "sessionInfo",
+			tokensIn: this.tokensIn,
+			tokensOut: this.tokensOut,
+			totalCost: this.totalCost,
+			contextUsed: this.contextUsed,
+			contextLimit: this._session?.model?.contextWindow ?? 0,
+			speed: this.speed,
+		});
 	}
 
 	private _handleMessageUpdate(event: any): void {
