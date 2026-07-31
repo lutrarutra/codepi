@@ -1,6 +1,7 @@
 import * as vscode from "vscode";
 import * as path from "node:path";
 import * as os from "node:os";
+import * as fs from "node:fs";
 import { PiEventRelay } from "./bridge/relay";
 import {
 	createVscodeTools,
@@ -17,6 +18,12 @@ import { ReviewDecorations, openProposalDiff } from "./review/decorations";
 import type { EditProposalSummary } from "./review/types";
 import type { WebviewMessage } from "./bridge/protocol";
 import type { AgentSession } from "@earendil-works/pi-coding-agent";
+import {
+	detectLegacyConfig,
+	getAgentDir,
+	importLegacyConfig,
+	setAgentDir,
+} from "./pi-store";
 
 // ── Types ────────────────────────────────────────────────────
 
@@ -38,7 +45,6 @@ interface PanelState {
 // ── Globals ──────────────────────────────────────────────────
 
 const panels = new Map<string, PanelState>();
-const agentDir = path.join(os.homedir(), ".pi", "agent");
 let treeProvider: SessionTreeProvider | undefined;
 
 // Shared editor decorations + CodeLens for ALL panels' pending edits.
@@ -127,7 +133,14 @@ function setPanelTitle(state: PanelState, title: string): void {
 }
 // ── Activation ───────────────────────────────────────────────
 
-export function activate(context: vscode.ExtensionContext) {
+export async function activate(context: vscode.ExtensionContext) {
+	// Point pi's config/session storage at VSCode's dedicated extension
+	// storage (globalStorageUri) instead of ~/.pi. Must run before any SDK
+	// call — pi reads PI_CODING_AGENT_DIR at call time.
+	const agentDir = path.join(context.globalStorageUri.fsPath, "agent");
+	setAgentDir(agentDir);
+	fs.mkdirSync(agentDir, { recursive: true });
+
 	// Register session tree provider
 	treeProvider = new SessionTreeProvider();
 	const treeView = vscode.window.createTreeView("codepi.sessionsList", {
@@ -135,6 +148,36 @@ export function activate(context: vscode.ExtensionContext) {
 		showCollapseAll: false,
 	});
 	context.subscriptions.push(treeView);
+
+	// First-run migration: offer to import an existing ~/.pi/agent config.
+	const legacyDir = path.join(os.homedir(), ".pi", "agent");
+	const legacy = detectLegacyConfig(legacyDir);
+	const importAsked = context.globalState.get<boolean>("codepi.importPrompted", false);
+	if (legacy && !importAsked) {
+		await context.globalState.update("codepi.importPrompted", true);
+		const choice = await vscode.window.showInformationMessage(
+			"Found existing pi configuration at ~/.pi/agent. Import it into CodePi's own storage?",
+			{ modal: false },
+			"Import (config + sessions)",
+			"Import config only",
+			"Start fresh",
+		);
+		if (choice?.startsWith("Import")) {
+			try {
+				const res = importLegacyConfig(legacyDir, agentDir, {
+					includeSessions: choice === "Import (config + sessions)",
+				});
+				const list = res.imported.join(", ");
+				vscode.window.showInformationMessage(
+					`Imported into CodePi storage: ${list || "nothing new"}.`,
+				);
+			} catch (err) {
+				vscode.window.showErrorMessage(
+					`Failed to import pi config: ${err instanceof Error ? err.message : String(err)}`,
+				);
+			}
+		}
+	}
 
 	// ── Edit review infrastructure ─────────────────────────────
 	const reviewHandlers = {
@@ -362,6 +405,28 @@ export function activate(context: vscode.ExtensionContext) {
 	context.subscriptions.push(
 		vscode.commands.registerCommand("codepi.refreshSessions", () => {
 			treeProvider?.refresh();
+		}),
+		vscode.commands.registerCommand("codepi.importPiConfig", async () => {
+			const choice = await vscode.window.showQuickPick(
+				[
+					{ label: "Import config + sessions", detail: "Copy settings.json, auth.json, models.json and the sessions/ folder" },
+					{ label: "Import config only", detail: "Copy settings.json, auth.json, models.json" },
+				],
+				{ placeHolder: "Import pi configuration from ~/.pi/agent" },
+			);
+			if (!choice) return;
+			try {
+				const res = importLegacyConfig(legacyDir, agentDir, {
+					includeSessions: choice.label.startsWith("Import config +"),
+				});
+				vscode.window.showInformationMessage(
+					`Imported into CodePi storage: ${res.imported.join(", ") || "nothing new"}.`,
+				);
+			} catch (err) {
+				vscode.window.showErrorMessage(
+					`Failed to import pi config: ${err instanceof Error ? err.message : String(err)}`,
+				);
+			}
 		}),
 	);
 }
@@ -816,7 +881,7 @@ async function startBackend(state: PanelState): Promise<void> {
 
 	const loader = new pi.DefaultResourceLoader({
 		cwd: workspaceRoot,
-		agentDir,
+		agentDir: getAgentDir(),
 		noExtensions: true,
 	});
 	await loader.reload();
@@ -824,7 +889,7 @@ async function startBackend(state: PanelState): Promise<void> {
 	const { session } = await pi.createAgentSession({
 		resourceLoader: loader,
 		cwd: workspaceRoot,
-		agentDir,
+		agentDir: getAgentDir(),
 		noTools: "builtin",
 		customTools: createVscodeTools(state.review),
 		sessionManager: state.sessionManager,

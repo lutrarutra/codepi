@@ -1,5 +1,4 @@
 import * as vscode from "vscode";
-import * as path from "node:path";
 import * as os from "node:os";
 
 // ── Types ────────────────────────────────────────────────────
@@ -82,11 +81,9 @@ export class SessionTreeProvider implements vscode.TreeDataProvider<SessionTreeI
 
 	private sessions: SessionTreeSession[] = [];
 	private cwd: string;
-	private agentDir: string;
 
 	constructor() {
 		this.cwd = getWorkspaceRoot();
-		this.agentDir = path.join(os.homedir(), ".pi", "agent");
 	}
 
 	refresh(): void {
