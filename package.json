@@ -36,7 +36,14 @@
       "codepi-sessions": [
         {
           "id": "codepi.sessionsList",
-          "name": "Sessions"
+          "name": "Sessions",
+          "when": "codepi.sidebarTab == sessions"
+        },
+        {
+          "id": "codepi.settings",
+          "name": "Settings",
+          "type": "webview",
+          "when": "codepi.sidebarTab == settings"
         }
       ]
     },
@@ -133,6 +140,18 @@
         "command": "codepi.openDiff",
         "title": "CodePi: Open Edit Diff",
         "icon": "$(diff)"
+      },
+      {
+        "command": "codepi.openSettingsTab",
+        "title": "Open CodePi Settings"
+      },
+      {
+        "command": "codepi.openSessionsTab",
+        "title": "Open CodePi Sessions"
+      },
+      {
+        "command": "codepi.importPiConfig",
+        "title": "CodePi: Import pi Configuration…"
       }
     ],
     "menus": {
@@ -146,6 +165,11 @@
           "command": "codepi.refreshSessions",
           "when": "view == codepi.sessionsList",
           "group": "navigation"
+        },
+        {
+          "command": "codepi.openSettingsTab",
+          "when": "view == codepi.sessionsList",
+          "icon": "$(gear)"
         }
       ],
       "view/item/context": [

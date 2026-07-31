@@ -18,6 +18,7 @@ import { ReviewDecorations, openProposalDiff } from "./review/decorations";
 import type { EditProposalSummary } from "./review/types";
 import type { WebviewMessage } from "./bridge/protocol";
 import type { AgentSession } from "@earendil-works/pi-coding-agent";
+import { SettingsViewProvider } from "./settings-view";
 import {
 	detectLegacyConfig,
 	getAgentDir,
@@ -148,6 +149,24 @@ export async function activate(context: vscode.ExtensionContext) {
 		showCollapseAll: false,
 	});
 	context.subscriptions.push(treeView);
+
+	// Settings sidebar tab (toggled with the Sessions tree via codepi.sidebarTab)
+	context.subscriptions.push(
+		vscode.window.registerWebviewViewProvider(
+			SettingsViewProvider.viewType,
+			new SettingsViewProvider(context.extensionUri, () => {
+				// Real implementation lands in Task 7 (refreshPanelModels).
+			}),
+			{ webviewOptions: { retainContextWhenHidden: true } },
+		),
+		vscode.commands.registerCommand("codepi.openSettingsTab", () =>
+			vscode.commands.executeCommand("setContext", "codepi.sidebarTab", "settings"),
+		),
+		vscode.commands.registerCommand("codepi.openSessionsTab", () =>
+			vscode.commands.executeCommand("setContext", "codepi.sidebarTab", "sessions"),
+		),
+	);
+	await vscode.commands.executeCommand("setContext", "codepi.sidebarTab", "sessions");
 
 	// First-run migration: offer to import an existing ~/.pi/agent config.
 	const legacyDir = path.join(os.homedir(), ".pi", "agent");
