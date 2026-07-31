@@ -1,6 +1,8 @@
 /**
  * Settings GUI protocol shared by the extension and the settings webview.
- * NO vscode imports — the webview imports this file too.
+ * NO vscode imports. The webview does NOT import this file — it keeps a
+ * local mirror of these types in webview-ui/src/settings/types.ts; keep the
+ * two in sync when changing messages here.
  */
 
 /**

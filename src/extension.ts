@@ -172,34 +172,37 @@ export async function activate(context: vscode.ExtensionContext) {
 	await vscode.commands.executeCommand("setContext", "codepi.sidebarTab", "sessions");
 
 	// First-run migration: offer to import an existing ~/.pi/agent config.
-	const legacyDir = path.join(os.homedir(), ".pi", "agent");
-	const legacy = detectLegacyConfig(legacyDir);
-	const importAsked = context.globalState.get<boolean>("codepi.importPrompted", false);
-	if (legacy && !importAsked) {
-		await context.globalState.update("codepi.importPrompted", true);
-		const choice = await vscode.window.showInformationMessage(
-			"Found existing pi configuration at ~/.pi/agent. Import it into CodePi's own storage?",
-			{ modal: false },
-			"Import (config + sessions)",
-			"Import config only",
-			"Start fresh",
-		);
-		if (choice?.startsWith("Import")) {
-			try {
-				const res = importLegacyConfig(legacyDir, agentDir, {
-					includeSessions: choice === "Import (config + sessions)",
-				});
-				const list = res.imported.join(", ");
-				vscode.window.showInformationMessage(
-					`Imported into CodePi storage: ${list || "nothing new"}.`,
-				);
-			} catch (err) {
-				vscode.window.showErrorMessage(
-					`Failed to import pi config: ${err instanceof Error ? err.message : String(err)}`,
-				);
+	// Run async, do NOT block registration on the prompt.
+	void (async () => {
+		const legacyDir = path.join(os.homedir(), ".pi", "agent");
+		const legacy = detectLegacyConfig(legacyDir);
+		const importAsked = context.globalState.get<boolean>("codepi.importPrompted", false);
+		if (legacy && !importAsked) {
+			await context.globalState.update("codepi.importPrompted", true);
+			const choice = await vscode.window.showInformationMessage(
+				"Found existing pi configuration at ~/.pi/agent. Import it into CodePi's own storage?",
+				{ modal: false },
+				"Import (config + sessions)",
+				"Import config only",
+				"Start fresh",
+			);
+			if (choice?.startsWith("Import")) {
+				try {
+					const res = importLegacyConfig(legacyDir, agentDir, {
+						includeSessions: choice === "Import (config + sessions)",
+					});
+					const list = res.imported.join(", ");
+					vscode.window.showInformationMessage(
+						`Imported into CodePi storage: ${list || "nothing new"}.`,
+					);
+				} catch (err) {
+					vscode.window.showErrorMessage(
+						`Failed to import pi config: ${err instanceof Error ? err.message : String(err)}`,
+					);
+				}
 			}
 		}
-	}
+	})();
 
 	// ── Edit review infrastructure ─────────────────────────────
 	const reviewHandlers = {
@@ -429,10 +432,16 @@ export async function activate(context: vscode.ExtensionContext) {
 			treeProvider?.refresh();
 		}),
 		vscode.commands.registerCommand("codepi.importPiConfig", async () => {
-			const res = await runImportFlow();
-			if (res) {
-				vscode.window.showInformationMessage(
-					`Imported into CodePi storage: ${res.imported.join(", ") || "nothing new"}.`,
+			try {
+				const res = await runImportFlow();
+				if (res) {
+					vscode.window.showInformationMessage(
+						`Imported into CodePi storage: ${res.imported.join(", ") || "nothing new"}.`,
+					);
+				}
+			} catch (err) {
+				vscode.window.showErrorMessage(
+					`Failed to import pi config: ${err instanceof Error ? err.message : String(err)}`,
 				);
 			}
 		}),

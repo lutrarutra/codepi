@@ -40,6 +40,30 @@ describe("validateSettings", () => {
 		expect(errors.some((e) => e.startsWith("defaultThinkingLevel"))).toBe(true);
 	});
 
+	it("rejects null (was: silently accepted, clobbering settings.json)", () => {
+		const errors = validateSettings(null);
+		expect(errors.some((e) => e.startsWith("settings:"))).toBe(true);
+	});
+
+	it("rejects non-object values", () => {
+		for (const bad of ["x", [1], 42, true]) {
+			const errors = validateSettings(bad);
+			expect(errors.some((e) => e.startsWith("settings:"))).toBe(true);
+		}
+	});
+
+	it("rejects invalid string[] values with field path", () => {
+		const errors = validateSettings({ skills: "not-an-array" });
+		expect(errors.some((e) => e.startsWith("skills"))).toBe(true);
+	});
+
+	it("tolerates unknown keys (typos are not rejected)", () => {
+		// validateSettings only checks known schema fields; unknown keys like
+		// "defautlProvider" pass through silently. The extension-side JSON
+		// editor relies on this leniency for forward compatibility.
+		expect(validateSettings({ defautlProvider: "openai" })).toEqual([]);
+	});
+
 	it("covers every key of pi's Settings interface", () => {
 		const keys = SETTINGS_SCHEMA.flatMap((s) => s.fields.map((f) => f.key));
 		const expected = [

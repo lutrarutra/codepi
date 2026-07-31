@@ -157,7 +157,7 @@ function checkField(path: string, field: SchemaField, value: unknown, errors: st
 
 /** Returns field-path error strings; empty array when the value is valid. */
 export function validateSettings(value: unknown): string[] {
-	if (value === undefined || value === null) return [];
+	if (value === undefined) return [];
 	if (!isPlainObject(value)) return ["settings: expected object"];
 	const errors: string[] = [];
 	for (const section of SETTINGS_SCHEMA) {

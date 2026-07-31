@@ -42,6 +42,7 @@ export function SettingsApp(): JSX.Element {
 				case "settings:saved":
 					setDirty(false);
 					setStatus(`Saved ${msg.file ?? ""}`.trim());
+					post({ command: "settings:get" });
 					break;
 				case "settings:error":
 					setStatus(`Error: ${msg.message}`);
