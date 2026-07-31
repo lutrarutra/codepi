@@ -1,7 +1,8 @@
 # CodePi Settings: Migration to VSCode Storage + Sidebar GUI
 
 **Date:** 2026-07-31
-**Status:** Approved design (pending implementation plan)
+**Status:** Implemented 2026-07-31 (see `docs/superpowers/plans/2026-07-31-settings-gui.md`; plan executed incl. Task 7b — import button + custom source path)
+**Approved design** (pending implementation plan — superseded)
 
 ## Problem
 
