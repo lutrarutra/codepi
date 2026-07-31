@@ -1,0 +1,152 @@
+.settings-page {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  overflow: hidden;
+  font-size: 13px;
+}
+
+.settings-tabstrip {
+  display: flex;
+  border-bottom: 1px solid var(--vscode-editorWidget-border, #333);
+  flex-shrink: 0;
+}
+
+.settings-tab {
+  background: transparent;
+  border: none;
+  color: var(--vscode-foreground, #ccc);
+  padding: 6px 14px;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.settings-tab-active {
+  border-bottom: 2px solid var(--vscode-focusBorder, #007fd4);
+  font-weight: 600;
+}
+
+.settings-inner-tabs {
+  display: flex;
+  padding: 4px 0 0;
+  border-bottom: 1px solid var(--vscode-editorWidget-border, #333);
+  flex-shrink: 0;
+}
+
+.settings-inner-tab {
+  background: transparent;
+  border: none;
+  color: var(--vscode-foreground, #ccc);
+  padding: 4px 12px;
+  cursor: pointer;
+}
+
+.settings-inner-tab-active {
+  font-weight: 600;
+  border-bottom: 2px solid var(--vscode-focusBorder, #007fd4);
+}
+
+.settings-form {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px 14px 24px;
+}
+
+.settings-section {
+  margin-bottom: 18px;
+  border: 1px solid var(--vscode-editorWidget-border, #333);
+  border-radius: 4px;
+  padding: 8px 12px;
+}
+
+.settings-section-title {
+  margin: 0 0 8px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.settings-row {
+  display: flex;
+  flex-direction: column;
+  margin-bottom: 8px;
+}
+
+.settings-label {
+  font-size: 12px;
+  margin-bottom: 2px;
+  opacity: 0.9;
+}
+
+.settings-control input[type="text"],
+.settings-control input[type="number"],
+.settings-control select,
+.settings-control textarea {
+  width: 100%;
+  box-sizing: border-box;
+  background: var(--vscode-input-background, #1e1e1e);
+  color: var(--vscode-input-foreground, #ddd);
+  border: 1px solid var(--vscode-input-border, #444);
+  padding: 3px 6px;
+}
+
+.settings-help {
+  font-size: 11px;
+  opacity: 0.6;
+  margin: 2px 0 0;
+}
+
+.settings-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.settings-save {
+  background: var(--vscode-button-background, #0e639c);
+  color: var(--vscode-button-foreground, #fff);
+  border: none;
+  padding: 5px 14px;
+  cursor: pointer;
+  border-radius: 3px;
+}
+
+.settings-save:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.settings-status {
+  font-size: 12px;
+  opacity: 0.85;
+}
+
+.settings-note {
+  font-size: 11px;
+  opacity: 0.6;
+  margin-top: 8px;
+}
+
+.settings-json {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 14px 24px;
+  overflow: hidden;
+}
+
+.settings-json-text {
+  flex: 1;
+  min-height: 120px;
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 12px;
+  background: var(--vscode-input-background, #1e1e1e);
+  color: var(--vscode-input-foreground, #ddd);
+  border: 1px solid var(--vscode-input-border, #444);
+}
+
+.settings-loading {
+  padding: 16px;
+  opacity: 0.6;
+}
