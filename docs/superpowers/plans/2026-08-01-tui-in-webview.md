@@ -1344,3 +1344,17 @@ git commit -m "docs: mark TUI-in-webview spec as implemented"
 1. **Spec coverage:** wipe (T3, T4) · terminal bridge (T1 patch, T2 terminal, T3 xterm) · lifecycle (T4) · integration (T4 settings no-op, T5 ask_user) · validation V1 (T5), V2 (T4/T6 F5), V3 (T4 stub command), V4 (T4 Step 2), V5 (T1 pinned patch) · acceptance criteria map to T6 checklist.
 2. **Placeholder scan:** all code blocks complete; the two "stub" blocks in T4 Step 8 are intentional final code, not placeholders.
 3. **Type consistency:** `TuiHostMessage`/`TuiWebviewMessage` identical in `src/tui/protocol.ts` and `webview-ui/src/terminal/protocol.ts`; `WebviewTerminal.handleReady/handleInput/handleResize` names match T2 tests and T4 Step 4 usage; `PanelState` fields match T4 Steps 1/3/5/6.
+
+
+---
+
+### Addendum: rendering backend → VS Code integrated terminal (added 2026-08-01, after T6)
+
+User feedback: the webview xterm.js rendering "looks like an old terminal window". Decision (user-approved): render the same in-process `InteractiveMode` inside **VS Code's integrated terminal opened in the editor area** (`createTerminal({ location: vscode.TerminalLocation.Editor, iconPath: ThemeIcon("codepi-logo"), pty })`).
+
+Changes vs Tasks 1–6:
+- `src/tui/tui-pty.ts` (new) — `TuiPty` implements both pi's `TuiTerminal` (the SDK patch's injected terminal) and `vscode.Pseudoterminal` (onDidWrite/onDidChangeName/open/handleInput/setDimensions/close). Writes before `open()` buffer; `setTitle`/`setProgress` update the terminal tab name (busy = " ●" suffix).
+- `src/extension.ts` — custom-editor machinery removed (provider, codepi-chat:// URIs, buildHtml, setPanelIcon/setPanelTitle, terminalBoot handshake, handleTuiMessage); `startTuiSession` creates the terminal + pty and starts the backend after `pty.waitForOpen()`; `cleanupSession` on close; `/quit` disposes the terminal tab. `panels` map → `sessions` (SessionState). Review/rename/delete commands updated.
+- Deleted: `src/tui/webview-terminal.ts`, `src/tui/protocol.ts`, `webview-ui/src/terminal/*`, webview `index.html`/`main.tsx`/`index.css`, xterm deps; Vite input is now settings-only; `contributes.customEditors` removed.
+- Tests: `tui-pty.test.ts` (9) replaces `webview-terminal.test.ts`.
+- Known trade-off: preview/double-click-pin semantics and custom-editor tab restore on reload are gone (sessions persist on disk; reopen from the sidebar). Clipboard/OSC-52 copy inside the TUI remains a pending-manual item.

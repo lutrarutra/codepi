@@ -2,6 +2,7 @@
 
 **Date:** 2026-08-01
 **Status:** Implemented 2026-08-01 (see `docs/superpowers/plans/2026-08-01-tui-in-webview.md`)
+**Rendering change (user-requested 2026-08-01):** the TUI is rendered in **VS Code's integrated terminal (editor area)** via a `Pseudoterminal` adapter (`src/tui/tui-pty.ts`) instead of xterm.js in a webview. Same in-process `InteractiveMode` + SDK patch; the terminal host webview, xterm deps, and the `codepi.chat` custom editor were removed.
 **Approved design** (pending implementation plan — superseded)
 
 ## Purpose
