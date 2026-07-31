@@ -15,6 +15,7 @@ export type ExtensionMessage =
 			toolCallId: string;
 			result: string;
 			isError: boolean;
+			editProposal?: { proposalId: string; path: string; hunkCount: number; status: string };
 	  }
 	| { command: "agentStart" }
 	| { command: "agentEnd"; willRetry: boolean }
@@ -35,6 +36,8 @@ export type ExtensionMessage =
 			provider: string;
 			modelId: string;
 			thinkingLevel: string;
+			supportsThinking?: boolean;
+			availableThinkingLevels?: string[];
 	  }
 	| {
 			command: "modelList";
@@ -42,6 +45,9 @@ export type ExtensionMessage =
 	  }
 	| { command: "toolsInfo"; tools: string[] }
 	| { command: "modeInfo"; mode: "ask" | "plan" | "agent" }
+	// Edit review — a file edit is pending user review
+	| { command: "editProposed"; summary: EditProposalSummary }
+	| { command: "editUpdated"; summary: EditProposalSummary }
 	| { command: "backendReady" }
 	| { command: "segmentStart" }
 	| {
@@ -82,6 +88,7 @@ export type ReplayEvent =
 			toolCallId: string;
 			result: string;
 			isError: boolean;
+			editProposal?: { proposalId: string; path: string; hunkCount: number; status: string };
 	  }
 	| {
 			command: "segmentEnd";
@@ -111,6 +118,8 @@ export type ReplayEvent =
 			provider: string;
 			modelId: string;
 			thinkingLevel: string;
+			supportsThinking?: boolean;
+			availableThinkingLevels?: string[];
 	  }
 	| { command: "toolsInfo"; tools: string[] }
 	| { command: "modeInfo"; mode: "ask" | "plan" | "agent" };
@@ -135,7 +144,15 @@ export type WebviewMessage =
 			answers: Record<string, QuestionAnswer> | null;
 	  }
 	// Todo list user interactions
-	| { command: "todoChange"; todos: TodoItem[] };
+	| { command: "todoChange"; todos: TodoItem[] }
+	// Edit review user actions
+	| { command: "acceptHunk"; proposalId: string; hunkId: string }
+	| { command: "rejectHunk"; proposalId: string; hunkId: string }
+	| { command: "acceptFile"; proposalId: string }
+	| { command: "rejectFile"; proposalId: string }
+	| { command: "acceptAllEdits" }
+	| { command: "rejectAllEdits" }
+	| { command: "openDiff"; proposalId: string };
 
 export interface ToolCallState {
 	toolCallId: string;
@@ -144,6 +161,8 @@ export interface ToolCallState {
 	output: string;
 	isError: boolean;
 	running: boolean;
+	/** Present when this tool call produced an edit proposal. */
+	editProposal?: { proposalId: string; path: string; hunkCount: number; status: string };
 }
 
 export interface InteractionStats {
@@ -221,4 +240,34 @@ export interface TodoItem {
 	id: number;
 	title: string;
 	status: "not-started" | "in-progress" | "completed";
+}
+
+// ── Edit review types ────────────────────────────────────────
+
+export type ProposalStatus = "pending" | "accepted" | "rejected" | "stale";
+
+export interface ProposalCounts {
+	total: number;
+	pending: number;
+	accepted: number;
+	rejected: number;
+	linesAdded: number;
+	linesRemoved: number;
+}
+
+/** Serializable summary sent from the extension for each proposal. */
+export interface EditProposalSummary {
+	proposalId: string;
+	toolCallId: string;
+	path: string;
+	status: ProposalStatus;
+	counts: ProposalCounts;
+}
+
+export interface EditReviewState {
+	proposals: Record<string, EditProposalSummary>;
+}
+
+export function emptyEditReviewState(): EditReviewState {
+	return { proposals: {} };
 }

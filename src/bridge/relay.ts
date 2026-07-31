@@ -120,11 +120,15 @@ export class PiEventRelay {
 				}
 				case "tool_execution_end": {
 					const text = (event as any).result?.content?.[0]?.text ?? "";
+					const details = (event as any).result?.details;
 					this.post({
 						command: "toolCallEnd",
 						toolCallId: event.toolCallId,
 						result: text,
 						isError: event.isError,
+						...(details?.editProposal
+							? { editProposal: details.editProposal }
+							: {}),
 					});
 					// For todo tool, sync the confirmed list from result details
 					if (event.toolName === "todo") {
@@ -188,11 +192,26 @@ export class PiEventRelay {
 
 	private _emitModelInfo(session: AgentSession): void {
 		if (session.model) {
+			let supportsThinking = false;
+			let availableThinkingLevels: string[] = [];
+			try {
+				supportsThinking = Boolean(
+					(session as any).supportsThinking?.() ?? session.model?.reasoning,
+				);
+				availableThinkingLevels = (
+					(session as any).getAvailableThinkingLevels?.() ??
+					[]
+				).map(String);
+			} catch {
+				/* ignore */
+			}
 			this.post({
 				command: "modelInfo",
 				provider: session.model.provider ?? "",
 				modelId: session.model.id ?? "",
 				thinkingLevel: session.thinkingLevel ?? "medium",
+				supportsThinking,
+				availableThinkingLevels,
 			});
 		}
 	}

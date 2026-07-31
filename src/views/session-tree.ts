@@ -66,7 +66,10 @@ export class SessionTreeItem extends vscode.TreeItem {
 		this.command = {
 			command: "codepi.openSession",
 			title: "Open Session",
-			arguments: [session.path],
+			// { fromTree: true } marks a click from the list so the handler can
+			// open the session as a preview tab (single click) and pin it on
+			// double click — like the file explorer.
+			arguments: [session.path, { fromTree: true }],
 		};
 	}
 }

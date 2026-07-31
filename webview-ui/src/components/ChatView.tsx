@@ -8,6 +8,9 @@ interface Props {
 	modelId: string;
 	availableTools: string[];
 	mode: "ask" | "plan" | "agent";
+	onAcceptFile?: (proposalId: string) => void;
+	onRejectFile?: (proposalId: string) => void;
+	onOpenDiff?: (proposalId: string) => void;
 }
 
 function groupInteractions(msgs: ChatMessage[]): ChatMessage[][] {
@@ -49,7 +52,7 @@ function modelLabel(group: ChatMessage[]): string {
 	return "";
 }
 
-export function ChatView({ messages, streaming, modelId, availableTools, mode }: Props) {
+export function ChatView({ messages, streaming, modelId, availableTools, mode, onAcceptFile, onRejectFile, onOpenDiff }: Props) {
 	const containerRef = useRef<HTMLDivElement>(null);
 	const [userScrolledUp, setUserScrolledUp] = useState(false);
 	const [collapsed, setCollapsed] = useState<Set<number>>(new Set());
@@ -162,7 +165,7 @@ export function ChatView({ messages, streaming, modelId, availableTools, mode }:
 						</button>
 						{!isCollapsed && group.map(msg => (
 							<div key={msg.id} className={`interactive-item-container ${msg.role === "user" ? "user" : "assistant"}`}>
-								<div className="value"><MessageBubble message={msg} /></div>
+								<div className="value"><MessageBubble message={msg} onAcceptFile={onAcceptFile} onRejectFile={onRejectFile} onOpenDiff={onOpenDiff} /></div>
 							</div>
 						))}
 					</div>

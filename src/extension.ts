@@ -3,7 +3,7 @@ import * as path from "node:path";
 import * as os from "node:os";
 import { PiEventRelay } from "./bridge/relay";
 import {
-	vscodeTools,
+	createVscodeTools,
 	setWriteMode,
 	resolveQuestion,
 	getTodoList,
@@ -12,6 +12,9 @@ import {
 	reconstructFromEntries,
 } from "./tools/index";
 import { SessionTreeProvider, SessionTreeItem } from "./views/session-tree";
+import { ReviewManager } from "./review/review-manager";
+import { ReviewDecorations, openProposalDiff } from "./review/decorations";
+import type { EditProposalSummary } from "./review/types";
 import type { WebviewMessage } from "./bridge/protocol";
 import type { AgentSession } from "@earendil-works/pi-coding-agent";
 
@@ -29,6 +32,7 @@ interface PanelState {
 	sessionId: string;
 	sessionPath: string;
 	disposables: vscode.Disposable[];
+	review: ReviewManager;
 }
 
 // ── Globals ──────────────────────────────────────────────────
@@ -36,7 +40,46 @@ interface PanelState {
 const panels = new Map<string, PanelState>();
 const agentDir = path.join(os.homedir(), ".pi", "agent");
 let treeProvider: SessionTreeProvider | undefined;
-let extensionContext: vscode.ExtensionContext | undefined;
+
+// Shared editor decorations + CodeLens for ALL panels' pending edits.
+let reviewDecorations: ReviewDecorations | undefined;
+
+// Bottom-right per-file review prompts, queued so files are asked one by one.
+const fileReviewQueue: Array<{ summary: EditProposalSummary; panel: PanelState }> = [];
+let promptInFlight = false;
+
+// Status-bar item showing how many edits are pending review.
+let reviewStatusBar: vscode.StatusBarItem | undefined;
+
+/** Refresh the global "N edits pending review" status-bar item. */
+function updateReviewStatusBar(): void {
+	let pendingFiles = 0;
+	let pendingHunks = 0;
+	for (const [, st] of panels) {
+		for (const p of st.review.allProposals()) {
+			if (p.status !== "pending") continue;
+			const c = st.review.counts(p);
+			if (c.pending > 0) {
+				pendingFiles++;
+				pendingHunks += c.pending;
+			}
+		}
+	}
+	if (!reviewStatusBar) {
+		reviewStatusBar = vscode.window.createStatusBarItem(
+			vscode.StatusBarAlignment.Right,
+			200,
+		);
+		reviewStatusBar.command = "codepi.openPendingReview";
+	}
+	if (pendingHunks > 0) {
+		reviewStatusBar.text = `$(diff) ${pendingFiles} file${pendingFiles === 1 ? "" : "s"} · ${pendingHunks} edit${pendingHunks === 1 ? "" : "s"} pending`;
+		reviewStatusBar.tooltip = "CodePi: review pending edits in the editor";
+		reviewStatusBar.show();
+	} else {
+		reviewStatusBar.hide();
+	}
+}
 
 // Lazy import — pi SDK is ESM-only, must use dynamic import from CJS bundle
 let _pi: any;
@@ -49,21 +92,42 @@ async function getPi(): Promise<any> {
 
 // ── Panel icon helpers ───────────────────────────────────────
 
+// The pi logo is contributed as a product icon (media/codepi-logo.woff,
+// contributed via `contributes.icons`) and used as a ThemeIcon for the tab
+// handle. Theme icons render via CSS + icon font (like file-language icons),
+// which is reliable in every client — unlike raw file:// or data: URIs that
+// the Remote client may fail to render after a tab label re-render.
+//
+// The logo itself is always white (codepi.logo); status is conveyed by the
+// session-name color in the chat header instead (see the webview).
 function setPanelIcon(
 	state: PanelState,
 	mode: "idle" | "busy" | "error",
 ): void {
-	const uri = vscode.Uri.joinPath(
-		state.extensionUri,
-		"media",
-		`pi-icon-${mode}.svg`,
+	// The mode parameter is kept for call-site clarity; the logo stays white.
+	void mode;
+	state.panel.iconPath = new vscode.ThemeIcon(
+		"codepi-logo",
+		new vscode.ThemeColor("codepi.logo"),
 	);
-	state.panel.iconPath = { light: uri, dark: uri };
+}
+
+/**
+ * Set the panel's tab title and re-assert the tab icon afterwards.
+ *
+ * Some VS Code versions drop the webview panel's tab icon when the title is
+ * changed (the tab label re-render loses the icon), so the icon is re-applied
+ * after every title change — the last label-affecting operation wins. Also
+ * broadcasts the name to the webview so the chat header can show it colored
+ * by status.
+ */
+function setPanelTitle(state: PanelState, title: string): void {
+	state.panel.title = title;
+	setPanelIcon(state, state.isBusy ? "busy" : "idle");
 }
 // ── Activation ───────────────────────────────────────────────
 
 export function activate(context: vscode.ExtensionContext) {
-	extensionContext = context;
 	// Register session tree provider
 	treeProvider = new SessionTreeProvider();
 	const treeView = vscode.window.createTreeView("codepi.sessionsList", {
@@ -72,23 +136,164 @@ export function activate(context: vscode.ExtensionContext) {
 	});
 	context.subscriptions.push(treeView);
 
+	// ── Edit review infrastructure ─────────────────────────────
+	const reviewHandlers = {
+		acceptHunk: async (proposalId: string, hunkId: string) => {
+			for (const [, state] of panels) {
+				if (state.review.getProposal(proposalId)) {
+					await state.review.acceptHunk(proposalId, hunkId);
+					break;
+				}
+			}
+		},
+		rejectHunk: async (proposalId: string, hunkId: string) => {
+			for (const [, state] of panels) {
+				if (state.review.getProposal(proposalId)) {
+					await state.review.rejectHunk(proposalId, hunkId);
+					break;
+				}
+			}
+		},
+		acceptFile: async (proposalId: string) => {
+			for (const [, state] of panels) {
+				if (state.review.getProposal(proposalId)) {
+					await state.review.acceptFile(proposalId);
+					break;
+				}
+			}
+		},
+		rejectFile: async (proposalId: string) => {
+			for (const [, state] of panels) {
+				if (state.review.getProposal(proposalId)) {
+					await state.review.rejectFile(proposalId);
+					break;
+				}
+			}
+		},
+		openDiff: async (proposalId: string) => {
+			for (const [, state] of panels) {
+				const proposal = state.review.getProposal(proposalId);
+				if (proposal) {
+					await openProposalDiff(proposal);
+					break;
+				}
+			}
+		},
+	};
+	reviewDecorations = new ReviewDecorations(reviewHandlers);
+	context.subscriptions.push(reviewDecorations);
+
+	context.subscriptions.push(
+		vscode.commands.registerCommand(
+			"codepi.acceptHunk",
+			(proposalId: string, hunkId: string) =>
+				reviewHandlers.acceptHunk(proposalId, hunkId),
+		),
+		vscode.commands.registerCommand(
+			"codepi.rejectHunk",
+			(proposalId: string, hunkId: string) =>
+				reviewHandlers.rejectHunk(proposalId, hunkId),
+		),
+		vscode.commands.registerCommand(
+			"codepi.acceptFile",
+			(proposalId: string) => reviewHandlers.acceptFile(proposalId),
+		),
+		vscode.commands.registerCommand(
+			"codepi.rejectFile",
+			(proposalId: string) => reviewHandlers.rejectFile(proposalId),
+		),
+		vscode.commands.registerCommand("codepi.acceptAllEdits", async () => {
+			for (const [, state] of panels) {
+				await state.review.acceptAll();
+			}
+		}),
+		vscode.commands.registerCommand("codepi.rejectAllEdits", async () => {
+			for (const [, state] of panels) {
+				await state.review.rejectAll();
+			}
+		}),
+		vscode.commands.registerCommand(
+			"codepi.openDiff",
+			(proposalId: string) => reviewHandlers.openDiff(proposalId),
+		),
+		vscode.commands.registerCommand("codepi.openPendingReview", async () => {
+			const items: Array<{
+				label: string;
+				description: string;
+				detail?: string;
+				proposal: EditProposalSummary;
+				panel: PanelState;
+			}> = [];
+			for (const [, st] of panels) {
+				for (const p of st.review.allProposals()) {
+					if (p.status !== "pending") continue;
+					const c = st.review.counts(p);
+					if (c.pending === 0) continue;
+					items.push({
+						label: p.path,
+						description: `${c.pending} change${c.pending === 1 ? "" : "s"} pending`,
+						detail: `${c.linesAdded} added · ${c.linesRemoved} removed`,
+						proposal: st.review.summary(p),
+						panel: st,
+					});
+				}
+			}
+			if (items.length === 0) {
+				vscode.window.showInformationMessage(
+					"CodePi: no pending edits to review.",
+				);
+				return;
+			}
+			const picked = await vscode.window.showQuickPick(items, {
+				placeHolder: "Select a file with pending edits to review",
+			});
+			if (!picked) return;
+			const proposal = picked.panel.review.getProposal(
+				picked.proposal.proposalId,
+			);
+			if (proposal) {
+				try {
+					const uri = vscode.Uri.parse(proposal.uri);
+					const doc = await vscode.workspace.openTextDocument(uri);
+					await vscode.window.showTextDocument(doc, { preview: false });
+				} catch {
+					/* ignore */
+				}
+			}
+		}),
+	);
+
+	// ── Custom editor provider: each chat session is its own editor tab ──
+	context.subscriptions.push(
+		vscode.window.registerCustomEditorProvider(
+			CHAT_VIEW_TYPE,
+			new CodePiChatProvider(context),
+			{
+				webviewOptions: { retainContextWhenHidden: true },
+			},
+		),
+	);
+
 	// Register commands
 	context.subscriptions.push(
 		vscode.commands.registerCommand("codepi.openPanel", () => {
-			createNewSessionPanel(context);
+			void createNewSessionPanel();
 		}),
 	);
 
 	context.subscriptions.push(
 		vscode.commands.registerCommand("codepi.newSession", () => {
-			createNewSessionPanel(context);
+			void createNewSessionPanel();
 		}),
 	);
 
 	context.subscriptions.push(
 		vscode.commands.registerCommand(
 			"codepi.openSession",
-			async (arg?: string | SessionTreeItem) => {
+			async (
+				arg?: string | SessionTreeItem,
+				opts?: { fromTree?: boolean },
+			) => {
 				let sessionPath: string | undefined;
 				if (typeof arg === "string") {
 					sessionPath = arg;
@@ -99,14 +304,9 @@ export function activate(context: vscode.ExtensionContext) {
 					await pickSession();
 					return;
 				}
-				// Check if this session is already open in a panel
-				for (const [, state] of panels) {
-					if (state.sessionPath === sessionPath) {
-						state.panel.reveal();
-						return;
-					}
-				}
-				await openExistingSessionPanel(context, sessionPath);
+				// openWith reuses/reveals the existing tab if already open;
+				// from the tree list it opens as a preview, pinned on double-click.
+				await openExistingSessionPanel(sessionPath, opts);
 			},
 		),
 	);
@@ -117,6 +317,19 @@ export function activate(context: vscode.ExtensionContext) {
 			async (item?: SessionTreeItem) => {
 				if (!item) return;
 				await treeProvider?.renameSession(item.session.path);
+				// Keep an open panel's tab title in sync with the new session name.
+				for (const [, state] of panels) {
+					if (state.sessionPath === item.session.path) {
+						const name = state.sessionManager.getSessionName?.();
+						if (name) {
+							setPanelTitle(
+								state,
+								name.length > 50 ? name.slice(0, 50) + "…" : name,
+							);
+						}
+						break;
+					}
+				}
 			},
 		),
 	);
@@ -153,11 +366,119 @@ export function activate(context: vscode.ExtensionContext) {
 	);
 }
 
+// ── Custom editor identity ──────────────────────────────────
+
+const CHAT_VIEW_TYPE = "codepi.chat";
+
+/** Fake resource URI used to give each chat session its own editor tab. */
+function chatUri(sessionId: string): vscode.Uri {
+	return vscode.Uri.parse(
+		`codepi-chat://chat/${encodeURIComponent(sessionId)}`,
+	);
+}
+
+function sessionIdFromUri(uri: vscode.Uri): string {
+	return decodeURIComponent(uri.path.replace(/^\//, ""));
+}
+
+interface SessionInfo {
+	sessionManager: any; // SessionManager from PI SDK
+	sessionPath: string;
+}
+
+// sessionId → session manager. Populated when a chat is opened by a command
+// and re-created by the provider when VS Code restores an editor (reload).
+const sessionRegistry = new Map<string, SessionInfo>();
+const sessionInfoPromises = new Map<string, Promise<SessionInfo>>();
+
+async function loadOrCreateSessionInfo(
+	sessionId: string,
+): Promise<SessionInfo> {
+	const pi = await getPi();
+	const workspaceRoot = getWorkspaceRoot();
+	// Restore an existing session file if present (e.g. after a window reload).
+	try {
+		const all: any[] = await pi.SessionManager.list(workspaceRoot);
+		const found = all.find((s: any) => String(s.id) === sessionId);
+		if (found?.path) {
+			const sessionManager = pi.SessionManager.open(
+				found.path,
+				undefined,
+				workspaceRoot,
+			);
+			return {
+				sessionManager,
+				sessionPath: sessionManager.getSessionFile() || found.path,
+			};
+		}
+	} catch (err) {
+		console.error("[CodePi] Error restoring session", sessionId, ":", err);
+	}
+	// No persisted session (e.g. brand-new chat that never sent a message) —
+	// start a fresh one.
+	const sessionManager = pi.SessionManager.create(workspaceRoot);
+	return {
+		sessionManager,
+		sessionPath: sessionManager.getSessionFile() || "",
+	};
+}
+
+function ensureSessionInfo(sessionId: string): Promise<SessionInfo> {
+	const existing = sessionRegistry.get(sessionId);
+	if (existing) return Promise.resolve(existing);
+	let pending = sessionInfoPromises.get(sessionId);
+	if (!pending) {
+		pending = loadOrCreateSessionInfo(sessionId).then((info) => {
+			sessionRegistry.set(sessionId, info);
+			return info;
+		});
+		sessionInfoPromises.set(sessionId, pending);
+	}
+	return pending;
+}
+
+// ── Custom editor provider ──────────────────────────────────
+
+class CodePiChatDocument implements vscode.CustomDocument {
+	constructor(public readonly uri: vscode.Uri) {}
+	dispose(): void {}
+}
+
+class CodePiChatProvider
+	implements vscode.CustomReadonlyEditorProvider<CodePiChatDocument>
+{
+	constructor(private readonly context: vscode.ExtensionContext) {}
+
+	openCustomDocument(
+		uri: vscode.Uri,
+		_openContext: vscode.CustomDocumentOpenContext,
+		_token: vscode.CancellationToken,
+	): CodePiChatDocument {
+		// Kick off session loading now; resolveCustomEditor awaits the result.
+		void ensureSessionInfo(sessionIdFromUri(uri));
+		return new CodePiChatDocument(uri);
+	}
+
+	async resolveCustomEditor(
+		document: CodePiChatDocument,
+		webviewPanel: vscode.WebviewPanel,
+		_token: vscode.CancellationToken,
+	): Promise<void> {
+		const sessionId = sessionIdFromUri(document.uri);
+		const info = await ensureSessionInfo(sessionId);
+		await setupChatPanel(
+			this.context,
+			webviewPanel,
+			info.sessionManager,
+			sessionId,
+			info.sessionPath,
+		);
+	}
+}
+
 // ── Panel Creation ───────────────────────────────────────────
 
-async function createNewSessionPanel(
-	context: vscode.ExtensionContext,
-): Promise<void> {
+async function createNewSessionPanel(): Promise<void> {
 	clearTodoList();
 
 	const pi = await getPi();
@@ -167,12 +488,22 @@ async function createNewSessionPanel(
 	const sessionId = sessionManager.getSessionId();
 	const sessionPath = sessionManager.getSessionFile() || "";
 
-	await createChatPanel(context, sessionManager, sessionId, sessionPath, false);
+	sessionRegistry.set(sessionId, { sessionManager, sessionPath });
+	await vscode.commands.executeCommand(
+		"vscode.openWith",
+		chatUri(sessionId),
+		CHAT_VIEW_TYPE,
+	);
 }
 
+// Session clicks from the tree list: a quick second click (double-click)
+// pins the preview tab, like the file explorer. Keyed by sessionId.
+const lastTreeOpen = new Map<string, number>();
+const TREE_DOUBLE_CLICK_MS = 300;
+
 async function openExistingSessionPanel(
-	context: vscode.ExtensionContext,
 	sessionPath: string,
+	opts?: { fromTree?: boolean },
 ): Promise<void> {
 	const pi = await getPi();
 	const workspaceRoot = getWorkspaceRoot();
@@ -184,7 +515,34 @@ async function openExistingSessionPanel(
 	);
 	const sessionId = sessionManager.getSessionId();
 
-	await createChatPanel(context, sessionManager, sessionId, sessionPath);
+	// Reuse the registry entry if this session is already open in a tab.
+	if (!sessionRegistry.has(sessionId)) {
+		sessionRegistry.set(sessionId, { sessionManager, sessionPath });
+	}
+
+	// openWith reuses/reveals the existing editor for an already-open URI.
+	// From the session list, the first click opens a preview tab; a quick
+	// second click (double-click) makes it a regular (non-preview) tab.
+	const now = Date.now();
+	const last = lastTreeOpen.get(sessionId) ?? 0;
+	lastTreeOpen.set(sessionId, now);
+	const isDoubleClick =
+		opts?.fromTree === true && now - last < TREE_DOUBLE_CLICK_MS;
+
+	const showOptions: vscode.TextDocumentShowOptions = {
+		preserveFocus: opts?.fromTree === true,
+	};
+	if (opts?.fromTree === true) {
+		// First click: preview. Double-click: keep it as a regular tab.
+		showOptions.preview = !isDoubleClick;
+	}
+
+	await vscode.commands.executeCommand(
+		"vscode.openWith",
+		chatUri(sessionId),
+		CHAT_VIEW_TYPE,
+		showOptions,
+	);
 }
 
 async function pickSession(): Promise<void> {
@@ -230,30 +588,92 @@ async function getSessionsFromProvider(): Promise<
 
 // ── Shared Panel Setup ──────────────────────────────────────
 
-async function createChatPanel(
+async function setupChatPanel(
 	context: vscode.ExtensionContext,
+	panel: vscode.WebviewPanel,
 	sessionManager: any,
 	sessionId: string,
 	sessionPath: string,
-	viewColumn?: vscode.ViewColumn,
 ): Promise<PanelState> {
 	const relay = new PiEventRelay();
 
-	const panel = vscode.window.createWebviewPanel(
-		"codepi",
-		"PI",
-		viewColumn ?? vscode.ViewColumn.Active,
-		{
-			enableScripts: true,
-			retainContextWhenHidden: true,
-			localResourceRoots: [
-				vscode.Uri.joinPath(context.extensionUri, "webview-ui", "dist"),
-			],
-		},
-	);
-
+	// The panel is provided by the custom-editor provider — configure its
+	// webview here (this must happen during resolve).
+	panel.webview.options = {
+		enableScripts: true,
+		localResourceRoots: [
+			vscode.Uri.joinPath(context.extensionUri, "webview-ui", "dist"),
+			vscode.Uri.joinPath(context.extensionUri, "media"),
+		],
+	};
 	panel.webview.html = buildHtml(context.extensionUri, panel.webview);
 	relay.setWebview(panel.webview);
+
+	// Per-panel review manager: tools created for this session register their
+	// proposals here, and review events are posted to this panel's webview.
+	let review: ReviewManager;
+	review = new ReviewManager(
+		{
+			post: (msg) => {
+				// Keep editor decorations in sync with review state.
+				if (msg.command === "editProposed" || msg.command === "editUpdated") {
+					const summary = msg.summary as { proposalId: string } | undefined;
+					if (summary) {
+						const proposal = review.getProposal(summary.proposalId);
+						if (proposal) {
+							if (
+								proposal.status === "accepted" ||
+								proposal.status === "rejected" ||
+								proposal.status === "stale"
+							) {
+								reviewDecorations?.clearProposal(proposal.uri);
+							} else {
+								reviewDecorations?.setProposal(proposal);
+							}
+						}
+					}
+					updateReviewStatusBar();
+				}
+				try {
+					panel.webview.postMessage(msg);
+				} catch {
+					/* panel gone */
+				}
+			},
+			openFile: async (uriStr) => {
+				try {
+					const uri = vscode.Uri.parse(uriStr);
+					const doc = await vscode.workspace.openTextDocument(uri);
+					await vscode.window.showTextDocument(doc, {
+						preview: false,
+						preserveFocus: true,
+					});
+				} catch {
+					/* ignore */
+				}
+			},
+			promptFileReview: (summary) => {
+				enqueueFileReviewPrompt(summary, state);
+			},
+			notify: (text) => {
+				void vscode.window.showInformationMessage(text);
+			},
+		},
+		{
+			readContent: async (uriStr) => {
+				const uri = vscode.Uri.parse(uriStr);
+				const raw = await vscode.workspace.fs.readFile(uri);
+				return new TextDecoder().decode(raw);
+			},
+			writeContent: async (uriStr, content) => {
+				const uri = vscode.Uri.parse(uriStr);
+				await vscode.workspace.fs.writeFile(
+					uri,
+					new TextEncoder().encode(content),
+				);
+			},
+		},
+	);
 
 	const state: PanelState = {
 		panel,
@@ -267,29 +687,27 @@ async function createChatPanel(
 		sessionId,
 		sessionPath,
 		disposables: [],
+		review,
 	};
 
-	// Set icon: white for empty sessions, green for sessions with history
-	const hasMessages = state.sessionManager
-		.getEntries()
-		.some((e: any) => e.type === "message");
-	if (hasMessages) {
-		setPanelIcon(state, "idle");
-	} else {
-		const darkUri = vscode.Uri.joinPath(
-			context.extensionUri,
-			"media",
-			"pi-icon-empty.svg",
-		);
-		const lightUri = vscode.Uri.joinPath(
-			context.extensionUri,
-			"media",
-			"pi-icon-empty-light.svg",
-		);
-		state.panel.iconPath = { light: lightUri, dark: darkUri };
-	}
+	// Tab handle icon: always the pi logo, colored by agent status
+	// (idle = green, busy = blue, error = yellow). Inlined as a data: URI so
+	// it renders even in Remote / Web contexts where server-side `file://`
+	// paths are not reachable from the client.
+	setPanelIcon(state, "idle");
 
 	panels.set(sessionId, state);
+
+	// Some VS Code versions fail to refresh webview tab icons when the panel
+	// is hidden or restored — re-assert the status icon on every view-state
+	// change so the logo stays visible.
+	panel.onDidChangeViewState(
+		() => {
+			setPanelIcon(state, state.isBusy ? "busy" : "idle");
+		},
+		undefined,
+		context.subscriptions,
+	);
 
 	// Handle messages from this panel's webview
 	const msgDisposable = panel.webview.onDidReceiveMessage(
@@ -310,8 +728,7 @@ async function createChatPanel(
 	// Handle panel disposal
 	panel.onDidDispose(
 		() => {
-			const vc = panel.viewColumn; // capture before cleanup deletes the state
-			cleanupPanel(sessionId, vc ?? undefined);
+			cleanupPanel(sessionId);
 		},
 		undefined,
 		context.subscriptions,
@@ -331,7 +748,7 @@ async function createChatPanel(
 	return state;
 }
 
-function cleanupPanel(sessionId: string, viewColumn?: vscode.ViewColumn): void {
+function cleanupPanel(sessionId: string): void {
 	const state = panels.get(sessionId);
 	if (!state) return;
 
@@ -341,6 +758,13 @@ function cleanupPanel(sessionId: string, viewColumn?: vscode.ViewColumn): void {
 
 	panels.delete(sessionId);
 	state.relay.detach();
+
+	// Clear editor decorations for this panel's pending proposals.
+	for (const p of state.review.allProposals()) {
+		reviewDecorations?.clearProposal(p.uri);
+	}
+	updateReviewStatusBar();
+
 	if (state.session) {
 		try {
 			state.session.dispose();
@@ -366,19 +790,17 @@ function cleanupPanel(sessionId: string, viewColumn?: vscode.ViewColumn): void {
 				"Close Anyway",
 			);
 			if (choice === "Cancel" || choice === undefined) {
-				// Recreate panel in same position — feels like close was prevented
-				const ec = extensionContext;
-				if (ec) {
-					const sid = savedSessionManager.getSessionId();
-					await createChatPanel(
-						ec,
-						savedSessionManager,
-						sid,
-						sessionPath,
-						false,
-						viewColumn,
-					);
-				}
+				// Recreate the chat editor — feels like close was prevented.
+				const sid = savedSessionManager.getSessionId();
+				sessionRegistry.set(sid, {
+					sessionManager: savedSessionManager,
+					sessionPath,
+				});
+				await vscode.commands.executeCommand(
+					"vscode.openWith",
+					chatUri(sid),
+					CHAT_VIEW_TYPE,
+				);
 			}
 			// "Close Anyway" → leave closed
 		}, 0);
@@ -404,7 +826,7 @@ async function startBackend(state: PanelState): Promise<void> {
 		cwd: workspaceRoot,
 		agentDir,
 		noTools: "builtin",
-		customTools: vscodeTools,
+		customTools: createVscodeTools(state.review),
 		sessionManager: state.sessionManager,
 	});
 
@@ -420,19 +842,19 @@ async function startBackend(state: PanelState): Promise<void> {
 	state.session = session;
 	state.relay.attach(session);
 
-	// Get models
+	// Get models — the FULL catalog (getAll), not just providers with
+	// configured auth (getAvailable), so the model selector isn't missing
+	// models.
 	const models: Array<{ provider: string; modelId: string }> = [];
 	try {
 		const registry: any = (session as any).modelRegistry;
-		if (registry?.getAvailable) {
-			const avail: any[] = registry.getAvailable();
-			if (avail && avail.length > 0) {
-				for (const m of avail) {
-					const prov = String(m.provider ?? "");
-					const mid = String(m.id ?? "");
-					if (prov && mid) {
-						models.push({ provider: prov, modelId: mid });
-					}
+		const avail: any[] = registry?.getAll?.() ?? registry?.getAvailable?.() ?? [];
+		if (avail && avail.length > 0) {
+			for (const m of avail) {
+				const prov = String(m.provider ?? "");
+				const mid = String(m.id ?? "");
+				if (prov && mid) {
+					models.push({ provider: prov, modelId: mid });
 				}
 			}
 		}
@@ -449,16 +871,17 @@ async function startBackend(state: PanelState): Promise<void> {
 	}
 
 	state.panel.webview.postMessage({ command: "modelList", models });
+	const toolNames = createVscodeTools(state.review).map((t) => t.name);
 	state.panel.webview.postMessage({
 		command: "toolsInfo",
-		tools: vscodeTools.map((t) => t.name),
+		tools: toolNames,
 	});
 	state.panel.webview.postMessage({ command: "modeInfo", mode: "agent" });
 	console.log(
 		"[CodePi] Sent",
 		models.length,
 		"models, tools:",
-		vscodeTools.map((t) => t.name).join(", "),
+		toolNames.join(", "),
 	);
 
 	// Save the SDK tool list for mode switching
@@ -481,14 +904,19 @@ async function startBackend(state: PanelState): Promise<void> {
 					events: replayEvents,
 				});
 			}
-			// Set tab title from first user message
+			// Set tab title: the pi logo icon already identifies the panel — the
+			// title is just the session name (explicit rename) or the first
+			// user message.
+			const sessionName = state.sessionManager.getSessionName?.();
 			const firstUserEntry = entries.find(
 				(e: any) => e.type === "message" && e.message?.role === "user",
 			);
-			if (firstUserEntry) {
-				const text = firstUserEntry.message.content?.[0]?.text || "";
-				const truncated = text.length > 50 ? text.slice(0, 50) + "…" : text;
-				state.panel.title = `PI: ${truncated}`;
+			const titleText =
+				sessionName || firstUserEntry?.message?.content?.[0]?.text || "";
+			if (titleText) {
+				const truncated =
+					titleText.length > 50 ? titleText.slice(0, 50) + "…" : titleText;
+				setPanelTitle(state, truncated);
 			}
 		} catch (err) {
 			console.error("[CodePi] Error replaying session history:", err);
@@ -515,6 +943,10 @@ async function startBackend(state: PanelState): Promise<void> {
 		provider: String((session.model as any).provider ?? ""),
 		modelId: String(session.model.id ?? ""),
 		thinkingLevel: session.thinkingLevel ?? "medium",
+		supportsThinking: Boolean(
+			(session as any).supportsThinking?.() ?? (session.model as any)?.reasoning,
+		),
+		availableThinkingLevels: ((session as any).getAvailableThinkingLevels?.() ?? []).map(String),
 	});
 
 	// Refresh the session tree to show the new session
@@ -549,6 +981,37 @@ async function handleWebviewMessage(
 		return;
 	}
 
+	// ── Edit review actions (do NOT require the chat backend) ──
+	if (message.command === "acceptHunk") {
+		await state.review.acceptHunk(message.proposalId, message.hunkId);
+		return;
+	}
+	if (message.command === "rejectHunk") {
+		await state.review.rejectHunk(message.proposalId, message.hunkId);
+		return;
+	}
+	if (message.command === "acceptFile") {
+		await state.review.acceptFile(message.proposalId);
+		return;
+	}
+	if (message.command === "rejectFile") {
+		await state.review.rejectFile(message.proposalId);
+		return;
+	}
+	if (message.command === "acceptAllEdits") {
+		await state.review.acceptAll();
+		return;
+	}
+	if (message.command === "rejectAllEdits") {
+		await state.review.rejectAll();
+		return;
+	}
+	if (message.command === "openDiff") {
+		const proposal = state.review.getProposal(message.proposalId);
+		if (proposal) await openProposalDiff(proposal);
+		return;
+	}
+
 	if (!state.isBackendReady || !state.session) {
 		console.warn(
 			"[CodePi] Backend not ready yet, dropping message:",
@@ -567,11 +1030,11 @@ async function handleWebviewMessage(
 			.getEntries()
 			.filter((e: any) => e.type === "message");
 		if (msgEntries.length === 0) {
+			const sessionName = state.sessionManager.getSessionName?.();
+			const titleText = sessionName || message.text;
 			const truncated =
-				message.text.length > 50
-					? message.text.slice(0, 50) + "…"
-					: message.text;
-			state.panel.title = `PI: ${truncated}`;
+				titleText.length > 50 ? titleText.slice(0, 50) + "…" : titleText;
+			setPanelTitle(state, truncated);
 		}
 		const promptStartTime = Date.now();
 		console.log(
@@ -581,10 +1044,16 @@ async function handleWebviewMessage(
 		state.isBusy = true;
 		setPanelIcon(state, "busy");
 		if (state.session.isStreaming) {
-			state.session.steer(message.text).catch((err: Error) => {
-				console.error("[CodePi] Steer error:", err);
-				setPanelIcon(state, "error");
-			});
+			state.session
+				.steer(message.text)
+				.then(() => {
+					state.isBusy = false;
+					setPanelIcon(state, "idle");
+				})
+				.catch((err: Error) => {
+					console.error("[CodePi] Steer error:", err);
+					setPanelIcon(state, "error");
+				});
 		} else {
 			state.session
 				.prompt(message.text)
@@ -616,17 +1085,31 @@ async function handleWebviewMessage(
 	} else if (message.command === "steer") {
 		state.isBusy = true;
 		setPanelIcon(state, "busy");
-		state.session.steer(message.text).catch(() => {});
+		state.session
+			.steer(message.text)
+			.then(() => {
+				state.isBusy = false;
+				setPanelIcon(state, "idle");
+			})
+			.catch(() => {});
 	} else if (message.command === "followUp") {
 		state.isBusy = true;
 		setPanelIcon(state, "busy");
-		state.session.followUp(message.text).catch(() => {});
+		state.session
+			.followUp(message.text)
+			.then(() => {
+				state.isBusy = false;
+				setPanelIcon(state, "idle");
+			})
+			.catch(() => {});
 	} else if (message.command === "setModel") {
 		try {
 			const registry: any = (state.session as any).modelRegistry;
 			if (!registry) return;
-			const avail: any[] = registry.getAvailable?.() ?? [];
-			const model = avail.find(
+			// Match against the full catalog (getAll), since the selector now
+			// shows all models, not just providers with configured auth.
+			const all: any[] = registry.getAll?.() ?? registry.getAvailable?.() ?? [];
+			const model = all.find(
 				(m: any) =>
 					String(m.provider ?? "") === message.provider &&
 					String(m.id ?? "") === message.modelId,
@@ -644,6 +1127,11 @@ async function handleWebviewMessage(
 			}
 		} catch (err) {
 			console.error("[CodePi] setModel error:", err);
+			// Surface the failure (e.g. provider has no API key) in the chat.
+			state.panel.webview.postMessage({
+				command: "error",
+				text: err instanceof Error ? err.message : String(err),
+			});
 		}
 	} else if (message.command === "setMode") {
 		try {
@@ -659,7 +1147,7 @@ async function handleWebviewMessage(
 				(state as any)._allSdkTools = allTools;
 				if (newMode === "ask") {
 					state.session.agent.state.tools = allTools.filter(
-						(t: any) => t.name !== "write" && t.name !== "todo",
+						(t: any) => t.name !== "write" && t.name !== "edit" && t.name !== "todo",
 					);
 					state.panel.webview.postMessage({
 						command: "toolsInfo",
@@ -675,7 +1163,7 @@ async function handleWebviewMessage(
 					state.session.agent.state.tools = allTools;
 					state.panel.webview.postMessage({
 						command: "toolsInfo",
-						tools: ["read", "write", "list_dir", "find_files", "grep"],
+						tools: ["read", "write", "edit", "list_dir", "find_files", "grep"],
 					});
 				}
 			}
@@ -685,11 +1173,87 @@ async function handleWebviewMessage(
 			console.error("[CodePi] setMode error:", err);
 		}
 	} else if (message.command === "setThinkingLevel") {
-		state.session?.setThinkingLevel(message.level as any);
+		try {
+			state.session?.setThinkingLevel(message.level as any);
+			const effective = state.session?.thinkingLevel ?? message.level;
+			console.log(
+				"[CodePi] Thinking level set →",
+				effective,
+				"(requested",
+				message.level + ")",
+			);
+		} catch (err) {
+			console.error("[CodePi] setThinkingLevel error:", err);
+		}
 		state.relay.emitModelInfo();
 	} else if (message.command === "newSession") {
 		// Open a new panel with a fresh session instead of replacing current
 		vscode.commands.executeCommand("codepi.newSession");
+	}
+}
+
+// ── File Review Prompt Queue ─────────────────────────────────
+
+/**
+ * VS Code shows `showInformationMessage` notifications in the bottom-right
+ * corner. We queue one prompt per edited FILE so the user is asked to accept
+ * or decline changes file by file, in order.
+ */
+function enqueueFileReviewPrompt(
+	summary: EditProposalSummary,
+	panel: PanelState,
+): void {
+	fileReviewQueue.push({ summary, panel });
+	void pumpFileReviewQueue();
+}
+
+async function pumpFileReviewQueue(): Promise<void> {
+	if (promptInFlight) return;
+	promptInFlight = true;
+	try {
+		while (fileReviewQueue.length > 0) {
+			const item = fileReviewQueue.shift();
+			if (!item) break;
+			const { summary, panel } = item;
+
+			const proposal = panel.review.getProposal(summary.proposalId);
+			if (!proposal || proposal.status !== "pending") continue;
+
+			// Open the file so the user can see the inline diff before deciding.
+			try {
+				const uri = vscode.Uri.parse(proposal.uri);
+				const doc = await vscode.workspace.openTextDocument(uri);
+				await vscode.window.showTextDocument(doc, { preview: false });
+			} catch {
+				/* ignore */
+			}
+
+			const c = summary.counts;
+			const detail =
+				`${c.total} change${c.total === 1 ? "" : "s"} · ` +
+				`${c.linesAdded} added · ${c.linesRemoved} removed`;
+			const choice = await vscode.window.showInformationMessage(
+				`CodePi edited ${summary.path}`,
+				{ detail, modal: false },
+				"Accept",
+				"Decline",
+				"Open Diff",
+			);
+
+			if (choice === "Accept") {
+				await panel.review.acceptFile(summary.proposalId);
+			} else if (choice === "Decline") {
+				await panel.review.rejectFile(summary.proposalId);
+			} else if (choice === "Open Diff") {
+				const p = panel.review.getProposal(summary.proposalId);
+				if (p) await openProposalDiff(p);
+				// Re-queue so the file is still asked for later.
+				fileReviewQueue.push({ summary, panel });
+			}
+			// Dismiss (or modal close) → leave pending; user can act later.
+		}
+	} finally {
+		promptInFlight = false;
 	}
 }
 
@@ -977,7 +1541,7 @@ function buildReplayEvents(
 	// Emit toolsInfo so tools show in the welcome area
 	events.push({
 		command: "toolsInfo",
-		tools: vscodeTools.map((t) => t.name),
+		tools: ["read", "write", "edit", "list_dir", "find_files", "grep", "todo", "ask_user_question"],
 	});
 
 	return events;

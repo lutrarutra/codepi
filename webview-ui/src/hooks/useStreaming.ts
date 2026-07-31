@@ -5,7 +5,11 @@ import type {
 	ExtensionMessage,
 	SessionStats,
 	ModelOption,
+	EditProposalSummary,
+	EditReviewState,
+	ProposalStatus,
 } from "../types";
+import { emptyEditReviewState } from "../types";
 
 export interface PendingQuestion {
 	toolCallId: string;
@@ -17,7 +21,13 @@ export interface ChatState {
 	streaming: boolean;
 	backendReady: boolean;
 	sessionInfo: SessionStats;
-	modelInfo: { provider: string; modelId: string; thinkingLevel: string };
+	modelInfo: {
+		provider: string;
+		modelId: string;
+		thinkingLevel: string;
+		supportsThinking: boolean;
+		availableThinkingLevels: string[];
+	};
 	availableModels: ModelOption[];
 	availableTools: string[];
 	mode: "ask" | "plan" | "agent";
@@ -28,6 +38,8 @@ export interface ChatState {
 	/** Todo list synced from the agent's todo tool */
 	todos: import("../types").TodoItem[];
 	todosExpanded: boolean;
+	/** Edit review — proposals pending user review */
+	edits: EditReviewState;
 }
 
 type Action =
@@ -49,6 +61,7 @@ type Action =
 			toolCallId: string;
 			result: string;
 			isError: boolean;
+			editProposal?: { proposalId: string; path: string; hunkCount: number; status: string };
 	  }
 	| {
 			type: "segmentEnd";
@@ -69,6 +82,8 @@ type Action =
 			provider: string;
 			modelId: string;
 			thinkingLevel: string;
+			supportsThinking?: boolean;
+			availableThinkingLevels?: string[];
 	  }
 	| { type: "toolsInfo"; tools: string[] }
 	| { type: "modelList"; models: ModelOption[] }
@@ -87,6 +102,8 @@ type Action =
 	| { type: "clearPendingQuestion" }
 	| { type: "todoUpdate"; todos: import("../types").TodoItem[] }
 	| { type: "toggleTodoExpand" }
+	| { type: "editProposed"; summary: EditProposalSummary }
+	| { type: "editUpdated"; summary: EditProposalSummary }
 	| { type: "backendReady" }
 	| { type: "replayEvents"; events: import("../types").ReplayEvent[] };
 
@@ -235,6 +252,7 @@ function chatReducer(state: ChatState, action: Action): ChatState {
 									output: action.result,
 									isError: action.isError,
 									running: false,
+									editProposal: action.editProposal ?? tc.editProposal,
 								}
 							: tc,
 					),
@@ -295,6 +313,8 @@ function chatReducer(state: ChatState, action: Action): ChatState {
 					provider: action.provider,
 					modelId: action.modelId,
 					thinkingLevel: action.thinkingLevel,
+					supportsThinking: action.supportsThinking ?? false,
+					availableThinkingLevels: action.availableThinkingLevels ?? [],
 				},
 			};
 		case "modelList":
@@ -339,6 +359,18 @@ function chatReducer(state: ChatState, action: Action): ChatState {
 			return { ...state, todos: action.todos };
 		case "toggleTodoExpand":
 			return { ...state, todosExpanded: !state.todosExpanded };
+		case "editProposed": {
+			const proposals = { ...state.edits.proposals };
+			proposals[action.summary.proposalId] = action.summary;
+			return { ...state, edits: { proposals } };
+		}
+		case "editUpdated": {
+			const proposals = { ...state.edits.proposals };
+			const existing = proposals[action.summary.proposalId];
+			if (!existing) return state;
+			proposals[action.summary.proposalId] = action.summary;
+			return { ...state, edits: { proposals } };
+		}
 		case "replayEvents": {
 			// Process events through the same reducer logic as live chat
 			let s = {
@@ -433,6 +465,8 @@ function applyReplayEvent(
 				provider: evt.provider,
 				modelId: evt.modelId,
 				thinkingLevel: evt.thinkingLevel,
+				supportsThinking: evt.supportsThinking,
+				availableThinkingLevels: evt.availableThinkingLevels,
 			});
 		case "toolsInfo":
 			return chatReducer(s, { type: "toolsInfo", tools: evt.tools });
@@ -456,7 +490,13 @@ export function useStreaming() {
 			speed: 0,
 			cacheRate: 0,
 		},
-		modelInfo: { provider: "", modelId: "", thinkingLevel: "medium" },
+		modelInfo: {
+			provider: "",
+			modelId: "",
+			thinkingLevel: "medium",
+			supportsThinking: true,
+			availableThinkingLevels: ["off", "minimal", "low", "medium", "high"],
+		},
 		availableModels: [],
 		availableTools: [],
 		mode: "agent",
@@ -465,6 +505,7 @@ export function useStreaming() {
 		error: null,
 		todos: [],
 		todosExpanded: false,
+		edits: emptyEditReviewState(),
 	});
 
 	const handleExtensionMessage = useCallback((msg: ExtensionMessage) => {
@@ -505,7 +546,14 @@ export function useStreaming() {
 					toolCallId: msg.toolCallId,
 					result: msg.result,
 					isError: msg.isError,
+					editProposal: msg.editProposal,
 				});
+				break;
+			case "editProposed":
+				dispatch({ type: "editProposed", summary: msg.summary });
+				break;
+			case "editUpdated":
+				dispatch({ type: "editUpdated", summary: msg.summary });
 				break;
 			case "segmentEnd":
 				dispatch({
@@ -547,6 +595,8 @@ export function useStreaming() {
 					provider: msg.provider,
 					modelId: msg.modelId,
 					thinkingLevel: msg.thinkingLevel,
+					supportsThinking: msg.supportsThinking,
+					availableThinkingLevels: msg.availableThinkingLevels,
 				});
 				dispatch({ type: "setThinkingLevel", level: msg.thinkingLevel });
 				break;

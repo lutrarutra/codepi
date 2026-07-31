@@ -187,6 +187,183 @@ body {
   overflow: hidden;
 }
 
+/* ── Edit Review Bar (Copilot-style pending edits) ─────────── */
+
+.edit-review-bar {
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-alt);
+  font-size: var(--chat-font-s);
+  flex-shrink: 0;
+  max-height: 45vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.edit-review-bar-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 12px;
+}
+
+.edit-review-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: none;
+  border: none;
+  color: var(--text);
+  cursor: pointer;
+  font-size: var(--chat-font-s);
+  padding: 2px 0;
+  min-width: 0;
+  flex: 1;
+  text-align: left;
+}
+
+.edit-review-toggle:hover { color: var(--accent); }
+
+.edit-review-chevron { font-size: 8px; opacity: 0.5; transition: transform 0.15s ease; display: flex; }
+.edit-review-chevron.open { transform: rotate(90deg); }
+.edit-review-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.edit-review-actions { display: flex; gap: 6px; flex-shrink: 0; }
+
+.edit-review-btn {
+  border: 1px solid var(--border);
+  background: var(--input-bg);
+  color: var(--text);
+  border-radius: 4px;
+  padding: 3px 10px;
+  font-size: var(--chat-font-xs);
+  cursor: pointer;
+  transition: background 0.1s, border-color 0.1s;
+  white-space: nowrap;
+}
+
+.edit-review-btn:hover { border-color: var(--accent); }
+
+.edit-review-btn.accept { color: var(--success); border-color: rgba(78, 201, 176, 0.5); }
+.edit-review-btn.accept:hover { background: rgba(78, 201, 176, 0.12); }
+
+.edit-review-btn.reject { color: var(--error); border-color: rgba(244, 71, 71, 0.5); }
+.edit-review-btn.reject:hover { background: rgba(244, 71, 71, 0.12); }
+
+.edit-review-btn.accept-all { background: rgba(78, 201, 176, 0.15); color: var(--success); border-color: rgba(78, 201, 176, 0.4); }
+.edit-review-btn.accept-all:hover { background: rgba(78, 201, 176, 0.25); }
+
+.edit-review-btn.reject-all { background: rgba(244, 71, 71, 0.12); color: var(--error); border-color: rgba(244, 71, 71, 0.4); }
+.edit-review-btn.reject-all:hover { background: rgba(244, 71, 71, 0.22); }
+
+.edit-review-btn.ghost { background: transparent; color: var(--text-muted); }
+
+.edit-review-files {
+  overflow-y: auto;
+  border-top: 1px solid var(--border);
+  padding: 4px 12px 8px;
+}
+
+.edit-review-empty { color: var(--success); padding: 8px 4px; font-size: var(--chat-font-xs); }
+
+.edit-file-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 4px;
+  border-radius: 5px;
+}
+
+.edit-file-row:hover { background: var(--input-bg); }
+
+.edit-file-name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: none;
+  border: none;
+  color: var(--text);
+  cursor: pointer;
+  font-size: var(--chat-font-s);
+  min-width: 0;
+  flex: 1;
+  text-align: left;
+  font-family: var(--mono);
+}
+
+.edit-file-name:hover { color: var(--accent); }
+
+.edit-file-path { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.edit-file-stats { display: flex; gap: 6px; font-size: var(--chat-font-xs); color: var(--text-muted); flex-shrink: 0; }
+.stat-added { color: var(--success); }
+.stat-removed { color: var(--error); }
+
+.edit-file-actions { display: flex; gap: 6px; flex-shrink: 0; }
+
+.edit-file-detail {
+  flex-basis: 100%;
+  font-size: var(--chat-font-xs);
+  color: var(--text-muted);
+  padding: 4px 6px;
+}
+
+.edit-file-detail-row { display: flex; gap: 14px; }
+.status-pending { color: var(--warning); }
+.status-accepted { color: var(--success); }
+.status-rejected { color: var(--error); }
+.status-stale { color: var(--text-muted); }
+
+/* ── Edit Cards (inside tool results) ──────────────────────── */
+
+.edit-cards { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+
+.edit-card {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--code-bg);
+  overflow: hidden;
+}
+
+.edit-card.status-pending { border-color: rgba(204, 167, 0, 0.4); }
+.edit-card.status-accepted { border-color: rgba(78, 201, 176, 0.4); }
+.edit-card.status-rejected { border-color: rgba(244, 71, 71, 0.4); }
+
+.edit-card-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 10px;
+  background: none;
+  border: none;
+  color: var(--text);
+  cursor: pointer;
+  font-size: var(--chat-font-s);
+  text-align: left;
+}
+
+.edit-card-header:hover { background: var(--input-bg); }
+.edit-card-icon { flex-shrink: 0; }
+.edit-card-text { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--mono); font-size: var(--chat-font-xs); }
+.edit-card-chevron { opacity: 0.5; transition: transform 0.15s ease; display: flex; }
+.edit-card-chevron.open { transform: rotate(90deg); }
+
+.edit-card-actions {
+  display: flex;
+  gap: 6px;
+  padding: 0 10px 8px;
+}
+
+.edit-card-detail {
+  padding: 0 10px 8px;
+  font-size: var(--chat-font-xs);
+  color: var(--text-muted);
+}
+
+
 
 
 /* ── Chat Messages ──────────────────────────────────────────── */
@@ -1097,6 +1274,18 @@ body {
   cursor: default;
 }
 
+/* Model can't reason — selector disabled with a distinct look. */
+.thinking-badge-btn.unsupported:not(:disabled) {
+  opacity: 0.55;
+  border-style: dashed;
+  cursor: not-allowed;
+}
+.thinking-badge-btn.unsupported:hover {
+  background: transparent;
+  border-color: var(--border);
+  color: var(--text-muted);
+}
+
 .thinking-badge-btn svg {
   width: 8px;
   height: 8px;
@@ -1172,6 +1361,14 @@ body {
   flex: 0 0 auto;
   font-size: 12px;
   font-weight: 600;
+}
+
+.thinking-option-empty {
+  cursor: default;
+  color: var(--text-muted);
+}
+.thinking-option-empty:hover {
+  background: transparent;
 }
 
 /* ── Model Dropdown (rendered via portal at body level) ────── */

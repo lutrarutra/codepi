@@ -1,5 +1,6 @@
 import type { Question, QuestionAnswer } from "../tools/ask-user-question";
 import type { TodoItem } from "../tools/todo";
+import type { EditProposalSummary } from "../review/types";
 
 // ── Extension → Webview messages ─────────────────────────────────
 
@@ -20,6 +21,7 @@ export type ExtensionMessage =
 			toolCallId: string;
 			result: string;
 			isError: boolean;
+			editProposal?: { proposalId: string; path: string; hunkCount: number; status: string };
 	  }
 	| { command: "agentStart" }
 	| { command: "agentEnd"; willRetry: boolean }
@@ -41,6 +43,8 @@ export type ExtensionMessage =
 			provider: string;
 			modelId: string;
 			thinkingLevel: string;
+			supportsThinking?: boolean;
+			availableThinkingLevels?: string[];
 	  }
 	| {
 			command: "modelList";
@@ -66,6 +70,9 @@ export type ExtensionMessage =
 	| { command: "askQuestion"; toolCallId: string; questions: Question[] }
 	// Todo list updates
 	| { command: "todoUpdate"; todos: TodoItem[] }
+	// Edit review — a file edit is pending user review (accept/decline)
+	| { command: "editProposed"; summary: EditProposalSummary }
+	| { command: "editUpdated"; summary: EditProposalSummary }
 	// Replay events for session history (same pipeline as live chat)
 	| { command: "replayEvents"; events: ReplayEvent[] };
 
@@ -89,6 +96,7 @@ export type ReplayEvent =
 			toolCallId: string;
 			result: string;
 			isError: boolean;
+			editProposal?: { proposalId: string; path: string; hunkCount: number; status: string };
 	  }
 	| {
 			command: "segmentEnd";
@@ -118,6 +126,8 @@ export type ReplayEvent =
 			provider: string;
 			modelId: string;
 			thinkingLevel: string;
+			supportsThinking?: boolean;
+			availableThinkingLevels?: string[];
 	  }
 	| { command: "toolsInfo"; tools: string[] }
 	| { command: "modeInfo"; mode: "ask" | "plan" | "agent" };
@@ -144,4 +154,12 @@ export type WebviewMessage =
 			answers: Record<string, QuestionAnswer> | null;
 	  }
 	// Todo list user interactions
-	| { command: "todoChange"; todos: TodoItem[] };
+	| { command: "todoChange"; todos: TodoItem[] }
+	// Edit review user actions
+	| { command: "acceptHunk"; proposalId: string; hunkId: string }
+	| { command: "rejectHunk"; proposalId: string; hunkId: string }
+	| { command: "acceptFile"; proposalId: string }
+	| { command: "rejectFile"; proposalId: string }
+	| { command: "acceptAllEdits" }
+	| { command: "rejectAllEdits" }
+	| { command: "openDiff"; proposalId: string };

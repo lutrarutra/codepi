@@ -20,6 +20,9 @@ export {
 	reconstructFromEntries,
 } from "./todo";
 export type { TodoItem, TodoDetails } from "./todo";
+import { ReviewManager } from "../review/review-manager";
+import type { EditProposal } from "../review/types";
+import { applyEditsToContent } from "../review/edit-apply";
 
 /**
  * VS Code workspace tool definitions.
@@ -42,6 +45,23 @@ export interface VscodeTool {
 		isError?: boolean;
 		details: Record<string, unknown>;
 	}>;
+}
+
+/** Build tool result details that carry the review proposal summary. */
+function proposalDetails(
+	proposal: EditProposal | undefined,
+	extra: Record<string, unknown> = {},
+): Record<string, unknown> {
+	if (!proposal) return { ...extra };
+	return {
+		...extra,
+		editProposal: {
+			proposalId: proposal.proposalId,
+			path: proposal.path,
+			hunkCount: proposal.hunks.length,
+			status: proposal.status,
+		},
+	};
 }
 
 /** Read a file from the workspace with optional line-range selection. */
@@ -96,66 +116,243 @@ export const readFileTool: VscodeTool = {
 };
 
 /** Create or overwrite a file in the workspace. */
-export const writeFileTool: VscodeTool = {
-	name: "write",
-	label: "Write File",
-	description:
-		"Create a new file or overwrite an existing file with the given content using VS Code's workspace file system. " +
-		"Automatically creates parent directories.",
-	parameters: {
-		type: "object",
-		properties: {
-			path: {
-				type: "string",
-				description: "Path to the file to write (relative or absolute)",
-			},
-			content: { type: "string", description: "Content to write to the file" },
-		},
-		required: ["path", "content"],
-	},
-	async execute(_toolCallId, params) {
-		if (writeMode === "disabled") {
-			return {
-				content: [
-					{
-						type: "text" as const,
-						text: "Writing files is not available in Ask mode. Switch to Agent or Plan mode to write files.",
-					},
-				],
-				isError: true,
-				details: {},
-			};
-		}
-		const { path: filePath, content } = params as {
-			path: string;
-			content: string;
-		};
-		if (writeMode === "plan" && !filePath.endsWith(".md")) {
-			return {
-				content: [
-					{
-						type: "text" as const,
-						text: `Cannot write to ${filePath}. In Plan mode, you can only create/edit markdown (.md) files for planning.`,
-					},
-				],
-				isError: true,
-				details: {},
-			};
-		}
-		const uri = resolveUri(filePath);
-		const data = new TextEncoder().encode(content);
-		await vscode.workspace.fs.writeFile(uri, data);
-		return {
-			content: [
-				{
-					type: "text" as const,
-					text: `Wrote ${content.split("\n").length} lines to ${filePath}`,
+export function createWriteFileTool(review: ReviewManager): VscodeTool {
+	return {
+		name: "write",
+		label: "Write File",
+		description:
+			"Create a new file or overwrite an existing file with the given content using VS Code's workspace file system. " +
+			"Automatically creates parent directories. " +
+			"The change is applied immediately but tracked for review — the user can accept or revert it from the editor.",
+		parameters: {
+			type: "object",
+			properties: {
+				path: {
+					type: "string",
+					description: "Path to the file to write (relative or absolute)",
 				},
-			],
-			details: {},
-		};
-	},
-};
+				content: { type: "string", description: "Content to write to the file" },
+			},
+			required: ["path", "content"],
+		},
+		async execute(toolCallId, params) {
+			if (writeMode === "disabled") {
+				return {
+					content: [
+						{
+							type: "text" as const,
+							text: "Writing files is not available in Ask mode. Switch to Agent or Plan mode to write files.",
+						},
+					],
+					isError: true,
+					details: {},
+				};
+			}
+			const { path: filePath, content } = params as {
+				path: string;
+				content: string;
+			};
+			if (writeMode === "plan" && !filePath.endsWith(".md")) {
+				return {
+					content: [
+						{
+							type: "text" as const,
+							text: `Cannot write to ${filePath}. In Plan mode, you can only create/edit markdown (.md) files for planning.`,
+						},
+					],
+					isError: true,
+					details: {},
+				};
+			}
+			const uri = resolveUri(filePath);
+			const uriStr = uri.toString();
+
+			// Capture the current content (empty for new files) BEFORE writing so
+			// the review proposal can compute hunks and later revert.
+			let originalContent = "";
+			try {
+				const existing = await vscode.workspace.fs.readFile(uri);
+				originalContent = new TextDecoder().decode(existing);
+			} catch {
+				// New file — treat as an all-add proposal.
+				try {
+					await vscode.workspace.fs.createDirectory(
+						vscode.Uri.joinPath(uri, ".."),
+					);
+				} catch {
+					/* parent may already exist */
+				}
+			}
+
+			const data = new TextEncoder().encode(content);
+			await vscode.workspace.fs.writeFile(uri, data);
+
+			const proposal = review.createProposal({
+				toolCallId,
+				uri: uriStr,
+				path: filePath,
+				originalContent,
+				proposedContent: content,
+			});
+
+			return {
+				content: [
+					{
+						type: "text" as const,
+						text: `Wrote ${content.split("\n").length} lines to ${filePath}${
+							proposal.hunks.length > 0
+								? ` — ${proposal.hunks.length} change${proposal.hunks.length > 1 ? "s" : ""} pending review`
+								: ""
+						}`,
+					},
+				],
+				details: proposalDetails(proposal),
+			};
+		},
+	};
+}
+
+/**
+ * Edit a file with targeted oldText/newText replacements.
+ * Follows Pi's `edit` tool schema; changes are applied immediately and saved,
+ * then tracked for review like writes.
+ */
+export function createEditFileTool(review: ReviewManager): VscodeTool {
+	return {
+		name: "edit",
+		label: "Edit File",
+		description:
+			"Apply targeted replacements to an existing file. Each edit must contain a unique oldText (matching exactly, including whitespace) " +
+			"and a newText replacement. Edits must not overlap. The change is applied immediately but tracked for review.",
+		parameters: {
+			type: "object",
+			properties: {
+				path: {
+					type: "string",
+					description: "Path to the file to edit (relative or absolute)",
+				},
+				edits: {
+					type: "array",
+					description:
+						"One or more targeted replacements. Each edit is matched against the original file, not incrementally.",
+					items: {
+						type: "object",
+						properties: {
+							oldText: {
+								type: "string",
+								description:
+									"Exact text to replace. Must be unique in the original file and must not overlap with other edits.",
+							},
+							newText: {
+								type: "string",
+								description: "Replacement text.",
+							},
+						},
+						required: ["oldText", "newText"],
+					},
+				},
+			},
+			required: ["path", "edits"],
+		},
+		async execute(toolCallId, params) {
+			if (writeMode === "disabled") {
+				return {
+					content: [
+						{
+							type: "text" as const,
+							text: "Editing files is not available in Ask mode. Switch to Agent or Plan mode.",
+						},
+					],
+					isError: true,
+					details: {},
+				};
+			}
+			const { path: filePath, edits } = params as {
+				path: string;
+				edits?: Array<{ oldText: string; newText: string }>;
+			};
+			if (writeMode === "plan" && !filePath.endsWith(".md")) {
+				return {
+					content: [
+						{
+							type: "text" as const,
+							text: `Cannot edit ${filePath}. In Plan mode, you can only edit markdown (.md) files for planning.`,
+						},
+					],
+					isError: true,
+					details: {},
+				};
+			}
+			if (!Array.isArray(edits) || edits.length === 0) {
+				return {
+					content: [
+						{
+							type: "text" as const,
+							text: "Edit tool input is invalid. edits must contain at least one replacement.",
+						},
+					],
+					isError: true,
+					details: {},
+				};
+			}
+
+			const uri = resolveUri(filePath);
+			const uriStr = uri.toString();
+			let originalContent: string;
+			try {
+				const raw = await vscode.workspace.fs.readFile(uri);
+				originalContent = new TextDecoder().decode(raw);
+			} catch {
+				return {
+					content: [
+						{ type: "text" as const, text: `File not found: ${filePath}` },
+					],
+					isError: true,
+					details: {},
+				};
+			}
+
+			let proposedContent: string;
+			try {
+				proposedContent = applyEditsToContent(originalContent, edits, filePath);
+			} catch (err) {
+				return {
+					content: [
+						{
+							type: "text" as const,
+							text: err instanceof Error ? err.message : String(err),
+						},
+					],
+					isError: true,
+					details: {},
+				};
+			}
+
+			const data = new TextEncoder().encode(proposedContent);
+			await vscode.workspace.fs.writeFile(uri, data);
+
+			const proposal = review.createProposal({
+				toolCallId,
+				uri: uriStr,
+				path: filePath,
+				originalContent,
+				proposedContent,
+			});
+
+			return {
+				content: [
+					{
+						type: "text" as const,
+						text: `Edited ${filePath}: ${proposal.hunks.length} change${
+							proposal.hunks.length > 1 ? "s" : ""
+						} pending review`,
+					},
+				],
+				details: proposalDetails(proposal),
+			};
+		},
+	};
+}
 
 /** List directory contents in the workspace. */
 export const listDirTool: VscodeTool = {
@@ -560,16 +757,60 @@ async function searchWithRipgrep(
 		});
 	});
 }
-/** All VS Code tools as an array. */
-export const vscodeTools: VscodeTool[] = [
-	readFileTool,
-	writeFileTool,
-	listDirTool,
-	findFilesTool,
-	grepTool,
-	askUserQuestionTool,
-	todoTool,
-];
+/** Build the full tool list for an agent session backed by `review`. */
+export function createVscodeTools(review: ReviewManager): VscodeTool[] {
+	return [
+		readFileTool,
+		createWriteFileTool(review),
+		createEditFileTool(review),
+		listDirTool,
+		findFilesTool,
+		grepTool,
+		askUserQuestionTool,
+		todoTool,
+	];
+}
+
+/**
+ * Default tool list used when no review manager is injected (tests, fallback).
+ * A fresh manager is created per call; tools created from this list still
+ * register proposals so review state is always tracked.
+ */
+export function getVscodeTools(review?: ReviewManager): VscodeTool[] {
+	return createVscodeTools(review ?? getDefaultReviewManager());
+}
+
+let _defaultReviewManager: ReviewManager | undefined;
+function getDefaultReviewManager(): ReviewManager {
+	if (!_defaultReviewManager) {
+		_defaultReviewManager = new ReviewManager(
+			{
+				post: () => {},
+				openFile: async () => {},
+				promptFileReview: () => {},
+				notify: () => {},
+			},
+			{
+				readContent: async (uriStr) => {
+					const uri = vscode.Uri.parse(uriStr);
+					const raw = await vscode.workspace.fs.readFile(uri);
+					return new TextDecoder().decode(raw);
+				},
+				writeContent: async (uriStr, content) => {
+					const uri = vscode.Uri.parse(uriStr);
+					await vscode.workspace.fs.writeFile(
+						uri,
+						new TextEncoder().encode(content),
+					);
+				},
+			},
+		);
+	}
+	return _defaultReviewManager;
+}
+
+/** Back-compat: module-level tool array (uses the default review manager). */
+export const vscodeTools: VscodeTool[] = getVscodeTools();
 
 // ── Mode-controlled write tool behavior ──────────────────────
 

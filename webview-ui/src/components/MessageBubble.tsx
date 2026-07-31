@@ -3,6 +3,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
 import type { ChatMessage, ToolCallState, InteractionStats } from "../types";
+import { EditCard } from "./EditCard";
 
 function copyToClipboard(text: string) {
 	navigator.clipboard.writeText(text).catch(() => {});
@@ -23,9 +24,12 @@ function cleanLine(line: string): string {
 
 interface Props {
 	message: ChatMessage;
+	onAcceptFile?: (proposalId: string) => void;
+	onRejectFile?: (proposalId: string) => void;
+	onOpenDiff?: (proposalId: string) => void;
 }
 
-export function MessageBubble({ message }: Props) {
+export function MessageBubble({ message, onAcceptFile, onRejectFile, onOpenDiff }: Props) {
 	const [thinkingOpen, setThinkingOpen] = useState<Record<number, boolean>>({});
 
 	// All thinking blocks start collapsed
@@ -150,6 +154,22 @@ export function MessageBubble({ message }: Props) {
 					stats={message.interaction}
 					toolCalls={message.toolCalls}
 				/>
+			)}
+
+			{message.toolCalls.some((tc) => tc.editProposal) && (
+				<div className="edit-cards">
+					{message.toolCalls
+						.filter((tc) => tc.editProposal)
+						.map((tc) => (
+							<EditCard
+								key={tc.toolCallId}
+								toolCall={tc}
+								onAcceptFile={onAcceptFile ?? (() => {})}
+								onRejectFile={onRejectFile ?? (() => {})}
+								onOpenDiff={onOpenDiff ?? (() => {})}
+							/>
+						))}
+				</div>
 			)}
 
 			{!message.complete && !hasContent && (

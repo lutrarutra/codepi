@@ -1,12 +1,23 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 import { createPortal } from "react-dom";
 
-export type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high";
+export type ThinkingLevel =
+	| "off"
+	| "minimal"
+	| "low"
+	| "medium"
+	| "high"
+	| "xhigh"
+	| "max";
 
 interface Props {
 	level: ThinkingLevel;
 	onLevelChange: (level: ThinkingLevel) => void;
 	disabled?: boolean;
+	/** Whether the current model supports thinking. */
+	supportsThinking?: boolean;
+	/** Levels the current model actually supports (subset of ThinkingLevel). */
+	supportedLevels?: ThinkingLevel[];
 }
 
 const levelConfig: Record<ThinkingLevel, { label: string; description: string }> = {
@@ -15,20 +26,46 @@ const levelConfig: Record<ThinkingLevel, { label: string; description: string }>
 	low: { label: "Low", description: "Light reasoning effort" },
 	medium: { label: "Medium", description: "Balanced reasoning" },
 	high: { label: "High", description: "Deep reasoning effort" },
+	xhigh: { label: "X-High", description: "Extra-high reasoning effort" },
+	max: { label: "Max", description: "Maximum reasoning effort" },
 };
 
-const levels: ThinkingLevel[] = ["off", "minimal", "low", "medium", "high"];
+/** Fallback for any level the SDK reports that we don't have a label for. */
+const FALLBACK_CONFIG = { label: "Unknown", description: "" };
 
-export function ThinkingLevelPicker({ level, onLevelChange, disabled }: Props) {
+const levels: ThinkingLevel[] = [
+	"off",
+	"minimal",
+	"low",
+	"medium",
+	"high",
+	"xhigh",
+	"max",
+];
+
+export function ThinkingLevelPicker({
+	level,
+	onLevelChange,
+	disabled,
+	supportsThinking = true,
+	supportedLevels,
+}: Props) {
 	const [open, setOpen] = useState(false);
 	const [anchor, setAnchor] = useState<DOMRect | null>(null);
 	const ref = useRef<HTMLButtonElement>(null);
 
+	// Model can't reason at all (or the SDK reports no non-off levels) — every
+	// selection clamps to "off", so the selector must be disabled and show why.
+	const canThink =
+		supportsThinking && (supportedLevels ?? levels).some((l) => l !== "off");
+	const options = supportedLevels ?? levels;
+	const effective: ThinkingLevel = canThink ? level : "off";
+
 	const openDropdown = useCallback(() => {
-		if (disabled) return;
+		if (disabled || !canThink) return;
 		if (ref.current) setAnchor(ref.current.getBoundingClientRect());
 		setOpen(true);
-	}, [disabled]);
+	}, [disabled, canThink]);
 
 	const select = useCallback(
 		(l: ThinkingLevel) => {
@@ -38,16 +75,20 @@ export function ThinkingLevelPicker({ level, onLevelChange, disabled }: Props) {
 		[onLevelChange],
 	);
 
-	const cfg = levelConfig[level];
+	const cfg = levelConfig[effective] ?? FALLBACK_CONFIG;
 
 	return (
 		<>
 			<button
 				ref={ref}
-				className="thinking-badge-btn"
+				className={`thinking-badge-btn ${canThink ? "" : "unsupported"}`}
 				onClick={openDropdown}
-				disabled={disabled}
-				title={`Thinking: ${cfg.label} — ${cfg.description}`}
+				disabled={disabled || !canThink}
+				title={
+					canThink
+						? `Thinking: ${cfg.label} — ${cfg.description}`
+						: "This model does not support thinking/reasoning"
+				}
 			>
 				<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
 					<polyline points="9 18 15 12 9 6"/>
@@ -56,7 +97,8 @@ export function ThinkingLevelPicker({ level, onLevelChange, disabled }: Props) {
 			</button>
 			{open && (
 				<ThinkingDropdown
-					current={level}
+					current={effective}
+					options={options}
 					onSelect={select}
 					onClose={() => setOpen(false)}
 					anchor={anchor}
@@ -70,11 +112,13 @@ export function ThinkingLevelPicker({ level, onLevelChange, disabled }: Props) {
 
 function ThinkingDropdown({
 	current,
+	options,
 	onSelect,
 	onClose,
 	anchor,
 }: {
 	current: ThinkingLevel;
+	options: ThinkingLevel[];
 	onSelect: (level: ThinkingLevel) => void;
 	onClose: () => void;
 	anchor: DOMRect | null;
@@ -116,8 +160,8 @@ function ThinkingDropdown({
 	return createPortal(
 		<div ref={ref} className="thinking-dropdown" style={style}>
 			<div className="thinking-dropdown-header">Thinking Level</div>
-			{levels.map((l) => {
-				const cfg = levelConfig[l];
+			{options.map((l) => {
+				const cfg = levelConfig[l] ?? FALLBACK_CONFIG;
 				const isActive = l === current;
 				return (
 					<button
@@ -131,6 +175,11 @@ function ThinkingDropdown({
 					</button>
 				);
 			})}
+			{options.length === 0 && (
+				<div className="thinking-option-row thinking-option-empty">
+					<span className="thinking-option-name">Not supported</span>
+				</div>
+			)}
 		</div>,
 		document.body,
 	);

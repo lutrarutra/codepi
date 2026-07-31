@@ -40,6 +40,38 @@
         }
       ]
     },
+    "customEditors": [
+      {
+        "viewType": "codepi.chat",
+        "displayName": "CodePi Chat",
+        "selector": [
+          {
+            "filenamePattern": "*.codepi-chat"
+          }
+        ],
+        "priority": "default"
+      }
+    ],
+    "icons": {
+      "codepi-logo": {
+        "description": "CodePi (pi) logo",
+        "default": {
+          "fontPath": "./media/codepi-logo.woff",
+          "fontCharacter": "\ue000"
+        }
+      }
+    },
+    "colors": [
+      {
+        "id": "codepi.logo",
+        "description": "CodePi logo color (tab handle) — white on dark themes, dark on light themes so it stays visible",
+        "defaults": {
+          "dark": "#ffffff",
+          "light": "#1f1f1f",
+          "highContrast": "#ffffff"
+        }
+      }
+    ],
     "commands": [
       {
         "command": "codepi.openPanel",
@@ -66,6 +98,41 @@
         "command": "codepi.refreshSessions",
         "title": "Refresh Sessions",
         "icon": "$(refresh)"
+      },
+      {
+        "command": "codepi.acceptHunk",
+        "title": "CodePi: Accept Edit Hunk",
+        "icon": "$(check)"
+      },
+      {
+        "command": "codepi.rejectHunk",
+        "title": "CodePi: Reject Edit Hunk",
+        "icon": "$(close)"
+      },
+      {
+        "command": "codepi.acceptFile",
+        "title": "CodePi: Accept All Edits in File",
+        "icon": "$(check-all)"
+      },
+      {
+        "command": "codepi.rejectFile",
+        "title": "CodePi: Reject All Edits in File",
+        "icon": "$(discard)"
+      },
+      {
+        "command": "codepi.acceptAllEdits",
+        "title": "CodePi: Accept All Edits",
+        "icon": "$(check-all)"
+      },
+      {
+        "command": "codepi.rejectAllEdits",
+        "title": "CodePi: Reject All Edits",
+        "icon": "$(discard)"
+      },
+      {
+        "command": "codepi.openDiff",
+        "title": "CodePi: Open Edit Diff",
+        "icon": "$(diff)"
       }
     ],
     "menus": {

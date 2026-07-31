@@ -6,6 +6,7 @@ import { InputArea } from "./components/InputArea";
 import { QuestionCarousel } from "./components/QuestionCarousel";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import TodoListWidget from "./components/TodoListWidget";
+import { EditReviewBar } from "./components/EditReviewBar";
 
 function fmt(n: number): string {
 	if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
@@ -122,6 +123,33 @@ function App() {
 		post({ command: "todoChange", todos: [] });
 	}, [post, setTodos]);
 
+	// ── Edit review handlers ─────────────────────────────────────
+
+	const handleAcceptFile = useCallback(
+		(proposalId: string) => {
+			post({ command: "acceptFile", proposalId });
+		},
+		[post],
+	);
+	const handleRejectFile = useCallback(
+		(proposalId: string) => {
+			post({ command: "rejectFile", proposalId });
+		},
+		[post],
+	);
+	const handleAcceptAllEdits = useCallback(() => {
+		post({ command: "acceptAllEdits" });
+	}, [post]);
+	const handleRejectAllEdits = useCallback(() => {
+		post({ command: "rejectAllEdits" });
+	}, [post]);
+	const handleOpenDiff = useCallback(
+		(proposalId: string) => {
+			post({ command: "openDiff", proposalId });
+		},
+		[post],
+	);
+
 	const handleMoveUp = useCallback(
 		(id: number) => {
 			const idx = todoList.findIndex((t) => t.id === id);
@@ -165,6 +193,14 @@ function App() {
 		<div className="app">
 			{/* Main chat area */}
 			<div className="chat-controls-container">
+				<EditReviewBar
+					proposals={state.edits.proposals}
+					onAcceptFile={handleAcceptFile}
+					onRejectFile={handleRejectFile}
+					onAcceptAll={handleAcceptAllEdits}
+					onRejectAll={handleRejectAllEdits}
+					onOpenDiff={handleOpenDiff}
+				/>
 				<div className="interactive-session">
 					<ChatView
 						messages={state.messages}
@@ -172,6 +208,9 @@ function App() {
 						modelId={state.modelInfo.modelId}
 						availableTools={state.availableTools}
 						mode={state.mode}
+						onAcceptFile={handleAcceptFile}
+						onRejectFile={handleRejectFile}
+						onOpenDiff={handleOpenDiff}
 					/>
 					{state.pendingQuestion && (
 						<QuestionCarousel
@@ -207,6 +246,8 @@ function App() {
 						onModeChange={handleModeChange}
 						thinkingLevel={state.thinkingLevel}
 						onThinkingLevelChange={handleThinkingLevelChange}
+						supportsThinking={state.modelInfo.supportsThinking}
+						availableThinkingLevels={state.modelInfo.availableThinkingLevels}
 					/>
 				)}
 				{(si.tokensIn > 0 || si.totalCost > 0) && (
