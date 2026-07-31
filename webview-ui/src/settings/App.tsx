@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { SETTINGS_SCHEMA, validateSettings } from "../../../src/shared/pi-settings-schema";
 import { FormSection } from "./components/FormSection";
 import { AuthKeys } from "./components/AuthKeys";
@@ -196,13 +196,16 @@ function JsonEditor(props: {
 	const [text, setText] = useState("");
 	const [modelsText, setModelsText] = useState("");
 	const [error, setError] = useState("");
+	// Prefill applies exactly once per provider value; a later settings:data
+	// (models refresh) must never clobber the text back to the single-provider view.
+	const appliedPrefill = useRef<string | undefined>(undefined);
 
 	useEffect(() => {
 		setText(JSON.stringify(props.settings ?? {}, null, 2));
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [props.settings]);
 	useEffect(() => {
-		if (props.prefillProvider) {
+		if (props.prefillProvider && props.prefillProvider !== appliedPrefill.current) {
 			const m = props.models as { providers?: Record<string, unknown> } | null;
 			const cfg = m?.providers?.[props.prefillProvider];
 			setModelsText(
@@ -214,8 +217,10 @@ function JsonEditor(props: {
 			);
 			setFile("models");
 			props.setStatus(`Editing ${props.prefillProvider} in models.json`);
+			appliedPrefill.current = props.prefillProvider;
 		} else if (props.prefillProvider === undefined) {
 			setModelsText(JSON.stringify(props.models ?? { providers: {} }, null, 2));
+			appliedPrefill.current = undefined;
 		}
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [props.models, props.prefillProvider]);
