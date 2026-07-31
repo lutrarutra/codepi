@@ -131,6 +131,7 @@ export class SettingsViewProvider implements vscode.WebviewViewProvider {
 			}
 			writeJsonFileAtomic(getSettingsPath(), parsed);
 			this.post({ command: "settings:saved", ok: true, file });
+			this.onConfigSaved();
 		} else {
 			// models.json — validated by pi's own loader; saveModels posts the result.
 			await this.saveModels(parsed);

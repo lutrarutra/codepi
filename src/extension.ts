@@ -155,7 +155,9 @@ export async function activate(context: vscode.ExtensionContext) {
 		vscode.window.registerWebviewViewProvider(
 			SettingsViewProvider.viewType,
 			new SettingsViewProvider(context.extensionUri, () => {
-				// Real implementation lands in Task 7 (refreshPanelModels).
+				for (const [, st] of panels) {
+					refreshPanelModels(st);
+				}
 			}),
 			{ webviewOptions: { retainContextWhenHidden: true } },
 		),
@@ -893,6 +895,37 @@ function cleanupPanel(sessionId: string): void {
 
 // ── Backend Setup ────────────────────────────────────────────
 
+/** Rebuild and repost the model list to a chat panel, re-reading models.json
+ *  from disk so custom-model and API-key changes hot-apply. */
+function refreshPanelModels(state: PanelState): void {
+	try {
+		const registry: any = (state.session as any).modelRegistry;
+		if (!registry) return;
+		try {
+			registry.refresh?.();
+		} catch {
+			/* refresh optional on some versions */
+		}
+		const all: any[] = registry.getAll?.() ?? registry.getAvailable?.() ?? [];
+		const models: Array<{ provider: string; modelId: string }> = [];
+		for (const m of all) {
+			const prov = String(m.provider ?? "");
+			const mid = String(m.id ?? "");
+			if (prov && mid) models.push({ provider: prov, modelId: mid });
+		}
+		if (state.session?.model) {
+			const curProv = String((state.session.model as any).provider ?? "");
+			const curId = String((state.session.model as any).id ?? "");
+			if (!models.some((m) => m.provider === curProv && m.modelId === curId)) {
+				models.unshift({ provider: curProv, modelId: curId });
+			}
+		}
+		state.panel.webview.postMessage({ command: "modelList", models });
+	} catch (err) {
+		console.error("[CodePi] refreshPanelModels error:", err);
+	}
+}
+
 async function startBackend(state: PanelState): Promise<void> {
 	console.time("[CodePi] startBackend panel:" + state.sessionId);
 	const pi = await getPi();
@@ -926,35 +959,7 @@ async function startBackend(state: PanelState): Promise<void> {
 	state.session = session;
 	state.relay.attach(session);
 
-	// Get models — the FULL catalog (getAll), not just providers with
-	// configured auth (getAvailable), so the model selector isn't missing
-	// models.
-	const models: Array<{ provider: string; modelId: string }> = [];
-	try {
-		const registry: any = (session as any).modelRegistry;
-		const avail: any[] = registry?.getAll?.() ?? registry?.getAvailable?.() ?? [];
-		if (avail && avail.length > 0) {
-			for (const m of avail) {
-				const prov = String(m.provider ?? "");
-				const mid = String(m.id ?? "");
-				if (prov && mid) {
-					models.push({ provider: prov, modelId: mid });
-				}
-			}
-		}
-	} catch (err) {
-		console.error("[CodePi] Error getting available models:", err);
-	}
-
-	if (session.model) {
-		const curProv = String((session.model as any).provider ?? "");
-		const curId = String(session.model.id ?? "");
-		if (!models.some((m) => m.provider === curProv && m.modelId === curId)) {
-			models.unshift({ provider: curProv, modelId: curId });
-		}
-	}
-
-	state.panel.webview.postMessage({ command: "modelList", models });
+	refreshPanelModels(state);
 	const toolNames = createVscodeTools(state.review).map((t) => t.name);
 	state.panel.webview.postMessage({
 		command: "toolsInfo",
@@ -962,9 +967,7 @@ async function startBackend(state: PanelState): Promise<void> {
 	});
 	state.panel.webview.postMessage({ command: "modeInfo", mode: "agent" });
 	console.log(
-		"[CodePi] Sent",
-		models.length,
-		"models, tools:",
+		"[CodePi] Sent model list, tools:",
 		toolNames.join(", "),
 	);
 
