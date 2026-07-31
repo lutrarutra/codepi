@@ -47,18 +47,6 @@
         }
       ]
     },
-    "customEditors": [
-      {
-        "viewType": "codepi.chat",
-        "displayName": "CodePi Chat",
-        "selector": [
-          {
-            "filenamePattern": "*.codepi-chat"
-          }
-        ],
-        "priority": "default"
-      }
-    ],
     "icons": {
       "codepi-logo": {
         "description": "CodePi (pi) logo",
