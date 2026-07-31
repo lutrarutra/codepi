@@ -2329,3 +2329,109 @@ git commit -m "docs: mark settings GUI spec as implemented"
 - **Deviation from spec (documented):** the models section uses per-provider JSON editing (list + structured add/remove provider) instead of form fields for every model property — pi's models.json is a deep typebox schema and a partial form would mislead; the JSON editor validates against pi's own loader and surfaces its errors.
 - **Deviation from spec (documented):** env-var-name credential entry was dropped — pi 0.80.1 stores only key values in `auth.json` (`ApiKeyCredential.key`); env-based keys come from process env/models.json and are out of GUI scope.
 - **Hot-apply (pinned):** settings.json → new sessions (GUI notes it); auth.json → next message (pi resolves at request time); models.json → open panels refresh their model list via `registry.refresh()`.
+
+---
+
+### Task 7b: Import button in the settings GUI + custom source path (added 2026-07-31, mid-execution)
+
+**User request:** in the settings GUI, add a button to import settings from `~/.pi` (or another local path).
+
+**Files:**
+- Create: `src/import-config.ts` — `runImportFlow(): Promise<{ imported: string[] } | undefined>` (undefined = user cancelled)
+- Modify: `src/settings-view.ts` — `settings:importConfig` case delegates to `runImportFlow()`; drop the now-unused `path`, `os`, `importLegacyConfig`, `getAgentDir` imports (verify with grep before removing)
+- Modify: `src/extension.ts` — `codepi.importPiConfig` command body replaced with `runImportFlow()` + info message (the first-run prompt in activate() keeps its inline `importLegacyConfig` call — that stays)
+- Modify: `webview-ui/src/settings/App.tsx` — "Import pi configuration…" button + note in the form, posting `{ command: "settings:importConfig" }`
+
+**`src/import-config.ts`:**
+```ts
+import * as vscode from "vscode";
+import * as path from "node:path";
+import * as os from "node:os";
+import { getAgentDir, importLegacyConfig } from "./pi-store";
+
+/**
+ * Interactive import flow for the settings GUI and the palette command.
+ * Offers ~/.pi (config+sessions or config only) or a user-picked folder.
+ * Returns the imported file list, or undefined when cancelled.
+ */
+export async function runImportFlow(): Promise<{ imported: string[] } | undefined> {
+	const defaultDir = path.join(os.homedir(), ".pi", "agent");
+	const choice = await vscode.window.showQuickPick(
+		[
+			{ label: "Import from ~/.pi (config + sessions)", detail: "Copy settings.json, auth.json, models.json and the sessions/ folder" },
+			{ label: "Import from ~/.pi (config only)", detail: "Copy settings.json, auth.json, models.json" },
+			{ label: "Import from another folder (config + sessions)…", detail: "Pick a directory containing a pi agent config" },
+			{ label: "Import from another folder (config only)…", detail: "Pick a directory containing settings.json / auth.json / models.json" },
+		],
+		{ placeHolder: "Import pi configuration into CodePi's storage" },
+	);
+	if (!choice) return undefined;
+
+	let source = defaultDir;
+	let includeSessions = false;
+	if (choice.label.startsWith("Import from ~/.pi (config + sessions)")) {
+		includeSessions = true;
+	} else if (choice.label.startsWith("Import from ~/.pi (config only)")) {
+		/* defaults */
+	} else {
+		const picked = await vscode.window.showOpenDialog({
+			canSelectFiles: false,
+			canSelectFolders: true,
+			canSelectMany: false,
+			openLabel: "Select config folder",
+			title: "Select a folder containing pi config (settings.json / auth.json / models.json)",
+			defaultUri: vscode.Uri.file(defaultDir),
+		});
+		if (!picked || picked.length === 0) return undefined;
+		source = picked[0].fsPath;
+		includeSessions = choice.label.includes("config + sessions");
+	}
+
+	return importLegacyConfig(source, getAgentDir(), { includeSessions });
+}
+```
+
+**`src/settings-view.ts` change:** replace the `case "settings:importConfig"` body with:
+```ts
+case "settings:importConfig": {
+	const res = await runImportFlow();
+	if (res) {
+		this.post({ command: "settings:importResult", imported: res.imported, message: res.imported.join(", ") || "nothing new" });
+		this.onConfigSaved();
+	}
+	break;
+}
+```
+and add `import { runImportFlow } from "./import-config";`. Remove `path`, `os`, `importLegacyConfig`, `getAgentDir` from imports only if grep confirms they are now unused in the file.
+
+**`src/extension.ts` change:** replace the `codepi.importPiConfig` command body with:
+```ts
+vscode.commands.registerCommand("codepi.importPiConfig", async () => {
+	const res = await runImportFlow();
+	if (res) {
+		vscode.window.showInformationMessage(
+			`Imported into CodePi storage: ${res.imported.join(", ") || "nothing new"}.`,
+		);
+	}
+}),
+```
+and add `import { runImportFlow } from "./import-config";` (keep the Task 3 pi-store imports — the first-run prompt still uses `importLegacyConfig` and `detectLegacyConfig`).
+
+**`webview-ui/src/settings/App.tsx` change:** between the Advanced sections and the actions row, add:
+```tsx
+<div className="settings-section">
+	<h3 className="settings-section-title">Import configuration</h3>
+	<p className="settings-help">
+		Copy settings, API keys, custom models (and optionally sessions) from the pi CLI's ~/.pi — or another folder — into CodePi's own storage.
+	</p>
+	<button
+		className="settings-save"
+		onClick={() => post({ command: "settings:importConfig" })}
+	>
+		Import pi configuration…
+	</button>
+</div>
+```
+(The existing `settings:importResult` handler in App.tsx already shows the status and re-fetches via `settings:get`.)
+
+**Verification:** `npm run build` + `npm run lint` (exactly 3 pre-existing errors) + `npm test` (15/15). Manual F5 (pending-manual): the button opens the QuickPick; custom folder path imports; result message appears; the `codepi.importPiConfig` palette command works the same way.
