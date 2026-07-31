@@ -763,6 +763,14 @@ async function setupTuiPanel(
 	);
 
 	const terminal = new WebviewTerminal((msg) => {
+		// Drive the tab icon from the TUI's busy state (tui:progress).
+		if (msg.command === "tui:progress") {
+			const st = panels.get(sessionId);
+			if (st) {
+				st.isBusy = msg.active;
+				setPanelIcon(st, msg.active ? "busy" : "idle");
+			}
+		}
 		try {
 			panel.webview.postMessage(msg);
 		} catch {
@@ -866,8 +874,6 @@ function cleanupPanel(sessionId: string): void {
 
 // ── Backend Setup ────────────────────────────────────────────
 
-/** Rebuild and repost the model list to a chat panel, re-reading models.json
- *  from disk so custom-model and API-key changes hot-apply. */
 async function startTuiBackend(state: PanelState): Promise<void> {
 	const pi = await getPi();
 	const workspaceRoot = getWorkspaceRoot();
