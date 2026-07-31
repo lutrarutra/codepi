@@ -22,27 +22,34 @@ const term = new Terminal({
 const fit = new FitAddon();
 term.loadAddon(fit);
 term.open(root);
-try {
-	fit.fit();
-} catch {
-	/* layout not ready yet */
-}
-term.focus();
 
-term.onData((data) => post({ command: "tui:input", data }));
-
-// Keep the terminal sized to the webview; report size so the TUI reflows.
+// Keep the terminal sized to the editor and report the size so the TUI
+// reflows. Retried a few times at startup because the webview may not have
+// its final layout yet when this script first runs.
 function reportSize(): void {
 	try {
 		fit.fit();
 	} catch {
-		/* ignore transient layout errors */
+		return; // layout not ready yet
 	}
 	post({ command: "tui:resize", cols: term.cols, rows: term.rows });
 }
-const observer = new ResizeObserver(reportSize);
-observer.observe(root);
-window.addEventListener("resize", reportSize);
+
+function scheduleFit(): void {
+	reportSize();
+	// One extra pass after layout settles (fonts/measurements change col/row).
+	requestAnimationFrame(() => {
+		requestAnimationFrame(reportSize);
+	});
+}
+
+term.onData((data) => post({ command: "tui:input", data }));
+
+// Observe both the container and the body: webview layout changes (editor
+// resize, sidebar toggles, tab switch) must re-fit and re-report.
+new ResizeObserver(reportSize).observe(root);
+new ResizeObserver(reportSize).observe(document.body);
+window.addEventListener("resize", scheduleFit);
 
 window.addEventListener("message", (event: MessageEvent) => {
 	const msg = (event.data ?? {}) as Partial<TuiHostMessage>;
@@ -51,10 +58,12 @@ window.addEventListener("message", (event: MessageEvent) => {
 	} else if (msg.command === "tui:title") {
 		document.title = msg.title ?? "";
 	}
-	// tui:progress is handled by the extension host (status bar / tab icon).
+	// tui:progress is handled by the extension host (tab icon / status).
 });
 
-// Announce readiness and the initial size (the extension awaits this before
-// starting the TUI, and buffers anything that arrived earlier).
+term.focus();
+
+// Announce readiness and the current size (the extension starts the TUI only
+// after both arrive, so the first frame is already at the real editor size).
 post({ command: "tui:ready" });
-reportSize();
+scheduleFit();

@@ -47,8 +47,14 @@ interface PanelState {
 
 const panels = new Map<string, PanelState>();
 
-// Resolvers fired when each tab's webview posts tui:ready.
-const terminalReadyWaiters = new Map<string, () => void>();
+// Boot handshake: a TUI starts only after its webview reports ready AND a
+// first size, so the first frame renders at the real editor dimensions.
+interface TerminalBoot {
+	ready: boolean;
+	sized: boolean;
+	resolve?: () => void;
+}
+const terminalBoot = new Map<string, TerminalBoot>();
 let treeProvider: SessionTreeProvider | undefined;
 
 // Shared editor decorations + CodeLens for ALL panels' pending edits.
@@ -821,15 +827,18 @@ async function setupTuiPanel(
 		context.subscriptions,
 	);
 
-	// Wait for xterm to be ready (bounded) before starting the TUI, so the
-	// first frames are not lost; WebviewTerminal also buffers until ready.
+	// Start the TUI only after the webview reports ready AND its first size,
+	// so it renders full-editor from the first frame (bounded wait; the
+	// WebviewTerminal also buffers writes until ready).
+	const boot: TerminalBoot = { ready: false, sized: false };
+	terminalBoot.set(sessionId, boot);
 	await Promise.race([
 		new Promise<void>((resolve) => {
-			terminalReadyWaiters.set(sessionId, resolve);
+			boot.resolve = resolve;
 		}),
 		new Promise((resolve) => setTimeout(resolve, 5000)),
 	]);
-	terminalReadyWaiters.delete(sessionId);
+	terminalBoot.delete(sessionId);
 
 	startTuiBackend(state).catch((err) => {
 		const msg = err instanceof Error ? err.message : String(err);
@@ -954,8 +963,12 @@ async function handleTuiMessage(
 	state: PanelState,
 ): Promise<void> {
 	if (message.command === "tui:ready") {
-		terminalReadyWaiters.get(state.sessionId)?.();
 		state.terminal.handleReady();
+		const boot = terminalBoot.get(state.sessionId);
+		if (boot) {
+			boot.ready = true;
+			if (boot.sized) boot.resolve?.();
+		}
 		return;
 	}
 	if (message.command === "tui:input") {
@@ -964,6 +977,11 @@ async function handleTuiMessage(
 	}
 	if (message.command === "tui:resize") {
 		state.terminal.handleResize(message.cols, message.rows);
+		const boot = terminalBoot.get(state.sessionId);
+		if (boot) {
+			boot.sized = true;
+			if (boot.ready) boot.resolve?.();
+		}
 		return;
 	}
 }
