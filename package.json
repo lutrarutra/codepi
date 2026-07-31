@@ -193,7 +193,8 @@
     "watch:extension": "node esbuild.mjs",
     "watch:webview": "npm --prefix webview-ui run dev",
     "test": "vitest run",
-    "lint": "tsc -p ./tsconfig.json --noEmit"
+    "lint": "tsc -p ./tsconfig.json --noEmit",
+    "postinstall": "patch-package"
   },
   "dependencies": {
     "@earendil-works/pi-coding-agent": "^0.80.1",
@@ -205,6 +206,7 @@
     "@types/vscode": "^1.85.0",
     "concurrently": "^8.2.2",
     "esbuild": "^0.20.0",
+    "patch-package": "^8.0.1",
     "typescript": "^5.3.0",
     "vitest": "^3.2.7"
   }

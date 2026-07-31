@@ -1,0 +1,26 @@
+diff --git a/node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/interactive-mode.d.ts b/node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/interactive-mode.d.ts
+index 1d36874..ba119f5 100644
+--- a/node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/interactive-mode.d.ts
++++ b/node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/interactive-mode.d.ts
+@@ -26,6 +26,8 @@ export interface InteractiveModeOptions {
+     initialMessages?: string[];
+     /** Force verbose startup (overrides quietStartup setting) */
+     verbose?: boolean;
++    /** Custom terminal to render into. Defaults to the process terminal (stdin/stdout). */
++    terminal?: import("@earendil-works/pi-tui").Terminal;
+ }
+ export declare class InteractiveMode {
+     private runtimeHost;
+diff --git a/node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/interactive-mode.js b/node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/interactive-mode.js
+index 654e711..d947de2 100644
+--- a/node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/interactive-mode.js
++++ b/node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/interactive-mode.js
+@@ -243,7 +243,7 @@ export class InteractiveMode {
+             await this.rebindCurrentSession({ renderBeforeBind: true });
+         });
+         this.version = VERSION;
+-        this.ui = new TUI(new ProcessTerminal(), this.settingsManager.getShowHardwareCursor());
++        this.ui = new TUI((options.terminal ?? new ProcessTerminal()), this.settingsManager.getShowHardwareCursor());
+         this.ui.setClearOnShrink(this.settingsManager.getClearOnShrink());
+         this.headerContainer = new Container();
+         this.chatContainer = new Container();
