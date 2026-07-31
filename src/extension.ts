@@ -25,6 +25,7 @@ import {
 	importLegacyConfig,
 	setAgentDir,
 } from "./pi-store";
+import { runImportFlow } from "./import-config";
 
 // ── Types ────────────────────────────────────────────────────
 
@@ -428,24 +429,10 @@ export async function activate(context: vscode.ExtensionContext) {
 			treeProvider?.refresh();
 		}),
 		vscode.commands.registerCommand("codepi.importPiConfig", async () => {
-			const choice = await vscode.window.showQuickPick(
-				[
-					{ label: "Import config + sessions", detail: "Copy settings.json, auth.json, models.json and the sessions/ folder" },
-					{ label: "Import config only", detail: "Copy settings.json, auth.json, models.json" },
-				],
-				{ placeHolder: "Import pi configuration from ~/.pi/agent" },
-			);
-			if (!choice) return;
-			try {
-				const res = importLegacyConfig(legacyDir, agentDir, {
-					includeSessions: choice.label.startsWith("Import config +"),
-				});
+			const res = await runImportFlow();
+			if (res) {
 				vscode.window.showInformationMessage(
 					`Imported into CodePi storage: ${res.imported.join(", ") || "nothing new"}.`,
-				);
-			} catch (err) {
-				vscode.window.showErrorMessage(
-					`Failed to import pi config: ${err instanceof Error ? err.message : String(err)}`,
 				);
 			}
 		}),

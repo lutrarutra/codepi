@@ -1,9 +1,8 @@
 import * as vscode from "vscode";
-import { getAgentDir, readJsonFile, writeJsonFileAtomic, getSettingsPath, getModelsPath, getAuthPath, importLegacyConfig } from "./pi-store";
+import { readJsonFile, writeJsonFileAtomic, getSettingsPath, getModelsPath, getAuthPath } from "./pi-store";
+import { runImportFlow } from "./import-config";
 import { validateSettings } from "./shared/pi-settings-schema";
 import type { AuthEntry, SettingsMessage, SettingsRecord, SettingsReply } from "./shared/settings-protocol";
-import * as path from "node:path";
-import * as os from "node:os";
 
 let sdkPromise: Promise<typeof import("@earendil-works/pi-coding-agent")> | undefined;
 function getSdk(): Promise<typeof import("@earendil-works/pi-coding-agent")> {
@@ -55,20 +54,11 @@ export class SettingsViewProvider implements vscode.WebviewViewProvider {
 					await this.saveJson(msg.file, msg.text);
 					break;
 				case "settings:importConfig": {
-					const choice = await vscode.window.showQuickPick(
-						[
-							{ label: "Import config + sessions", detail: "Copy settings.json, auth.json, models.json and the sessions/ folder" },
-							{ label: "Import config only", detail: "Copy settings.json, auth.json, models.json" },
-						],
-						{ placeHolder: "Import pi configuration from ~/.pi/agent" },
-					);
-					if (!choice) return;
-					const legacyDir = path.join(os.homedir(), ".pi", "agent");
-					const res = importLegacyConfig(legacyDir, getAgentDir(), {
-						includeSessions: choice.label.startsWith("Import config +"),
-					});
-					this.post({ command: "settings:importResult", imported: res.imported, message: res.imported.join(", ") || "nothing new" });
-					this.onConfigSaved();
+					const res = await runImportFlow();
+					if (res) {
+						this.post({ command: "settings:importResult", imported: res.imported, message: res.imported.join(", ") || "nothing new" });
+						this.onConfigSaved();
+					}
 					break;
 				}
 				case "settings:openSessions":

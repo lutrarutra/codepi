@@ -149,6 +149,18 @@ export function SettingsApp(): JSX.Element {
 							onChange={onChange}
 						/>
 					))}
+					<div className="settings-section">
+						<h3 className="settings-section-title">Import configuration</h3>
+						<p className="settings-help">
+							Copy settings, API keys, custom models (and optionally sessions) from the pi CLI's ~/.pi — or another folder — into CodePi's own storage.
+						</p>
+						<button
+							className="settings-save"
+							onClick={() => post({ command: "settings:importConfig" })}
+						>
+							Import pi configuration…
+						</button>
+					</div>
 					<div className="settings-actions">
 						<button className="settings-save" onClick={save} disabled={!dirty}>
 							Save settings
