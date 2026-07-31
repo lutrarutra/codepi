@@ -1,11 +1,7 @@
 import * as vscode from "vscode";
 import { spawn } from "node:child_process";
 import { askUserQuestionTool } from "./ask-user-question";
-export {
-	resolveQuestion,
-	rejectQuestion,
-	getPendingQuestions,
-} from "./ask-user-question";
+export { askUserQuestionTool } from "./ask-user-question";
 export type {
 	Question,
 	QuestionOption,
