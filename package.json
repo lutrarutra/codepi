@@ -168,6 +168,7 @@
     "watch": "concurrently -n webview,ext \"npm:watch:webview\" \"npm:watch:extension\"",
     "watch:extension": "node esbuild.mjs",
     "watch:webview": "npm --prefix webview-ui run dev",
+    "test": "vitest run",
     "lint": "tsc -p ./tsconfig.json --noEmit"
   },
   "dependencies": {
@@ -180,6 +181,7 @@
     "@types/vscode": "^1.85.0",
     "concurrently": "^8.2.2",
     "esbuild": "^0.20.0",
-    "typescript": "^5.3.0"
+    "typescript": "^5.3.0",
+    "vitest": "^3.2.7"
   }
 }
