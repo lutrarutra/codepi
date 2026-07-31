@@ -1,7 +1,8 @@
 # CodePi: Native pi TUI inside the Editor Webview
 
 **Date:** 2026-08-01
-**Status:** Approved design (pending implementation plan)
+**Status:** Implemented 2026-08-01 (see `docs/superpowers/plans/2026-08-01-tui-in-webview.md`)
+**Approved design** (pending implementation plan — superseded)
 
 ## Purpose
 
