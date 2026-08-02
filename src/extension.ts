@@ -36,6 +36,7 @@ import {
 	setAgentDir,
 } from "./pi-store";
 import {
+	applyImplicitBundledTheme,
 	buildPiResourceLoaderOptions,
 	buildPiRuntimeResourcePaths,
 } from "./pi-runtime-config";
@@ -1268,11 +1269,7 @@ async function startTuiBackend(state: SessionState): Promise<void> {
 
 	const createRuntime: any = async (opts: any) => {
 		const settingsManager = pi.SettingsManager.create(opts.cwd, agentDir);
-		const hasExplicitTheme = settingsManager.getThemeSetting() !== undefined;
 		const bundledThemeEnabled = bundledThemes.length > 0;
-		if (!hasExplicitTheme && bundledThemeEnabled) {
-			settingsManager.applyOverrides({ theme: "nebula-pulse" });
-		}
 		const loaderOptions = buildPiResourceLoaderOptions(opts.cwd, agentDir, {
 			...resourcePaths,
 			bundledExtensionPaths: bundledExtensions,
@@ -1287,16 +1284,18 @@ async function startTuiBackend(state: SessionState): Promise<void> {
 					...base,
 					extensions: [
 						...base.extensions.filter(
-							(extension: any) => !bundled.has(extension.resolvedPath ?? extension.path),
+							(extension: any) =>
+								!bundled.has(extension.resolvedPath ?? extension.path),
 						),
-						...base.extensions.filter(
-							(extension: any) => bundled.has(extension.resolvedPath ?? extension.path),
+						...base.extensions.filter((extension: any) =>
+							bundled.has(extension.resolvedPath ?? extension.path),
 						),
 					],
 				};
 			},
 		});
 		await loader.reload();
+		applyImplicitBundledTheme(settingsManager, bundledThemeEnabled);
 		return pi.createAgentSession({
 			resourceLoader: loader,
 			settingsManager,

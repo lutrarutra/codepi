@@ -1,9 +1,6 @@
 /** Pure runtime resource-path construction for the embedded Pi SDK. */
 import { join } from "node:path";
-import {
-	getEnabledBundledResources,
-	type BundledResourceConfig,
-} from "./pi-store";
+import { getEnabledBundledResources } from "./pi-store";
 
 export interface PiRuntimeResourcePaths {
 	/** CodePi-shipped extension entry points selected by user policy. */
@@ -71,10 +68,22 @@ export function buildPiResourceLoaderOptions(
 	};
 }
 
-/** Return a copy of the default policy for callers that need its type. */
-export function defaultRuntimeResourceConfig(): BundledResourceConfig {
-	return {
-		bundledExtensions: { "custom-footer": true, filechanges: true },
-		bundledThemes: { "nebula-pulse": true },
-	};
+/**
+ * Apply CodePi's implicit bundled theme without persisting it to settings.json.
+ * Call this after any SDK reload, because SettingsManager.reload() replaces
+ * in-memory overrides with values read from disk.
+ */
+export function applyImplicitBundledTheme(
+	settingsManager: {
+		getThemeSetting(): unknown;
+		applyOverrides(overrides: { theme: string }): void;
+	},
+	bundledThemeEnabled: boolean,
+): void {
+	if (
+		bundledThemeEnabled &&
+		settingsManager.getThemeSetting() === undefined
+	) {
+		settingsManager.applyOverrides({ theme: "nebula-pulse" });
+	}
 }
