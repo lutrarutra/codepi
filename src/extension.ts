@@ -27,9 +27,11 @@ import {
 import { SettingsViewProvider } from "./settings-view";
 import {
 	ensureRuntimeTools,
+	detectLegacyConfig,
 	getCanonicalAgentDir,
 	getCodePiSessionDir,
 	getSettingsPath,
+	migrateLegacyCodePiStorage,
 	readJsonFile,
 	setAgentDir,
 } from "./pi-store";
@@ -120,6 +122,63 @@ function getCodePiSessionDirForRuntime(): string {
 	return codePiSessionDir;
 }
 
+const LEGACY_MIGRATION_PROMPTED_KEY = "codepi.legacyMigrationPrompted.v1";
+
+async function offerLegacyMigration(
+	context: vscode.ExtensionContext,
+	canonicalAgentDir: string,
+	codePiSessionDir: string,
+): Promise<void> {
+	if (context.globalState.get<boolean>(LEGACY_MIGRATION_PROMPTED_KEY)) return;
+
+	const legacyAgentDir = path.join(context.globalStorageUri.fsPath, "agent");
+	const legacySessionDir = path.join(legacyAgentDir, "sessions");
+	const detected = detectLegacyConfig(legacyAgentDir);
+	const hasMissingConfig = Boolean(
+		detected &&
+		(["settings", "auth", "models"] as const).some(
+			(file) =>
+				detected[file] && !fs.existsSync(path.join(canonicalAgentDir, `${file}.json`)),
+		),
+	);
+	const hasLegacySessions =
+		fs.existsSync(legacySessionDir) &&
+		fs.statSync(legacySessionDir).isDirectory() &&
+		fs.readdirSync(legacySessionDir).length > 0 &&
+		(!fs.existsSync(codePiSessionDir) || fs.readdirSync(codePiSessionDir).length === 0);
+	if (!hasMissingConfig && !hasLegacySessions) {
+		await context.globalState.update(LEGACY_MIGRATION_PROMPTED_KEY, true);
+		return;
+	}
+
+	const choice = await vscode.window.showInformationMessage(
+		"CodePi found settings from an older CodePi storage location. Migrate missing files from the old CodePi storage into this computer's ~/.pi/agent? CodePi sessions move only within this computer's VS Code storage; remote hosts are not affected, and ~/.pi/agent/sessions is never copied.",
+		"Migrate now",
+		"Not now",
+	);
+	await context.globalState.update(LEGACY_MIGRATION_PROMPTED_KEY, true);
+	if (choice !== "Migrate now") return;
+
+	try {
+		const result = migrateLegacyCodePiStorage(
+			legacyAgentDir,
+			canonicalAgentDir,
+			legacySessionDir,
+			codePiSessionDir,
+		);
+		const copied = [...result.copiedFiles, ...result.copiedSessions.map((name) => `sessions/${name}`)];
+		vscode.window.showInformationMessage(
+			copied.length > 0
+				? `CodePi migrated ${copied.join(", ")} from its legacy storage.`
+				: "CodePi found no additional legacy files to migrate.",
+		);
+	} catch (error) {
+		vscode.window.showErrorMessage(
+			`CodePi could not migrate legacy storage: ${error instanceof Error ? error.message : String(error)}`,
+		);
+	}
+}
+
 // ── Activation ───────────────────────────────────────────────
 
 export async function activate(context: vscode.ExtensionContext) {
@@ -180,6 +239,7 @@ export async function activate(context: vscode.ExtensionContext) {
 	// canonical ~/.pi/agent resources and sessions.
 	codePiSessionDir = getCodePiSessionDir(context.globalStorageUri.fsPath);
 	fs.mkdirSync(codePiSessionDir, { recursive: true });
+	await offerLegacyMigration(context, agentDir, codePiSessionDir);
 
 	// Register session tree provider
 	treeProvider = new SessionTreeProvider(codePiSessionDir);

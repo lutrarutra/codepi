@@ -10,6 +10,7 @@ import {
 	cpSync,
 	existsSync,
 	mkdirSync,
+	readdirSync,
 	readFileSync,
 	renameSync,
 	statSync,
@@ -349,11 +350,19 @@ export function detectLegacyConfig(
 	return found.settings || found.auth || found.models ? found : undefined;
 }
 
+export interface MigrationResult {
+	copiedFiles: string[];
+	copiedSessions: string[];
+	skippedFiles: string[];
+	sessionsSkipped?: "missing-source" | "destination-not-empty";
+}
+
+/** @deprecated Use migrateLegacyCodePiStorage for the explicit upgrade flow. */
 export interface ImportResult {
 	imported: string[];
 }
 
-/** Copy legacy config (and optionally sessions) into the target agent dir. */
+/** @deprecated Retained for compatibility with older internal callers; not exposed as a command. */
 export function importLegacyConfig(
 	legacyAgentDir: string,
 	targetAgentDir: string,
@@ -362,14 +371,13 @@ export function importLegacyConfig(
 	mkdirSync(targetAgentDir, { recursive: true });
 	const imported: string[] = [];
 	for (const file of ["settings.json", "auth.json", "models.json"]) {
-		const src = join(legacyAgentDir, file);
-		if (!existsSync(src)) continue;
-		const dest = join(targetAgentDir, file);
-		cpSync(src, dest, { force: true });
+		const source = join(legacyAgentDir, file);
+		if (!existsSync(source)) continue;
+		const target = join(targetAgentDir, file);
+		cpSync(source, target, { force: true });
 		if (file === "auth.json") {
-			// Keep pi's credential file permission: owner rw only.
 			try {
-				chmodSync(dest, 0o600);
+				chmodSync(target, 0o600);
 			} catch {
 				/* non-POSIX — ignore */
 			}
@@ -377,14 +385,68 @@ export function importLegacyConfig(
 		imported.push(file);
 	}
 	if (opts.includeSessions) {
-		const srcSessions = join(legacyAgentDir, "sessions");
-		if (existsSync(srcSessions) && statSync(srcSessions).isDirectory()) {
-			cpSync(srcSessions, join(targetAgentDir, "sessions"), {
-				recursive: true,
-				force: true,
-			});
+		const source = join(legacyAgentDir, "sessions");
+		if (existsSync(source) && statSync(source).isDirectory()) {
+			cpSync(source, join(targetAgentDir, "sessions"), { recursive: true, force: true });
 			imported.push("sessions/");
 		}
 	}
 	return { imported };
+}
+
+/**
+ * Migrate storage written by older CodePi versions.
+ *
+ * The source session directory is passed explicitly because the canonical Pi
+ * agent directory may also contain Pi CLI sessions. This helper never derives
+ * or inspects `<canonicalAgentDir>/sessions`.
+ */
+export function migrateLegacyCodePiStorage(
+	legacyAgentDir: string,
+	canonicalAgentDir: string,
+	legacySessionDir: string,
+	codePiSessionDir: string,
+): MigrationResult {
+	mkdirSync(canonicalAgentDir, { recursive: true });
+	const copiedFiles: string[] = [];
+	const skippedFiles: string[] = [];
+	for (const file of ["settings.json", "auth.json", "models.json"]) {
+		const source = join(legacyAgentDir, file);
+		const target = join(canonicalAgentDir, file);
+		if (!existsSync(source) || !statSync(source).isFile()) continue;
+		if (existsSync(target)) {
+			skippedFiles.push(file);
+			continue;
+		}
+		cpSync(source, target);
+		if (file === "auth.json") {
+			try {
+				chmodSync(target, 0o600);
+			} catch {
+				/* non-POSIX — ignore */
+			}
+		}
+		copiedFiles.push(file);
+	}
+
+	if (!existsSync(legacySessionDir) || !statSync(legacySessionDir).isDirectory()) {
+		return {
+			copiedFiles,
+			copiedSessions: [],
+			skippedFiles,
+			sessionsSkipped: "missing-source",
+		};
+	}
+	mkdirSync(codePiSessionDir, { recursive: true });
+	if (readdirSync(codePiSessionDir).length > 0) {
+		return {
+			copiedFiles,
+			copiedSessions: [],
+			skippedFiles,
+			sessionsSkipped: "destination-not-empty",
+		};
+	}
+	cpSync(legacySessionDir, codePiSessionDir, { recursive: true });
+	const copiedSessions = readdirSync(legacySessionDir);
+	return { copiedFiles, copiedSessions, skippedFiles };
 }
