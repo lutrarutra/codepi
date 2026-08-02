@@ -12,6 +12,23 @@ export interface DashboardFileStatus {
 	auth: boolean;
 }
 
+export interface ConfiguredPackageStatusInput {
+	source: string;
+	scope: "user" | "project";
+	installedPath?: string;
+}
+
+/** Convert SDK package-manager entries into the credential-free dashboard shape. */
+export function mapConfiguredPackageStatus(
+	packages: ConfiguredPackageStatusInput[],
+): PackageStatusEntry[] {
+	return packages.map(({ source, scope, installedPath }) => ({
+		source,
+		scope,
+		installed: installedPath !== undefined,
+	}));
+}
+
 /**
  * Return only filesystem metadata for the Pi JSON files.
  * In particular, auth.json is never read or parsed here.

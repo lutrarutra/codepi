@@ -12,10 +12,10 @@ import {
 import {
 	buildDashboardData,
 	getDashboardFileStatus,
+	mapConfiguredPackageStatus,
 } from "./settings-dashboard";
 import type {
 	DashboardData,
-	PackageStatusEntry,
 	SettingsMessage,
 	SettingsReply,
 } from "./shared/settings-protocol";
@@ -104,13 +104,9 @@ export class SettingsViewProvider implements vscode.WebviewViewProvider {
 			agentDir: this.agentDir,
 			settingsManager,
 		});
-		const packages: PackageStatusEntry[] = packageManager
-			.listConfiguredPackages()
-			.map((entry) => ({
-				source: entry.source,
-				scope: entry.scope,
-				installed: entry.installedPath !== undefined,
-			}));
+		const packages = mapConfiguredPackageStatus(
+			packageManager.listConfiguredPackages(),
+		);
 		const data = buildDashboardData(
 			this.agentDir,
 			this.sessionDir,
@@ -156,7 +152,9 @@ export class SettingsViewProvider implements vscode.WebviewViewProvider {
 function isBundledResourceId(
 	id: string,
 ): id is DashboardData["bundledResources"][number]["id"] {
-	return id === "custom-footer" || id === "filechanges" || id === "nebula-pulse";
+	return (
+		id === "custom-footer" || id === "filechanges" || id === "nebula-pulse"
+	);
 }
 
 function getSettingsPathForAgent(agentDir: string): string {

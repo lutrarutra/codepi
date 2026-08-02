@@ -1254,29 +1254,32 @@ async function startTuiBackend(state: SessionState): Promise<void> {
 	const extensionDir = extensionUri
 		? vscode.Uri.joinPath(extensionUri, "resources", "extensions")
 		: undefined;
-	const resourcePaths = buildPiRuntimeResourcePaths(
-		extensionDir?.fsPath ?? "",
-		agentDir,
-		readJsonFile(getSettingsPath()) ?? {},
-	);
-	const bundledExtensions = resourcePaths.bundledExtensionPaths.filter((p) =>
-		fs.existsSync(p),
-	);
-	const bundledThemes = resourcePaths.bundledThemePaths.filter((p) =>
-		fs.existsSync(p),
-	);
-	if (fs.existsSync(resourcePaths.rpivTodoPath)) {
-		bundledExtensions.push(resourcePaths.rpivTodoPath);
-	} else {
-		console.warn(
-			"[CodePi] rpiv-todo extension not found at",
-			resourcePaths.rpivTodoPath,
-			"— no todo tool will be available to the agent.",
-		);
-	}
 
+	// Build all resource paths inside the runtime factory. The SDK may invoke this
+	// factory for more than one new session; each session must see current settings
+	// and bundled-resource toggles rather than activation-time snapshots.
 	const createRuntime: any = async (opts: any) => {
 		const settingsManager = pi.SettingsManager.create(opts.cwd, agentDir);
+		const resourcePaths = buildPiRuntimeResourcePaths(
+			extensionDir?.fsPath ?? "",
+			agentDir,
+			readJsonFile(getSettingsPath()) ?? {},
+		);
+		const bundledExtensions = resourcePaths.bundledExtensionPaths.filter((p) =>
+			fs.existsSync(p),
+		);
+		const bundledThemes = resourcePaths.bundledThemePaths.filter((p) =>
+			fs.existsSync(p),
+		);
+		if (fs.existsSync(resourcePaths.rpivTodoPath)) {
+			bundledExtensions.push(resourcePaths.rpivTodoPath);
+		} else {
+			console.warn(
+				"[CodePi] rpiv-todo extension not found at",
+				resourcePaths.rpivTodoPath,
+				"— no todo tool will be available to the agent.",
+			);
+		}
 		const bundledThemeEnabled = bundledThemes.length > 0;
 		const loaderOptions = buildPiResourceLoaderOptions(opts.cwd, agentDir, {
 			...resourcePaths,

@@ -6,6 +6,7 @@ import { getCodePiSessionDir, getCanonicalAgentDir } from "../pi-store";
 import {
 	buildDashboardData,
 	getDashboardFileStatus,
+	mapConfiguredPackageStatus,
 } from "../settings-dashboard";
 import type {
 	DashboardData,
@@ -30,6 +31,42 @@ describe("settings dashboard protocol", () => {
 				expect.objectContaining({ id: "custom-footer", enabled: true }),
 			]),
 		);
+	});
+
+	it("maps configured package paths to installed and missing status", () => {
+		const packages = mapConfiguredPackageStatus([
+			{
+				source: "npm:installed",
+				scope: "user",
+				installedPath: "/pi/agent/npm/node_modules/installed",
+			},
+			{ source: "git:example/missing", scope: "project" },
+		]);
+
+		expect(packages).toEqual([
+			{
+				source: "npm:installed",
+				scope: "user",
+				installed: true,
+			},
+			{
+				source: "git:example/missing",
+				scope: "project",
+				installed: false,
+			},
+		]);
+		const dashboard = buildDashboardData(
+			"/home/user/.pi/agent",
+			"/vscode/codepi/sessions",
+			{},
+			packages,
+		);
+		expect(dashboard.packages).toMatchObject({
+			configured: 2,
+			installed: 1,
+			missing: 1,
+		});
+		expect(dashboard.packages.entries).toEqual(packages);
 	});
 
 	it("uses auth metadata without reading or parsing auth.json", () => {
