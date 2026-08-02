@@ -82,7 +82,7 @@ export class SessionTreeProvider implements vscode.TreeDataProvider<SessionTreeI
 	private sessions: SessionTreeSession[] = [];
 	private cwd: string;
 
-	constructor() {
+	constructor(private readonly sessionDir: string) {
 		this.cwd = getWorkspaceRoot();
 	}
 
@@ -119,7 +119,7 @@ export class SessionTreeProvider implements vscode.TreeDataProvider<SessionTreeI
 	async renameSession(sessionPath: string): Promise<void> {
 		const pi = await getPi();
 		try {
-			const sm = pi.SessionManager.open(sessionPath);
+			const sm = pi.SessionManager.open(sessionPath, this.sessionDir);
 			const currentName = sm.getSessionName();
 			const name = await vscode.window.showInputBox({
 				title: "Rename Session",
@@ -144,7 +144,7 @@ export class SessionTreeProvider implements vscode.TreeDataProvider<SessionTreeI
 		}
 		try {
 			const pi = await getPi();
-			const all: any[] = await pi.SessionManager.list(this.cwd);
+			const all: any[] = await pi.SessionManager.list(this.cwd, this.sessionDir);
 			this.sessions = all
 				.map((s: any) => ({
 					id: s.id,

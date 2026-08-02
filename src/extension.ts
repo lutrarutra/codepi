@@ -30,6 +30,7 @@ import {
 	ensureDefaultTheme,
 	ensureRuntimeTools,
 	getAgentDir,
+	getCodePiSessionDir,
 	importLegacyConfig,
 	setAgentDir,
 } from "./pi-store";
@@ -61,6 +62,7 @@ interface SessionState {
 // inside a webview panel hosting xterm.js (editor area).
 const sessions = new Map<string, SessionState>();
 let extensionContext: vscode.ExtensionContext | undefined;
+let codePiSessionDir: string | undefined;
 let treeProvider: SessionTreeProvider | undefined;
 
 // Shared editor decorations + CodeLens for ALL sessions' pending edits.
@@ -106,6 +108,13 @@ async function getPi(): Promise<any> {
 		_pi = await import("@earendil-works/pi-coding-agent");
 	}
 	return _pi;
+}
+
+function getCodePiSessionDirForRuntime(): string {
+	if (!codePiSessionDir) {
+		throw new Error("CodePi session storage is not initialized");
+	}
+	return codePiSessionDir;
 }
 
 // ── Activation ───────────────────────────────────────────────
@@ -168,8 +177,13 @@ export async function activate(context: vscode.ExtensionContext) {
 	// Copilot-style pending-edit dot on tabs/Explorer for files awaiting review.
 	registerPendingReviewDots(extensionContext);
 
+	// Keep CodePi conversations in VS Code storage, separate from Pi's
+	// canonical ~/.pi/agent resources and sessions.
+	codePiSessionDir = getCodePiSessionDir(context.globalStorageUri.fsPath);
+	fs.mkdirSync(codePiSessionDir, { recursive: true });
+
 	// Register session tree provider
-	treeProvider = new SessionTreeProvider();
+	treeProvider = new SessionTreeProvider(codePiSessionDir);
 	const treeView = vscode.window.createTreeView("codepi.sessionsList", {
 		treeDataProvider: treeProvider,
 		showCollapseAll: false,
@@ -199,7 +213,7 @@ export async function activate(context: vscode.ExtensionContext) {
 					const pi = await getPi();
 					const sessionManager = pi.SessionManager.open(
 						sessionPath,
-						undefined,
+						getCodePiSessionDirForRuntime(),
 						getWorkspaceRoot(),
 					);
 					if (sessionManager.getSessionId() !== sessionId) {
@@ -618,7 +632,10 @@ async function createNewSession(): Promise<void> {
 	const pi = await getPi();
 	const workspaceRoot = getWorkspaceRoot();
 
-	const sessionManager = pi.SessionManager.create(workspaceRoot);
+	const sessionManager = pi.SessionManager.create(
+		workspaceRoot,
+		getCodePiSessionDirForRuntime(),
+	);
 	const sessionId = sessionManager.getSessionId();
 	const sessionPath = sessionManager.getSessionFile() || "";
 
@@ -641,7 +658,7 @@ async function openSessionTerminal(
 
 	const sessionManager = pi.SessionManager.open(
 		sessionPath,
-		undefined,
+		getCodePiSessionDirForRuntime(),
 		workspaceRoot,
 	);
 	const sessionId = sessionManager.getSessionId();
@@ -686,7 +703,10 @@ async function getSessionsFromProvider(): Promise<
 	try {
 		const pi = await getPi();
 		const workspaceRoot = getWorkspaceRoot();
-		const all: any[] = await pi.SessionManager.list(workspaceRoot);
+		const all: any[] = await pi.SessionManager.list(
+			workspaceRoot,
+			getCodePiSessionDirForRuntime(),
+		);
 		return all
 			.map((s: any) => ({
 				firstMessage: s.firstMessage || "(empty)",
@@ -709,10 +729,15 @@ async function findSessionPathById(
 ): Promise<string | undefined> {
 	try {
 		const pi = await getPi();
-		const byCwd: any[] = await pi.SessionManager.list(getWorkspaceRoot());
+		const byCwd: any[] = await pi.SessionManager.list(
+			getWorkspaceRoot(),
+			getCodePiSessionDirForRuntime(),
+		);
 		const hit = byCwd.find((s: any) => s.id === sessionId);
 		if (hit) return hit.path;
-		const all: any[] = await pi.SessionManager.listAll();
+		const all: any[] = await pi.SessionManager.listAll(
+			getCodePiSessionDirForRuntime(),
+		);
 		return all.find((s: any) => s.id === sessionId)?.path;
 	} catch {
 		return undefined;

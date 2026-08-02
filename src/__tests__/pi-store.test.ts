@@ -15,6 +15,7 @@ import {
 	ensureDefaultTheme,
 	ensureRuntimeTools,
 	getAgentDir,
+	getCodePiSessionDir,
 	importLegacyConfig,
 	ensurePiJsonFileInDir,
 	readJsonFile,
@@ -39,6 +40,11 @@ afterEach(() => {
 });
 
 describe("agent dir", () => {
+	it("keeps CodePi sessions below VS Code global storage", () => {
+		expect(getCodePiSessionDir(join(dir, "global"))).toBe(
+			join(dir, "global", "sessions"),
+		);
+	});
 	it("reads the env override", () => {
 		process.env.PI_CODING_AGENT_DIR = join(dir, "agent");
 		expect(getAgentDir()).toBe(join(dir, "agent"));
