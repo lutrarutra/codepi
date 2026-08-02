@@ -152,11 +152,10 @@ async function offerLegacyMigration(
 	}
 
 	const choice = await vscode.window.showInformationMessage(
-		"CodePi found settings from an older CodePi storage location. Migrate missing files from the old CodePi storage into this computer's ~/.pi/agent? CodePi sessions move only within this computer's VS Code storage; remote hosts are not affected, and ~/.pi/agent/sessions is never copied.",
+		"CodePi found legacy storage/configuration or sessions from an older CodePi version. Migrate missing files from the old CodePi storage into this computer's ~/.pi/agent? CodePi sessions move only within this computer's VS Code storage; remote hosts are not affected, and ~/.pi/agent/sessions is never copied.",
 		"Migrate now",
 		"Not now",
 	);
-	await context.globalState.update(LEGACY_MIGRATION_PROMPTED_KEY, true);
 	if (choice !== "Migrate now") return;
 
 	try {
@@ -166,6 +165,7 @@ async function offerLegacyMigration(
 			legacySessionDir,
 			codePiSessionDir,
 		);
+		await context.globalState.update(LEGACY_MIGRATION_PROMPTED_KEY, true);
 		const copied = [...result.copiedFiles, ...result.copiedSessions.map((name) => `sessions/${name}`)];
 		vscode.window.showInformationMessage(
 			copied.length > 0

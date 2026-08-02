@@ -32,6 +32,47 @@ describe("migrateLegacyCodePiStorage", () => {
 		expect(statSync(join(canonical, "auth.json")).mode & 0o777).toBe(0o600);
 	});
 
+	it("is idempotent when invoked again with the same inputs", () => {
+		const legacy = join(root, "legacy-agent");
+		const canonical = join(root, "canonical-agent");
+		const oldSessions = join(legacy, "sessions");
+		const sessions = join(root, "global", "sessions");
+		mkdirSync(oldSessions, { recursive: true });
+		writeFileSync(join(legacy, "settings.json"), '{"theme":"legacy"}');
+		writeFileSync(join(oldSessions, "old.json"), "old");
+
+		const first = migrateLegacyCodePiStorage(
+			legacy,
+			canonical,
+			oldSessions,
+			sessions,
+		);
+		const canonicalSnapshot = readFileSync(
+			join(canonical, "settings.json"),
+			"utf8",
+		);
+		const sessionsSnapshot = readFileSync(join(sessions, "old.json"), "utf8");
+		const second = migrateLegacyCodePiStorage(
+			legacy,
+			canonical,
+			oldSessions,
+			sessions,
+		);
+
+		expect(first.copiedFiles).toEqual(["settings.json"]);
+		expect(first.copiedSessions).toEqual(["old.json"]);
+		expect(second.copiedFiles).toEqual([]);
+		expect(second.copiedSessions).toEqual([]);
+		expect(second.skippedFiles).toEqual(["settings.json"]);
+		expect(second.sessionsSkipped).toBe("destination-not-empty");
+		expect(readFileSync(join(canonical, "settings.json"), "utf8")).toBe(
+			canonicalSnapshot,
+		);
+		expect(readFileSync(join(sessions, "old.json"), "utf8")).toBe(
+			sessionsSnapshot,
+		);
+	});
+
 	it("copies old CodePi sessions without touching canonical Pi sessions", () => {
 		const legacy = join(root, "legacy-agent");
 		const canonical = join(root, "canonical-agent");
