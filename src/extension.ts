@@ -246,13 +246,14 @@ export async function activate(context: vscode.ExtensionContext) {
 	context.subscriptions.push(
 		vscode.window.registerWebviewViewProvider(
 			SettingsViewProvider.viewType,
-			new SettingsViewProvider(context.extensionUri, () => {
-				// Settings hot-apply under the native TUI:
-				//  - settings.json applies to NEW sessions (unchanged)
-				//  - auth.json is read at request time (unchanged)
-				//  - models.json is re-read by the TUI's own /model selector on
-				//    demand, so no push refresh is needed here.
-			}),
+			new SettingsViewProvider(
+				context.extensionUri,
+				() => {
+					// Settings and bundled-resource toggles apply to new sessions.
+				},
+				getCanonicalAgentDir(),
+				getCodePiSessionDirForRuntime(),
+			),
 			{ webviewOptions: { retainContextWhenHidden: true } },
 		),
 		vscode.commands.registerCommand("codepi.openSettingsTab", () =>
@@ -1307,10 +1308,8 @@ async function startTuiBackend(state: SessionState): Promise<void> {
 			sessionManager: opts.sessionManager,
 			sessionStartEvent: { type: "session_start", reason: "startup" },
 		});
-		installImplicitBundledThemeReload(
-			result.session,
-			settingsManager,
-			() => buildPiRuntimeResourcePaths(
+		installImplicitBundledThemeReload(result.session, settingsManager, () =>
+			buildPiRuntimeResourcePaths(
 				extensionDir?.fsPath ?? "",
 				agentDir,
 				readJsonFile(getSettingsPath()) ?? {},

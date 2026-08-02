@@ -1,26 +1,43 @@
 import * as vscode from "vscode";
-import { readJsonFile, writeJsonFileAtomic, getSettingsPath, getModelsPath, getAuthPath } from "./pi-store";
-import { runImportFlow } from "./import-config";
-import { validateSettings } from "./shared/pi-settings-schema";
-import type { AuthEntry, SettingsMessage, SettingsRecord, SettingsReply } from "./shared/settings-protocol";
+import {
+	ensurePiJsonFileInDir,
+	getCanonicalAgentDir,
+	getCodePiSessionDir,
+	readBundledResourceConfig,
+	readJsonFile,
+	updateBundledResourceConfig,
+	type BundledResourceConfig,
+} from "./pi-store";
+import { buildDashboardData } from "./settings-dashboard";
+import type {
+	DashboardData,
+	PackageStatusEntry,
+	SettingsMessage,
+	SettingsReply,
+} from "./shared/settings-protocol";
 
 let sdkPromise: Promise<typeof import("@earendil-works/pi-coding-agent")> | undefined;
 function getSdk(): Promise<typeof import("@earendil-works/pi-coding-agent")> {
-	if (!sdkPromise) {
-		sdkPromise = import("@earendil-works/pi-coding-agent");
-	}
+	if (!sdkPromise) sdkPromise = import("@earendil-works/pi-coding-agent");
 	return sdkPromise;
 }
 
 export class SettingsViewProvider implements vscode.WebviewViewProvider {
 	public static readonly viewType = "codepi.settings";
-
 	private view: vscode.WebviewView | undefined;
+
+	private readonly agentDir: string;
+	private readonly sessionDir: string;
 
 	constructor(
 		private readonly extensionUri: vscode.Uri,
 		private readonly onConfigSaved: () => void,
-	) {}
+		agentDir = getCanonicalAgentDir(),
+		sessionDir?: string,
+	) {
+		this.agentDir = agentDir;
+		this.sessionDir = sessionDir ?? getCodePiSessionDir(agentDir);
+	}
 
 	resolveWebviewView(webviewView: vscode.WebviewView): void {
 		this.view = webviewView;
@@ -29,7 +46,6 @@ export class SettingsViewProvider implements vscode.WebviewViewProvider {
 			localResourceRoots: [vscode.Uri.joinPath(this.extensionUri, "webview-ui", "dist")],
 		};
 		webviewView.webview.html = buildSettingsHtml(this.extensionUri, webviewView.webview);
-
 		webviewView.webview.onDidReceiveMessage((msg: SettingsMessage) => {
 			void this.handleMessage(msg);
 		});
@@ -39,28 +55,16 @@ export class SettingsViewProvider implements vscode.WebviewViewProvider {
 		try {
 			switch (msg.command) {
 				case "settings:get":
+				case "settings:refresh":
+					if (msg.command === "settings:refresh") this.onConfigSaved();
 					await this.sendData();
 					break;
-				case "settings:saveSettings":
-					await this.saveSettings(msg.settings);
+				case "settings:setBundledResource":
+					await this.setBundledResource(msg.id, msg.enabled);
 					break;
-				case "settings:saveAuth":
-					await this.saveAuth(msg.provider, msg.key, msg.remove === true);
+				case "settings:openFile":
+					await this.openFile(msg.file);
 					break;
-				case "settings:saveModels":
-					await this.saveModels(msg.models);
-					break;
-				case "settings:saveJson":
-					await this.saveJson(msg.file, msg.text);
-					break;
-				case "settings:importConfig": {
-					const res = await runImportFlow();
-					if (res) {
-						this.post({ command: "settings:importResult", imported: res.imported, message: res.imported.join(", ") || "nothing new" });
-						this.onConfigSaved();
-					}
-					break;
-				}
 				case "settings:openSessions":
 					await vscode.commands.executeCommand("codepi.openSessionsTab");
 					break;
@@ -77,111 +81,67 @@ export class SettingsViewProvider implements vscode.WebviewViewProvider {
 		this.view?.webview.postMessage(msg);
 	}
 
-	private async saveModels(models: unknown): Promise<void> {
-		const modelsPath = getModelsPath();
-		// Keep the previous content so a pi-validation failure can roll back.
-		const previous = readJsonFile<unknown>(modelsPath);
-		writeJsonFileAtomic(modelsPath, models);
-		const sdk = await getSdk();
-		const registry = sdk.ModelRegistry.create(sdk.AuthStorage.create(getAuthPath()), modelsPath);
-		registry.refresh();
-		const err = registry.getError();
-		if (err) {
-			if (previous !== undefined) {
-				try {
-					writeJsonFileAtomic(modelsPath, previous);
-				} catch {
-					/* best effort rollback */
-				}
-			}
-			this.post({ command: "settings:error", message: err, file: "models.json" });
-			return;
-		}
-		this.post({ command: "settings:saved", ok: true, file: "models.json" });
-		this.onConfigSaved();
-	}
-
-	private async saveJson(file: "settings" | "models", text: string): Promise<void> {
-		let parsed: unknown;
-		try {
-			parsed = JSON.parse(text);
-		} catch (err) {
-			this.post({
-				command: "settings:error",
-				message: `Invalid JSON: ${err instanceof Error ? err.message : String(err)}`,
-				file,
-			});
-			return;
-		}
-		if (file === "settings") {
-			const errors = validateSettings(parsed);
-			if (errors.length > 0) {
-				this.post({ command: "settings:error", message: errors.join("\n"), file });
-				return;
-			}
-			writeJsonFileAtomic(getSettingsPath(), parsed);
-			this.post({ command: "settings:saved", ok: true, file });
-			this.onConfigSaved();
-		} else {
-			// models.json — validated by pi's own loader; saveModels posts the result.
-			await this.saveModels(parsed);
-		}
-	}
-
 	private async sendData(): Promise<void> {
+		const settingsPath = getSettingsPathForAgent(this.agentDir);
+		const settings = readJsonFile<Record<string, unknown>>(settingsPath) ?? {};
 		const sdk = await getSdk();
-		const auth = sdk.AuthStorage.create(getAuthPath());
-		const registry = sdk.ModelRegistry.create(auth, getModelsPath());
-		registry.refresh();
-		const modelsError = registry.getError();
-		const models = readJsonFile<unknown>(getModelsPath());
-		const settings = readJsonFile<SettingsRecord>(getSettingsPath()) ?? {};
-		const catalog: Array<{ provider: string; modelId: string }> = registry
-			.getAll()
-			.map((m: any) => ({ provider: String(m.provider ?? ""), modelId: String(m.id ?? "") }))
-			.filter((m) => m.provider && m.modelId);
-		const authEntries: AuthEntry[] = [];
-		for (const provider of auth.list()) {
-			const cred = auth.get(provider);
-			authEntries.push({
-				provider,
-				type: cred?.type === "oauth" ? "oauth" : "api_key",
-				hasKey: !!cred && cred.type === "api_key" && !!cred.key,
-			});
-		}
-		this.post({ command: "settings:data", settings, auth: authEntries, models, modelsError, catalog });
+		const cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? this.agentDir;
+		const settingsManager = sdk.SettingsManager.create(cwd, this.agentDir);
+		const packageManager = new sdk.DefaultPackageManager({
+			cwd,
+			agentDir: this.agentDir,
+			settingsManager,
+		});
+		const packages: PackageStatusEntry[] = packageManager
+			.listConfiguredPackages()
+			.map((entry) => ({
+				source: entry.source,
+				scope: entry.scope,
+				installed: entry.installedPath !== undefined,
+			}));
+		const data = buildDashboardData(
+			this.agentDir,
+			this.sessionDir,
+			settings,
+			packages,
+			{
+				settings: readJsonFile(settingsPath) !== undefined,
+				models: readJsonFile(`${this.agentDir}/models.json`) !== undefined,
+				auth: readJsonFile(`${this.agentDir}/auth.json`) !== undefined,
+			},
+		);
+		this.post({ command: "settings:data", data });
 	}
 
-	private async saveSettings(settings: SettingsRecord): Promise<void> {
-		const errors = validateSettings(settings);
-		if (errors.length > 0) {
-			this.post({ command: "settings:error", message: errors.join("\n"), file: "settings.json" });
-			return;
-		}
-		writeJsonFileAtomic(getSettingsPath(), settings);
-		this.post({ command: "settings:saved", ok: true, file: "settings.json" });
+	private async setBundledResource(
+		id: DashboardData["bundledResources"][number]["id"],
+		enabled: boolean,
+	): Promise<void> {
+		const settingsPath = getSettingsPathForAgent(this.agentDir);
+		const settings = readJsonFile<Record<string, unknown>>(settingsPath) ?? {};
+		const current = readBundledResourceConfig(settings);
+		const next: BundledResourceConfig = {
+			bundledExtensions: { ...current.bundledExtensions },
+			bundledThemes: { ...current.bundledThemes },
+		};
+		if (id === "nebula-pulse") next.bundledThemes["nebula-pulse"] = enabled;
+		else next.bundledExtensions[id] = enabled;
+		updateBundledResourceConfig(settingsPath, next);
 		this.onConfigSaved();
+		this.post({ command: "settings:saved", ok: true, resource: id });
+		await this.sendData();
 	}
 
-	private async saveAuth(provider: string, key: string | undefined, remove: boolean): Promise<void> {
-		if (!provider) {
-			this.post({ command: "settings:error", message: "Provider name required", file: "auth.json" });
-			return;
-		}
-		const sdk = await getSdk();
-		const auth = sdk.AuthStorage.create(getAuthPath());
-		if (remove) {
-			auth.remove(provider);
-		} else {
-			if (!key) {
-				this.post({ command: "settings:error", message: `API key for ${provider} is empty`, file: "auth.json" });
-				return;
-			}
-			auth.set(provider, { type: "api_key", key });
-		}
-		this.post({ command: "settings:saved", ok: true, file: "auth.json" });
-		this.onConfigSaved();
+	private async openFile(file: "settings" | "models" | "auth"): Promise<void> {
+		const filePath = ensurePiJsonFileInDir(this.agentDir, file);
+		const document = await vscode.workspace.openTextDocument(vscode.Uri.file(filePath));
+		await vscode.window.showTextDocument(document, { preview: false });
+		this.post({ command: "settings:opened", file, path: filePath });
 	}
+}
+
+function getSettingsPathForAgent(agentDir: string): string {
+	return `${agentDir}/settings.json`;
 }
 
 function buildSettingsHtml(extensionUri: vscode.Uri, webview: vscode.Webview): string {
@@ -196,7 +156,7 @@ function buildSettingsHtml(extensionUri: vscode.Uri, webview: vscode.Webview): s
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline'; script-src ${webview.cspSource} 'nonce-${nonce}';" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <link rel="stylesheet" crossorigin href="${styleUri}" />
-  <title>PI Settings</title>
+  <title>CodePi Settings</title>
 </head>
 <body>
   <div id="root"></div>
@@ -208,8 +168,6 @@ function buildSettingsHtml(extensionUri: vscode.Uri, webview: vscode.Webview): s
 function getNonce(): string {
 	let text = "";
 	const possible = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
-	for (let i = 0; i < 32; i++) {
-		text += possible.charAt(Math.floor(Math.random() * possible.length));
-	}
+	for (let i = 0; i < 32; i++) text += possible.charAt(Math.floor(Math.random() * possible.length));
 	return text;
 }
