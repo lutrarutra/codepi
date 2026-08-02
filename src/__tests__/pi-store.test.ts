@@ -16,7 +16,6 @@ import {
 	ensureRuntimeTools,
 	getAgentDir,
 	getCodePiSessionDir,
-	importLegacyConfig,
 	ensurePiJsonFileInDir,
 	readJsonFile,
 	setAgentDir,
@@ -185,54 +184,6 @@ describe("detectLegacyConfig", () => {
 			auth: false,
 			models: false,
 		});
-	});
-});
-
-describe("importLegacyConfig", () => {
-	it("copies config files and keeps auth 0o600", () => {
-		const legacy = join(dir, "legacy");
-		mkdirSync(legacy, { recursive: true });
-		writeFileSync(join(legacy, "settings.json"), '{"theme":"dark"}');
-		writeFileSync(
-			join(legacy, "auth.json"),
-			'{"openai":{"type":"api_key","key":"sk-x"}}',
-			{ mode: 0o600 },
-		);
-		const target = join(dir, "target");
-		mkdirSync(target, { recursive: true });
-		const res = importLegacyConfig(legacy, target, { includeSessions: false });
-		expect(res.imported).toContain("settings.json");
-		expect(res.imported).toContain("auth.json");
-		let parsedSettings: unknown;
-		try {
-			parsedSettings = JSON.parse(
-				readFileSync(join(target, "settings.json"), "utf8"),
-			);
-		} catch {
-			parsedSettings = undefined;
-		}
-		expect(parsedSettings).toEqual({ theme: "dark" });
-		const mode = statSync(join(target, "auth.json")).mode;
-		expect(mode & 0o777).toBe(0o600);
-	});
-	it("copies sessions when requested", () => {
-		const legacy = join(dir, "legacy");
-		const sessions = join(legacy, "sessions", "proj");
-		mkdirSync(sessions, { recursive: true });
-		writeFileSync(join(sessions, "abc.json"), "{}");
-		const target = join(dir, "target");
-		mkdirSync(target, { recursive: true });
-		importLegacyConfig(legacy, target, { includeSessions: true });
-		expect(existsSync(join(target, "sessions", "proj", "abc.json"))).toBe(true);
-	});
-	it("skips sessions when not requested", () => {
-		const legacy = join(dir, "legacy");
-		mkdirSync(join(legacy, "sessions", "proj"), { recursive: true });
-		writeFileSync(join(legacy, "sessions", "proj", "abc.json"), "{}");
-		const target = join(dir, "target");
-		mkdirSync(target, { recursive: true });
-		importLegacyConfig(legacy, target, { includeSessions: false });
-		expect(existsSync(join(target, "sessions"))).toBe(false);
 	});
 });
 

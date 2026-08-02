@@ -357,43 +357,6 @@ export interface MigrationResult {
 	sessionsSkipped?: "missing-source" | "destination-not-empty";
 }
 
-/** @deprecated Use migrateLegacyCodePiStorage for the explicit upgrade flow. */
-export interface ImportResult {
-	imported: string[];
-}
-
-/** @deprecated Retained for compatibility with older internal callers; not exposed as a command. */
-export function importLegacyConfig(
-	legacyAgentDir: string,
-	targetAgentDir: string,
-	opts: { includeSessions: boolean },
-): ImportResult {
-	mkdirSync(targetAgentDir, { recursive: true });
-	const imported: string[] = [];
-	for (const file of ["settings.json", "auth.json", "models.json"]) {
-		const source = join(legacyAgentDir, file);
-		if (!existsSync(source)) continue;
-		const target = join(targetAgentDir, file);
-		cpSync(source, target, { force: true });
-		if (file === "auth.json") {
-			try {
-				chmodSync(target, 0o600);
-			} catch {
-				/* non-POSIX — ignore */
-			}
-		}
-		imported.push(file);
-	}
-	if (opts.includeSessions) {
-		const source = join(legacyAgentDir, "sessions");
-		if (existsSync(source) && statSync(source).isDirectory()) {
-			cpSync(source, join(targetAgentDir, "sessions"), { recursive: true, force: true });
-			imported.push("sessions/");
-		}
-	}
-	return { imported };
-}
-
 /**
  * Migrate storage written by older CodePi versions.
  *
