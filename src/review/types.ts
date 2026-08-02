@@ -79,10 +79,6 @@ export interface FileReviewState {
 export interface ReviewHost {
 	/** Post a message to the chat webview(s). */
 	post(message: Record<string, unknown>): void;
-	/** Show the file in the editor (used when a proposal is created). */
-	openFile(uri: string): Promise<void>;
-	/** Queue a bottom-right notification asking accept/decline for a file. */
-	promptFileReview(summary: EditProposalSummary): void;
 	/** Show an informational notification. */
 	notify(text: string): void;
 }

@@ -60,7 +60,13 @@ export class ReviewManager {
 	}
 
 	summary(proposal: EditProposal): EditProposalSummary {
-		return { proposalId: proposal.proposalId, toolCallId: proposal.toolCallId, path: proposal.path, status: proposal.status, counts: this.counts(proposal) };
+		return {
+			proposalId: proposal.proposalId,
+			toolCallId: proposal.toolCallId,
+			path: proposal.path,
+			status: proposal.status,
+			counts: this.counts(proposal),
+		};
 	}
 
 	// ── proposal creation ─────────────────────────────────────────────────
@@ -94,10 +100,10 @@ export class ReviewManager {
 			status: "pending",
 		};
 		this.proposals.set(proposal.proposalId, proposal);
-		this.host.post({ command: "editProposed", summary: this.summary(proposal) });
-		// Ask the user file-by-file (the extension host queues these prompts so
-		// they appear one file at a time in the bottom-right corner).
-		this.host.promptFileReview(this.summary(proposal));
+		this.host.post({
+			command: "editProposed",
+			summary: this.summary(proposal),
+		});
 		return proposal;
 	}
 
@@ -140,6 +146,31 @@ export class ReviewManager {
 		await this.io.writeContent(proposal.uri, proposal.originalContent);
 		for (const h of proposal.hunks) h.status = "rejected";
 		proposal.status = "rejected";
+		this.emitUpdate(proposal);
+		return true;
+	}
+
+	/**
+	 * Resolve every pending hunk WITHOUT touching the file on disk. Used when
+	 * an external source (e.g. the TUI's /filechanges commands) has already
+	 * applied the outcome — we only mirror the review state so editor
+	 * decorations and the review bar clear.
+	 */
+	async resolveFile(
+		proposalId: string,
+		status: "accepted" | "rejected",
+	): Promise<boolean> {
+		const proposal = this.proposals.get(proposalId);
+		if (!proposal) return false;
+		let changed = false;
+		for (const h of proposal.hunks) {
+			if (h.status === "pending") {
+				h.status = status;
+				changed = true;
+			}
+		}
+		if (!changed) return false;
+		proposal.status = this.deriveStatus(proposal);
 		this.emitUpdate(proposal);
 		return true;
 	}
@@ -196,7 +227,11 @@ export class ReviewManager {
 		if (status === "rejected") {
 			// Apply the inverse of THIS hunk to the current document and save.
 			const current = await this.io.readContent(proposal.uri);
-			const inverse = computeInverseEdit(current, hunk, proposal.originalContent);
+			const inverse = computeInverseEdit(
+				current,
+				hunk,
+				proposal.originalContent,
+			);
 			if (inverse === undefined) {
 				this.markStale(proposal);
 				return false;
@@ -353,7 +388,32 @@ export function computeCounts(proposal: EditProposal): ProposalCounts {
 		else if (h.status === "rejected") rejected++;
 	}
 	const { added, removed } = countHunkLines(proposal.hunks);
-	return { total: proposal.hunks.length, pending, accepted, rejected, linesAdded: added, linesRemoved: removed };
+	return {
+		total: proposal.hunks.length,
+		pending,
+		accepted,
+		rejected,
+		linesAdded: added,
+		linesRemoved: removed,
+	};
+}
+
+/** Count added/removed lines across ONLY the pending hunks. */
+export function pendingLineCounts(proposal: EditProposal): {
+	pendingHunks: number;
+	added: number;
+	removed: number;
+} {
+	let pendingHunks = 0;
+	let added = 0;
+	let removed = 0;
+	for (const h of proposal.hunks) {
+		if (h.status !== "pending") continue;
+		pendingHunks++;
+		if (h.oldText.length > 0) removed += h.oldText.split("\n").length;
+		if (h.newText.length > 0) added += h.newText.split("\n").length;
+	}
+	return { pendingHunks, added, removed };
 }
 
 /** Convenience: compute the FileReviewState for the webview mirror. */
@@ -361,6 +421,7 @@ export function toFileReviewState(proposal: EditProposal): FileReviewState {
 	return {
 		proposal,
 		counts: computeCounts(proposal),
-		allResolved: proposal.status === "accepted" || proposal.status === "rejected",
+		allResolved:
+			proposal.status === "accepted" || proposal.status === "rejected",
 	};
 }

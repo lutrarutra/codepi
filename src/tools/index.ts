@@ -8,14 +8,6 @@ export type {
 	QuestionAnswer,
 	AskQuestionsParams,
 } from "./ask-user-question";
-import { todoTool } from "./todo";
-export {
-	getTodoList,
-	setTodoList,
-	clearTodoList,
-	reconstructFromEntries,
-} from "./todo";
-export type { TodoItem, TodoDetails } from "./todo";
 import { ReviewManager } from "../review/review-manager";
 import type { EditProposal } from "../review/types";
 import { applyEditsToContent } from "../review/edit-apply";
@@ -127,7 +119,10 @@ export function createWriteFileTool(review: ReviewManager): VscodeTool {
 					type: "string",
 					description: "Path to the file to write (relative or absolute)",
 				},
-				content: { type: "string", description: "Content to write to the file" },
+				content: {
+					type: "string",
+					description: "Content to write to the file",
+				},
 			},
 			required: ["path", "content"],
 		},
@@ -582,8 +577,15 @@ export const grepTool: VscodeTool = {
 			}
 
 			if (matches.length === 0) {
+				// Patterns match literally by default — if the pattern contains
+				// regex metacharacters, remind callers that escaping is NOT
+				// needed (and isRegExp: true switches to regex syntax).
+				const looksLikeRegex = /[.*+?^${}()|[\]\\]/.test(pattern);
+				const hint = looksLikeRegex
+					? "\n(No matches — patterns match literally by default. Set isRegExp: true to use regex syntax; do NOT escape regex chars for plain-text searches.)"
+					: "";
 				return {
-					content: [{ type: "text" as const, text: "No matches found" }],
+					content: [{ type: "text" as const, text: `No matches found${hint}` }],
 					details: {},
 				};
 			}
@@ -763,7 +765,6 @@ export function createVscodeTools(review: ReviewManager): VscodeTool[] {
 		findFilesTool,
 		grepTool,
 		askUserQuestionTool,
-		todoTool,
 	];
 }
 
@@ -782,8 +783,6 @@ function getDefaultReviewManager(): ReviewManager {
 		_defaultReviewManager = new ReviewManager(
 			{
 				post: () => {},
-				openFile: async () => {},
-				promptFileReview: () => {},
 				notify: () => {},
 			},
 			{

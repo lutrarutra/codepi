@@ -2,23 +2,33 @@ import * as vscode from "vscode";
 import * as path from "node:path";
 import * as os from "node:os";
 import * as fs from "node:fs";
-import {
-	createVscodeTools,
-	clearTodoList,
-	reconstructFromEntries,
-} from "./tools/index";
+import { createVscodeTools } from "./tools/index";
 import { SessionTreeProvider, SessionTreeItem } from "./views/session-tree";
-import { ReviewManager } from "./review/review-manager";
-import { ReviewDecorations, openProposalDiff } from "./review/decorations";
+import { ReviewManager, pendingLineCounts } from "./review/review-manager";
+import {
+	ReviewDecorations,
+	openProposalDiff,
+	type ReviewActionHandlers,
+} from "./review/decorations";
 import type { EditProposalSummary } from "./review/types";
 import type {
 	AgentSessionRuntime,
 	InteractiveMode,
 } from "@earendil-works/pi-coding-agent";
-import { TuiPty } from "./tui/tui-pty";
+import { stripPiFromTitle, WebviewPty } from "./tui/webview-pty";
+import {
+	classifyAsUrl,
+	escapeGlob,
+	normalizeSearchText,
+	resolveTerminalFilePath,
+	splitLineColumn,
+	type CodePiOpenLinkPayload,
+} from "./tui/links";
 import { SettingsViewProvider } from "./settings-view";
 import {
 	detectLegacyConfig,
+	ensureDefaultTheme,
+	ensureRuntimeTools,
 	getAgentDir,
 	importLegacyConfig,
 	setAgentDir,
@@ -28,8 +38,8 @@ import { runImportFlow } from "./import-config";
 // ── Types ────────────────────────────────────────────────────
 
 interface SessionState {
-	terminal: vscode.Terminal;
-	pty: TuiPty;
+	panel: vscode.WebviewPanel;
+	pty: WebviewPty;
 	runtime: AgentSessionRuntime;
 	tui: InteractiveMode;
 	sessionManager: any; // SessionManager from PI SDK
@@ -39,21 +49,22 @@ interface SessionState {
 	sessionPath: string;
 	disposables: vscode.Disposable[];
 	review: ReviewManager;
+	/** proposalIds already mirrored to the TUI filechanges tracker. */
+	fcSeenEntries: Set<string>;
+	/** last session branch head id seen by the filechanges sync poll. */
+	fcLastHead: string | undefined;
 }
 
 // ── Globals ──────────────────────────────────────────────────
 
 // sessionId → live TUI session. Each session runs its own InteractiveMode
-// inside a VS Code integrated terminal (editor area).
+// inside a webview panel hosting xterm.js (editor area).
 const sessions = new Map<string, SessionState>();
+let extensionContext: vscode.ExtensionContext | undefined;
 let treeProvider: SessionTreeProvider | undefined;
 
 // Shared editor decorations + CodeLens for ALL sessions' pending edits.
 let reviewDecorations: ReviewDecorations | undefined;
-
-// Bottom-right per-file review prompts, queued so files are asked one by one.
-const fileReviewQueue: Array<{ summary: EditProposalSummary; state: SessionState }> = [];
-let promptInFlight = false;
 
 // Status-bar item showing how many edits are pending review.
 let reviewStatusBar: vscode.StatusBarItem | undefined;
@@ -100,12 +111,62 @@ async function getPi(): Promise<any> {
 // ── Activation ───────────────────────────────────────────────
 
 export async function activate(context: vscode.ExtensionContext) {
+	extensionContext = context;
+
+	// pi's InteractiveMode ends every quit path (/quit, Ctrl+C/Ctrl+D, signals)
+	// with process.exit(). VS Code's extension host already neutralizes
+	// process.exit (patchProcess in extensionHostProcess.ts — it just logs
+	// "prevented"), so the host survives but our TUI tab is left open with a
+	// dead session behind it. Intercept instead: when pi asks to exit, close
+	// the session panel(s) — /quit or closing the tab are the only sanctioned
+	// ways to end a session. Per-session targeting uses WebviewPty.quitting
+	// (set when pi's shutdown calls drainInput).
+	const baseExit = process.exit.bind(process);
+	(process as unknown as { exit: (code?: number) => never }).exit = ((
+		code?: number,
+	) => {
+		if (sessions.size === 0) {
+			// Not a CodePi shutdown — let VS Code's own patch handle it.
+			baseExit(code);
+			return;
+		}
+		const quitting = [...sessions.values()].filter(
+			(s) => (s.pty as WebviewPty).quitting,
+		);
+		const targets = quitting.length > 0 ? quitting : [...sessions.values()];
+		console.log(
+			`[CodePi] pi requested process.exit(${code}) — closing ${targets.length} TUI panel(s)`,
+		);
+		for (const s of targets) {
+			if (sessions.has(s.sessionId)) cleanupSession(s.sessionId);
+		}
+		// Swallow: pi's shutdown() returns normally and the host keeps running.
+	}) as (code?: number) => never;
+
+	// The embedded TUI renders in a truecolor-capable webview xterm. pi's
+	// terminal capability detection (pi-tui detectCapabilities) only emits
+	// truecolor when it can identify a truecolor terminal — otherwise every
+	// theme hex color gets quantized to the 256-color palette, which makes
+	// the dark message/tool backgrounds render as near-black. Identify the
+	// "terminal" as VS Code (TERM_PROGRAM=vscode ⇒ trueColor + OSC8 links)
+	// and also set COLORTERM as a belt-and-suspenders; getCapabilities()
+	// caches, so this must run before ANY pi SDK call.
+	process.env.TERM_PROGRAM = "vscode";
+	process.env.COLORTERM = "truecolor";
+
 	// Point pi's config/session storage at VSCode's dedicated extension
 	// storage (globalStorageUri) instead of ~/.pi. Must run before any SDK
 	// call — pi reads PI_CODING_AGENT_DIR at call time.
 	const agentDir = path.join(context.globalStorageUri.fsPath, "agent");
 	setAgentDir(agentDir);
 	fs.mkdirSync(agentDir, { recursive: true });
+
+	// Default TUI theme: select the bundled nebula-pulse unless the user has
+	// already chosen a theme (settings UI or legacy import set it).
+	ensureDefaultTheme();
+
+	// Copilot-style pending-edit dot on tabs/Explorer for files awaiting review.
+	registerPendingReviewDots(extensionContext);
 
 	// Register session tree provider
 	treeProvider = new SessionTreeProvider();
@@ -114,6 +175,55 @@ export async function activate(context: vscode.ExtensionContext) {
 		showCollapseAll: false,
 	});
 	context.subscriptions.push(treeView);
+
+	// Restore TUI tabs that were open before a window reload. VS Code persists
+	// open webview panels and revives them here; the webview content persisted
+	// its session id via vscode.setState (see terminal.ts), which arrives as
+	// `state` below.
+	context.subscriptions.push(
+		vscode.window.registerWebviewPanelSerializer("codepi-tui", {
+			deserializeWebviewPanel: async (panel, state) => {
+				const sessionId = (state as { sessionId?: string } | undefined)
+					?.sessionId;
+				if (!sessionId) {
+					panel.dispose();
+					return;
+				}
+				try {
+					const sessionPath = await findSessionPathById(sessionId);
+					if (!sessionPath) {
+						// Session deleted since the reload — drop the orphaned tab.
+						panel.dispose();
+						return;
+					}
+					const pi = await getPi();
+					const sessionManager = pi.SessionManager.open(
+						sessionPath,
+						undefined,
+						getWorkspaceRoot(),
+					);
+					if (sessionManager.getSessionId() !== sessionId) {
+						panel.dispose();
+						return;
+					}
+					await setupSessionPanel(
+						panel,
+						sessionManager,
+						sessionId,
+						sessionPath,
+					);
+				} catch (err) {
+					console.error(
+						"[CodePi] Failed to restore session",
+						sessionId,
+						":",
+						err,
+					);
+					panel.dispose();
+				}
+			},
+		}),
+	);
 
 	// Settings sidebar tab (toggled with the Sessions tree via codepi.sidebarTab)
 	context.subscriptions.push(
@@ -129,20 +239,35 @@ export async function activate(context: vscode.ExtensionContext) {
 			{ webviewOptions: { retainContextWhenHidden: true } },
 		),
 		vscode.commands.registerCommand("codepi.openSettingsTab", () =>
-			vscode.commands.executeCommand("setContext", "codepi.sidebarTab", "settings"),
+			vscode.commands.executeCommand(
+				"setContext",
+				"codepi.sidebarTab",
+				"settings",
+			),
 		),
 		vscode.commands.registerCommand("codepi.openSessionsTab", () =>
-			vscode.commands.executeCommand("setContext", "codepi.sidebarTab", "sessions"),
+			vscode.commands.executeCommand(
+				"setContext",
+				"codepi.sidebarTab",
+				"sessions",
+			),
 		),
 	);
-	await vscode.commands.executeCommand("setContext", "codepi.sidebarTab", "sessions");
+	await vscode.commands.executeCommand(
+		"setContext",
+		"codepi.sidebarTab",
+		"sessions",
+	);
 
 	// First-run migration: offer to import an existing ~/.pi/agent config.
 	// Run async, do NOT block registration on the prompt.
 	void (async () => {
 		const legacyDir = path.join(os.homedir(), ".pi", "agent");
 		const legacy = detectLegacyConfig(legacyDir);
-		const importAsked = context.globalState.get<boolean>("codepi.importPrompted", false);
+		const importAsked = context.globalState.get<boolean>(
+			"codepi.importPrompted",
+			false,
+		);
 		if (legacy && !importAsked) {
 			await context.globalState.update("codepi.importPrompted", true);
 			const choice = await vscode.window.showInformationMessage(
@@ -157,6 +282,9 @@ export async function activate(context: vscode.ExtensionContext) {
 					const res = importLegacyConfig(legacyDir, agentDir, {
 						includeSessions: choice === "Import (config + sessions)",
 					});
+					// The import may have replaced settings.json with a legacy file
+					// that has no `theme` — restore the bundled default if so.
+					ensureDefaultTheme();
 					const list = res.imported.join(", ");
 					vscode.window.showInformationMessage(
 						`Imported into CodePi storage: ${list || "nothing new"}.`,
@@ -171,7 +299,7 @@ export async function activate(context: vscode.ExtensionContext) {
 	})();
 
 	// ── Edit review infrastructure ─────────────────────────────
-	const reviewHandlers = {
+	const reviewHandlers: ReviewActionHandlers = {
 		acceptHunk: async (proposalId: string, hunkId: string) => {
 			for (const [, state] of sessions) {
 				if (state.review.getProposal(proposalId)) {
@@ -214,7 +342,7 @@ export async function activate(context: vscode.ExtensionContext) {
 			}
 		},
 	};
-	reviewDecorations = new ReviewDecorations(reviewHandlers);
+	reviewDecorations = new ReviewDecorations();
 	context.subscriptions.push(reviewDecorations);
 
 	context.subscriptions.push(
@@ -228,13 +356,11 @@ export async function activate(context: vscode.ExtensionContext) {
 			(proposalId: string, hunkId: string) =>
 				reviewHandlers.rejectHunk(proposalId, hunkId),
 		),
-		vscode.commands.registerCommand(
-			"codepi.acceptFile",
-			(proposalId: string) => reviewHandlers.acceptFile(proposalId),
+		vscode.commands.registerCommand("codepi.acceptFile", (proposalId: string) =>
+			reviewHandlers.acceptFile(proposalId),
 		),
-		vscode.commands.registerCommand(
-			"codepi.rejectFile",
-			(proposalId: string) => reviewHandlers.rejectFile(proposalId),
+		vscode.commands.registerCommand("codepi.rejectFile", (proposalId: string) =>
+			reviewHandlers.rejectFile(proposalId),
 		),
 		vscode.commands.registerCommand("codepi.acceptAllEdits", async () => {
 			for (const [, state] of sessions) {
@@ -246,9 +372,8 @@ export async function activate(context: vscode.ExtensionContext) {
 				await state.review.rejectAll();
 			}
 		}),
-		vscode.commands.registerCommand(
-			"codepi.openDiff",
-			(proposalId: string) => reviewHandlers.openDiff(proposalId),
+		vscode.commands.registerCommand("codepi.openDiff", (proposalId: string) =>
+			reviewHandlers.openDiff(proposalId),
 		),
 		vscode.commands.registerCommand("codepi.openPendingReview", async () => {
 			const items: Array<{
@@ -313,10 +438,7 @@ export async function activate(context: vscode.ExtensionContext) {
 	context.subscriptions.push(
 		vscode.commands.registerCommand(
 			"codepi.openSession",
-			async (
-				arg?: string | SessionTreeItem,
-				opts?: { fromTree?: boolean },
-			) => {
+			async (arg?: string | SessionTreeItem, opts?: { fromTree?: boolean }) => {
 				let sessionPath: string | undefined;
 				if (typeof arg === "string") {
 					sessionPath = arg;
@@ -367,11 +489,11 @@ export async function activate(context: vscode.ExtensionContext) {
 				);
 				if (confirm !== "Delete") return;
 
-				// Close any terminal hosting this session
+				// Close any panel hosting this session
 				const sessionPath = item.session.path;
-				for (const [id, state] of sessions) {
+				for (const [, state] of sessions) {
 					if (state.sessionPath === sessionPath) {
-						state.terminal.dispose();
+						state.panel.dispose();
 						break;
 					}
 				}
@@ -414,10 +536,85 @@ export async function activate(context: vscode.ExtensionContext) {
 
 // ── Session Creation ─────────────────────────────────────────
 
+/**
+ * Sync the editor review state with the TUI filechanges tracker.
+ *
+ * The filechanges extension appends `filechanges:resolved` custom session
+ * entries when the user runs /filechanges-accept or /filechanges-decline in
+ * the TUI. This poll picks them up and resolves the matching review proposals
+ * so editor decorations / the review bar clear in step with the TUI.
+ */
+async function pollFileChangesSync(state: SessionState): Promise<void> {
+	if (!state.sessionManager) return;
+	let branch: any[];
+	try {
+		branch = state.sessionManager.getBranch();
+	} catch {
+		return;
+	}
+	if (branch.length === 0) return;
+	const headId = branch[branch.length - 1].id;
+	if (headId === state.fcLastHead) return;
+	state.fcLastHead = headId;
+
+	let changed = false;
+	for (const entry of branch) {
+		if (
+			entry.type !== "custom" ||
+			entry.customType !== "filechanges:resolved"
+		) {
+			continue;
+		}
+		if (state.fcSeenEntries.has(entry.id)) continue;
+		state.fcSeenEntries.add(entry.id);
+		const data = entry.data as
+			| { paths?: string[]; reason?: "accept" | "decline" }
+			| undefined;
+		if (!data?.paths) continue;
+		for (const p of data.paths) {
+			const proposal = state.review.getProposalByFile(
+				resolveReviewUri(p).toString(),
+			);
+			if (!proposal) continue;
+			changed = true;
+			await state.review.resolveFile(
+				proposal.proposalId,
+				data.reason === "decline" ? "rejected" : "accepted",
+			);
+		}
+	}
+	if (changed) {
+		updateReviewStatusBar();
+	}
+}
+
+/** Relativize a proposal uri for the TUI tracker (its cwd is the workspace). */
+function toRelPath(uriStr: string): string {
+	try {
+		const uri = vscode.Uri.parse(uriStr);
+		const folder = vscode.workspace.getWorkspaceFolder(uri);
+		if (folder) {
+			return (
+				path.relative(folder.uri.fsPath, uri.fsPath) ||
+				path.basename(uri.fsPath)
+			);
+		}
+		return uri.fsPath;
+	} catch {
+		return uriStr;
+	}
+}
+
+/** Resolve a tracker path (relative to the workspace, or absolute) to a uri. */
+function resolveReviewUri(p: string): vscode.Uri {
+	if (path.isAbsolute(p)) return vscode.Uri.file(p);
+	const ws = vscode.workspace.workspaceFolders?.[0];
+	if (ws) return vscode.Uri.joinPath(ws.uri, p);
+	return vscode.Uri.file(p);
+}
+
 /** Create a brand-new session and open its TUI terminal tab. */
 async function createNewSession(): Promise<void> {
-	clearTodoList();
-
 	const pi = await getPi();
 	const workspaceRoot = getWorkspaceRoot();
 
@@ -451,7 +648,7 @@ async function openSessionTerminal(
 
 	const existing = sessions.get(sessionId);
 	if (existing) {
-		existing.terminal.show();
+		existing.panel.reveal();
 		return;
 	}
 
@@ -502,7 +699,191 @@ async function getSessionsFromProvider(): Promise<
 	}
 }
 
+/**
+ * Resolve a session id to its JSONL file path, used when restoring a TUI tab
+ * after a window reload. Prefers sessions under the current workspace root;
+ * falls back to a full scan (covers sessions from other folders).
+ */
+async function findSessionPathById(
+	sessionId: string,
+): Promise<string | undefined> {
+	try {
+		const pi = await getPi();
+		const byCwd: any[] = await pi.SessionManager.list(getWorkspaceRoot());
+		const hit = byCwd.find((s: any) => s.id === sessionId);
+		if (hit) return hit.path;
+		const all: any[] = await pi.SessionManager.listAll();
+		return all.find((s: any) => s.id === sessionId)?.path;
+	} catch {
+		return undefined;
+	}
+}
+
 // ── Session Setup ────────────────────────────────────────────
+
+/**
+ * Open a Ctrl+clicked terminal link (VS Code built-in terminal behavior):
+ * URLs go to the default browser via openExternal, file paths open in the
+ * editor at the (optional) line:column — mirroring TerminalUrlLinkOpener and
+ * TerminalLocalFileLinkOpener from the vscode-main submodule.
+ */
+async function openTerminalLink(link: CodePiOpenLinkPayload): Promise<void> {
+	try {
+		const raw = (link.text ?? "").trim();
+		if (!raw) return;
+
+		const workspaceRoot = getWorkspaceRoot();
+		const folders =
+			vscode.workspace.workspaceFolders?.map((f) => f.uri.fsPath) ?? [];
+
+		// OSC 8 hyperlinks carry an explicit target.
+		if (link.kind === "url" && link.url) {
+			await openUrlOrFile(link.url);
+			return;
+		}
+		if (link.kind === "file" && link.path) {
+			const resolved = resolveTerminalFilePath(
+				link.path,
+				workspaceRoot,
+				folders,
+			);
+			if (resolved) {
+				await openTerminalFile(resolved, link.line, link.column);
+				return;
+			}
+		}
+
+		// Word link: VS Code decides what it is on activation (URL → browser,
+		// existing file → editor, directory → explorer, otherwise → search).
+		const url = classifyAsUrl(raw);
+		if (url) {
+			await openUrlOrFile(raw);
+			return;
+		}
+
+		const normalized = normalizeSearchText(raw);
+		const { path: p, line, column } = splitLineColumn(normalized);
+		if (p) {
+			const resolved = resolveTerminalFilePath(p, workspaceRoot, folders);
+			if (resolved) {
+				await openTerminalFile(resolved, line, column);
+				return;
+			}
+			// Fallback like TerminalSearchLinkOpener: search the workspace when
+			// the exact path doesn't exist on disk.
+			if (await searchAndOpen(p, raw, line, column)) {
+				return;
+			}
+		}
+
+		// Nothing matched: report the failure (error reports are allowed;
+		// success notifications are not).
+		void vscode.window.showWarningMessage(
+			`CodePi: no file, folder or URL matches “${raw}”`,
+		);
+	} catch (err) {
+		void vscode.window.showErrorMessage(
+			`CodePi: could not open link — ${
+				err instanceof Error ? err.message : String(err)
+			}`,
+		);
+	}
+}
+
+/** Open a URL externally, or a file:// target in the editor. */
+async function openUrlOrFile(urlText: string): Promise<void> {
+	const uri = vscode.Uri.parse(urlText);
+	if (uri.scheme === "file") {
+		await openTerminalFile(uri.fsPath);
+		return;
+	}
+	await vscode.env.openExternal(uri);
+}
+
+/**
+ * Workspace search fallback for a word that isn't an existing path: open the
+ * single exact match directly (VS Code's _getExactMatch), otherwise open the
+ * Quick Open file picker (Ctrl+P) pre-filled with the word — the on-top menu
+ * VS Code's terminal word links use (quickAccess), NOT the sidebar search.
+ */
+async function searchAndOpen(
+	pathText: string,
+	query: string,
+	line?: number,
+	column?: number,
+): Promise<boolean> {
+	const glob = escapeGlob(pathText);
+
+	// Exact relative-path match.
+	const exact = await vscode.workspace.findFiles(
+		`**/${glob}`,
+		"**/node_modules/**",
+		5,
+	);
+	if (exact.length === 1) {
+		await openTerminalFile(exact[0].fsPath, line, column);
+		return true;
+	}
+
+	// Filename contains the word (quick access-style matching).
+	const found = await vscode.workspace.findFiles(
+		`**/*${glob}*`,
+		"**/node_modules/**",
+		10,
+	);
+	if (found.length === 1) {
+		await openTerminalFile(found[0].fsPath, line, column);
+		return true;
+	}
+
+	// Open the Ctrl+P file picker pre-filled with the word; its own fuzzy
+	// file search lists any matches.
+	await vscode.commands.executeCommand(
+		"workbench.action.quickOpen",
+		query || pathText,
+	);
+	return true;
+}
+
+/** Open a local file (or reveal a folder) at the optional line:column. */
+async function openTerminalFile(
+	filePath: string,
+	line?: number,
+	column?: number,
+): Promise<void> {
+	const uri = vscode.Uri.file(filePath);
+	if (fs.existsSync(filePath) && fs.statSync(filePath).isDirectory()) {
+		await vscode.commands.executeCommand("revealInExplorer", uri);
+		return;
+	}
+	const selection =
+		typeof line === "number"
+			? new vscode.Range(
+					Math.max(line, 1) - 1,
+					Math.max(column ?? 1, 1) - 1,
+					Math.max(line, 1) - 1,
+					Math.max(column ?? 1, 1) - 1,
+				)
+			: undefined;
+	const doc = await vscode.workspace.openTextDocument(uri);
+	await vscode.window.showTextDocument(doc, {
+		preview: false,
+		selection,
+	});
+}
+
+/** Tab title for a session: the session name, else the first user message. */
+function computeSessionTitle(sessionManager: any): string {
+	const entries = sessionManager.getEntries();
+	const sessionName = sessionManager.getSessionName?.();
+	const firstUserEntry = entries?.find(
+		(e: any) => e.type === "message" && e.message?.role === "user",
+	);
+	const titleText = stripPiFromTitle(
+		sessionName || firstUserEntry?.message?.content?.[0]?.text || "PI",
+	);
+	return titleText.length > 50 ? titleText.slice(0, 50) + "…" : titleText;
+}
 
 /**
  * Create the VS Code terminal (editor area) hosting a session's TUI and run
@@ -513,6 +894,47 @@ async function startTuiSession(
 	sessionId: string,
 	sessionPath: string,
 ): Promise<void> {
+	const extensionUri = extensionContext?.extensionUri;
+	if (!extensionUri) {
+		throw new Error("CodePi not activated");
+	}
+
+	const panel = vscode.window.createWebviewPanel(
+		"codepi-tui",
+		computeSessionTitle(sessionManager),
+		vscode.ViewColumn.Active,
+		{
+			enableScripts: true,
+			retainContextWhenHidden: true,
+			localResourceRoots: [
+				vscode.Uri.joinPath(extensionUri, "webview-ui", "dist"),
+				// Bundled icon font (powerline glyphs) for the TUI footer.
+				vscode.Uri.joinPath(extensionUri, "media"),
+			],
+		},
+	);
+	await setupSessionPanel(panel, sessionManager, sessionId, sessionPath);
+}
+
+/**
+ * Wire a session's TUI into an existing webview panel: review manager, pty,
+ * message handlers, lifecycle, and (once xterm is ready) the in-process
+ * backend. Shared by freshly-created panels (startTuiSession) and panels
+ * restored across a window reload (registerWebviewPanelSerializer).
+ */
+async function setupSessionPanel(
+	panel: vscode.WebviewPanel,
+	sessionManager: any,
+	sessionId: string,
+	sessionPath: string,
+): Promise<void> {
+	// A restored panel must not duplicate a session that is already live.
+	if (sessions.has(sessionId)) {
+		sessions.get(sessionId)!.panel.reveal();
+		panel.dispose();
+		return;
+	}
+
 	// Per-session review manager: tools register proposals here; review
 	// events drive editor decorations, the review status bar, and
 	// notifications.
@@ -534,25 +956,33 @@ async function startTuiSession(
 							} else {
 								reviewDecorations?.setProposal(proposal);
 							}
+							// Mirror the review state to the TUI filechanges tracker on
+							// every change (proposal created, hunk accepted/rejected).
+							// The entry carries the REMAINING pending counts so the
+							// widget's line counter counts down to zero, at which point
+							// the tracker drops the file.
+							if (proposal) {
+								try {
+									const pending = pendingLineCounts(proposal);
+									state.sessionManager?.appendCustomEntry(
+										"codepi:review_resolved",
+										{
+											path: toRelPath(proposal.uri),
+											status: proposal.status,
+											pendingHunks: pending.pendingHunks,
+											pendingAdded: pending.added,
+											pendingRemoved: pending.removed,
+										},
+									);
+								} catch {
+									/* entry logging is best-effort */
+								}
+							}
 						}
 					}
 					updateReviewStatusBar();
+					syncPendingReviewDots();
 				}
-			},
-			openFile: async (uriStr) => {
-				try {
-					const uri = vscode.Uri.parse(uriStr);
-					const doc = await vscode.workspace.openTextDocument(uri);
-					await vscode.window.showTextDocument(doc, {
-						preview: false,
-						preserveFocus: true,
-					});
-				} catch {
-					/* ignore */
-				}
-			},
-			promptFileReview: (summary) => {
-				enqueueFileReviewPrompt(summary, state);
 			},
 			notify: (text) => {
 				void vscode.window.showInformationMessage(text);
@@ -574,32 +1004,45 @@ async function startTuiSession(
 		},
 	);
 
-	// Initial terminal name: session name or the first user message.
-	const entries = sessionManager.getEntries();
-	const sessionName = sessionManager.getSessionName?.();
-	const firstUserEntry = entries?.find(
-		(e: any) => e.type === "message" && e.message?.role === "user",
-	);
-	const titleText =
-		sessionName ||
-		firstUserEntry?.message?.content?.[0]?.text ||
-		"PI";
-	const initialTitle =
-		titleText.length > 50 ? titleText.slice(0, 50) + "…" : titleText;
+	// Initial terminal name: session name or the first user message. A
+	// restored panel keeps its persisted tab title; overwrite with the
+	// current one (also strips the π letter pi's APP_TITLE injects).
+	const initialTitle = computeSessionTitle(sessionManager);
+	panel.title = initialTitle;
 
-	const pty = new TuiPty(initialTitle, () => cleanupSession(sessionId));
-	const terminal = vscode.window.createTerminal({
-		name: initialTitle,
-		iconPath: new vscode.ThemeIcon(
-			"codepi-logo",
-			new vscode.ThemeColor("codepi.logo"),
-		),
-		location: vscode.TerminalLocation.Editor,
-		pty,
-	});
+	// `extensionUri` is resolved from the module-level activation context.
+	const extensionUri = extensionContext?.extensionUri;
+	if (!extensionUri) {
+		throw new Error("CodePi not activated");
+	}
+
+	// Restore/populate the webview content. For a fresh panel this is the
+	// initial load; for a reload-restored panel VS Code hands back an empty
+	// webview that must be re-populated here.
+	panel.webview.html = buildTerminalHtml(
+		extensionUri,
+		panel.webview,
+		sessionId,
+	);
+
+	// Messages posted before the webview finishes loading are dropped by VS
+	// Code — anything config-like is sent in response to `tuiReady` below.
+
+	// Progress/icon bridge — filled once `state` exists (constructor runs first).
+	let updateStatusIcon: (busy: boolean) => void = () => {};
+
+	const pty = new WebviewPty(
+		panel.webview,
+		initialTitle,
+		() => cleanupSession(sessionId),
+		(title) => {
+			panel.title = title;
+		},
+		(busy) => updateStatusIcon(busy),
+	);
 
 	const state: SessionState = {
-		terminal,
+		panel,
 		pty,
 		runtime: undefined as unknown as AgentSessionRuntime, // filled by startTuiBackend
 		tui: undefined as unknown as InteractiveMode, // filled by startTuiBackend
@@ -610,27 +1053,116 @@ async function startTuiSession(
 		sessionPath,
 		disposables: [],
 		review,
+		fcSeenEntries: new Set(),
+		fcLastHead: undefined,
 	};
 	sessions.set(sessionId, state);
 
-	terminal.show();
+	// Tab indicator: green dot (idle) / yellow dot (generating) / red (error).
+	setPanelIcon(panel, "idle");
+	updateStatusIcon = (busy) => setPanelIcon(panel, busy ? "busy" : "idle");
 
-	// Clean up session state when its terminal tab is closed.
-	const closeSub = vscode.window.onDidCloseTerminal((term) => {
-		if (term === terminal) cleanupSession(sessionId);
-	});
-	state.disposables.push(closeSub);
+	// Webview messages: terminal input / resize / ready.
+	panel.webview.onDidReceiveMessage(
+		(msg) => {
+			switch (msg.command) {
+				case "tuiInput":
+					pty.handleInput(msg.data);
+					break;
+				case "tuiResize":
+					console.log("[CodePi-tui] tuiResize", msg.cols, "x", msg.rows);
+					pty.setDimensions(msg.cols, msg.rows);
+					break;
+				case "tuiReady":
+					pty.setDimensions(msg.cols, msg.rows);
+					pty.markReady();
+					break;
+				case "tuiFontStatus":
+					console.log(
+						`[CodePi-tui] terminal font loaded: ${msg.ok === true ? "yes" : "NO — powerline branch icon will be tofu"}`,
+					);
+					break;
+				case "tuiClipboardRead":
+					// Webview clipboard fallback: navigator.clipboard is
+					// unavailable or rejected, so read via the extension host.
+					void vscode.env.clipboard.readText().then(
+						(text) => {
+							try {
+								void panel.webview.postMessage({
+									command: "tuiClipboardData",
+									text,
+								});
+							} catch {
+								/* webview disposed */
+							}
+						},
+						() => {
+							try {
+								void panel.webview.postMessage({
+									command: "tuiClipboardData",
+									text: "",
+								});
+							} catch {
+								/* webview disposed */
+							}
+						},
+					);
+					break;
+				case "tuiClipboardWrite":
+					void vscode.env.clipboard.writeText(String(msg.text ?? ""));
+					break;
+				case "codepi:openLink":
+					void openTerminalLink(msg.link as CodePiOpenLinkPayload);
+					break;
+				case "tuiError":
+					void vscode.window.showErrorMessage(
+						`CodePi terminal error: ${String(msg.message ?? "unknown")}`,
+					);
+					break;
+			}
+		},
+		undefined,
+		state.disposables,
+	);
 
-	// Start the backend once VS Code has opened the pty (real size known);
-	// the pty buffers any output that arrives before that.
+	// Clean up session state when its webview panel is closed.
+	panel.onDidDispose(
+		() => {
+			cleanupSession(sessionId);
+		},
+		undefined,
+		state.disposables,
+	);
+
+	// Poll the session branch for filechanges:resolved entries (written by the
+	// TUI's /filechanges accept/decline) so editor review decorations stay in
+	// step with the TUI tracker.
+	const fcPollTimer = setInterval(() => {
+		void pollFileChangesSync(state);
+	}, 1000);
+	state.disposables.push({ dispose: () => clearInterval(fcPollTimer) });
+
+	// Start the backend once the webview has initialized xterm (real size known);
+	// the pty buffers any output that arrives before that. Show a visible
+	// status line so startup doesn't look frozen; the TUI's first full render
+	// clears it.
 	void (async () => {
-		await pty.waitForOpen();
+		await pty.waitForReady();
+		pty.write(
+			"\x1b[2J\x1b[H\x1b[2mCodePi — starting… (loading runtime)\x1b[0m\r\n",
+		);
 		await startTuiBackend(state);
 	})().catch((err) => {
 		const msg = err instanceof Error ? err.message : String(err);
+		setPanelIcon(panel, "error");
 		cleanupSession(sessionId);
 		void vscode.window.showErrorMessage(`CodePi TUI backend error: ${msg}`);
-		console.error("[CodePi] TUI backend error for session", sessionId, ":", err);
+		console.error(
+			"[CodePi] TUI backend error for session",
+			sessionId,
+			":",
+			err,
+		);
 	});
 }
 
@@ -639,6 +1171,16 @@ function cleanupSession(sessionId: string): void {
 	if (!state) return;
 
 	sessions.delete(sessionId);
+	// Pending-edit tab dots must drop for this session's files.
+	syncPendingReviewDots();
+
+	// Close the hosting panel (no-op if already disposed — cleanup may be
+	// triggered from the panel's own onDidDispose).
+	try {
+		state.panel.dispose();
+	} catch {
+		/* ignore */
+	}
 
 	// Stop the TUI and dispose the runtime (disposes the session).
 	try {
@@ -672,12 +1214,71 @@ async function startTuiBackend(state: SessionState): Promise<void> {
 	const workspaceRoot = getWorkspaceRoot();
 	const agentDir = getAgentDir();
 
+	// Make fd/rg available in <agentDir>/bin BEFORE the TUI's init() looks
+	// for them — pi's ensureTool() otherwise downloads both binaries over
+	// the network during startup (the "unresponsive" gap). rg ships with
+	// this extension; fd is copied from a legacy ~/.pi/agent/bin when present.
+	await ensureRuntimeTools(agentDir);
+
 	// Factory reused by the runtime for /new, /resume and /fork flows.
+	// Bundled pi resources shipped with this extension: the nebula-pulse
+	// theme (default) and the custom-footer + filechanges extensions. Passed
+	// as additional paths so they load even with `noExtensions: true` (they
+	// get temporary "cli" scope).
+	const extensionUri = extensionContext?.extensionUri;
+	const extensionDir = extensionUri
+		? vscode.Uri.joinPath(extensionUri, "resources", "extensions")
+		: undefined;
+	const customFooterPath = extensionDir
+		? vscode.Uri.joinPath(extensionDir, "custom-footer.ts").fsPath
+		: "";
+	const fileChangesPath = extensionDir
+		? vscode.Uri.joinPath(extensionDir, "filechanges.ts").fsPath
+		: "";
+	const nebulaPulsePath = extensionUri
+		? vscode.Uri.joinPath(
+				extensionUri,
+				"resources",
+				"themes",
+				"nebula-pulse.json",
+			).fsPath
+		: "";
+
+	const bundledExtensions = [customFooterPath, fileChangesPath].filter(
+		(p) => p,
+	);
+
+	// pi's real todo tool (tool + /todos + TUI overlay) ships as the
+	// rpiv-todo extension in the user's pi npm extensions dir. Load it when
+	// present instead of the old custom todo tool; without it the embedded
+	// agent simply has no todo tool (graceful degradation).
+	const rpivTodoPath = path.join(
+		os.homedir(),
+		".pi",
+		"agent",
+		"npm",
+		"node_modules",
+		"@juicesharp",
+		"rpiv-todo",
+		"index.ts",
+	);
+	if (fs.existsSync(rpivTodoPath)) {
+		bundledExtensions.push(rpivTodoPath);
+	} else {
+		console.warn(
+			"[CodePi] rpiv-todo extension not found at",
+			rpivTodoPath,
+			"— no todo tool will be available to the agent.",
+		);
+	}
+
 	const createRuntime: any = async (opts: any) => {
 		const loader = new pi.DefaultResourceLoader({
 			cwd: opts.cwd,
 			agentDir: opts.agentDir,
 			noExtensions: true,
+			additionalExtensionPaths: bundledExtensions,
+			additionalThemePaths: nebulaPulsePath ? [nebulaPulsePath] : [],
 		});
 		await loader.reload();
 		return pi.createAgentSession({
@@ -698,13 +1299,6 @@ async function startTuiBackend(state: SessionState): Promise<void> {
 	});
 	state.runtime = runtime;
 
-	// Reconstruct todo state from the session (tool reads it on demand).
-	try {
-		reconstructFromEntries(state.sessionManager.getEntries() ?? []);
-	} catch (err) {
-		console.error("[CodePi] Error reconstructing todos:", err);
-	}
-
 	state.tui = new pi.InteractiveMode(runtime, {
 		terminal: state.pty,
 		verbose: true,
@@ -714,11 +1308,11 @@ async function startTuiBackend(state: SessionState): Promise<void> {
 	state.isBusy = true;
 	treeProvider?.refresh();
 
-	// run() resolves when the TUI exits (e.g. /quit) → close the terminal tab.
+	// run() resolves when the TUI exits (e.g. /quit) → close the panel tab.
 	void state.tui
 		.run()
 		.then(() => {
-			state.terminal.dispose();
+			state.panel.dispose();
 		})
 		.catch((err: Error) => {
 			console.error("[CodePi] TUI exited with error:", err);
@@ -728,74 +1322,171 @@ async function startTuiBackend(state: SessionState): Promise<void> {
 		});
 }
 
-// ── File Review Prompt Queue ─────────────────────────────────
+// ── Pending-edit tab dots (Copilot-style) ────────────────────
 
-/**
- * VS Code shows `showInformationMessage` notifications in the bottom-right
- * corner. We queue one prompt per edited FILE so the user is asked to accept
- * or decline changes file by file, in order.
- */
-function enqueueFileReviewPrompt(
-	summary: EditProposalSummary,
-	state: SessionState,
-): void {
-	fileReviewQueue.push({ summary, state });
-	void pumpFileReviewQueue();
+// FileDecorationProvider that marks files with pending review edits with the
+// same "squared-dot" indicator Copilot uses: a colored dot badge on the editor
+// tab (and Explorer). The color matches VS Code's chat.editedFileForeground
+// (the color Copilot uses for edited files). The dot disappears once every
+// hunk of the proposal is accepted or declined.
+let pendingReviewDotsEmitter:
+	| vscode.EventEmitter<vscode.Uri | vscode.Uri[]>
+	| undefined;
+let pendingReviewUris = new Set<string>(); // uri.toString() with pending hunks
+
+function registerPendingReviewDots(context: vscode.ExtensionContext): void {
+	pendingReviewDotsEmitter = new vscode.EventEmitter<
+		vscode.Uri | vscode.Uri[]
+	>();
+	const provider: vscode.FileDecorationProvider = {
+		onDidChangeFileDecorations: pendingReviewDotsEmitter.event,
+		provideFileDecoration(uri: vscode.Uri) {
+			if (!pendingReviewUris.has(uri.toString())) return undefined;
+			return {
+				badge: "●",
+				color: new vscode.ThemeColor("chat.editedFileForeground"),
+				tooltip: "CodePi: edits pending review",
+			};
+		},
+	};
+	context.subscriptions.push(
+		vscode.window.registerFileDecorationProvider(provider),
+		pendingReviewDotsEmitter,
+	);
 }
 
-async function pumpFileReviewQueue(): Promise<void> {
-	if (promptInFlight) return;
-	promptInFlight = true;
-	try {
-		while (fileReviewQueue.length > 0) {
-			const item = fileReviewQueue.shift();
-			if (!item) break;
-			const { summary, state } = item;
-
-			const proposal = state.review.getProposal(summary.proposalId);
-			if (!proposal || proposal.status !== "pending") continue;
-
-			// Open the file so the user can see the inline diff before deciding.
-			try {
-				const uri = vscode.Uri.parse(proposal.uri);
-				const doc = await vscode.workspace.openTextDocument(uri);
-				await vscode.window.showTextDocument(doc, { preview: false });
-			} catch {
-				/* ignore */
-			}
-
-			const c = summary.counts;
-			const detail =
-				`${c.total} change${c.total === 1 ? "" : "s"} · ` +
-				`${c.linesAdded} added · ${c.linesRemoved} removed`;
-			const choice = await vscode.window.showInformationMessage(
-				`CodePi edited ${summary.path}`,
-				{ detail, modal: false },
-				"Accept",
-				"Decline",
-				"Open Diff",
-			);
-
-			if (choice === "Accept") {
-				await state.review.acceptFile(summary.proposalId);
-			} else if (choice === "Decline") {
-				await state.review.rejectFile(summary.proposalId);
-			} else if (choice === "Open Diff") {
-				const p = state.review.getProposal(summary.proposalId);
-				if (p) await openProposalDiff(p);
-				// Re-queue so the file is still asked for later.
-				fileReviewQueue.push({ summary, state });
-			}
-			// Dismiss (or modal close) → leave pending; user can act later.
+/** Recompute which files carry a pending-edit dot and notify VS Code. */
+function syncPendingReviewDots(): void {
+	if (!pendingReviewDotsEmitter) return;
+	const next = new Set<string>();
+	for (const [, st] of sessions) {
+		for (const p of st.review.allProposals()) {
+			if (p.status !== "pending") continue;
+			if (st.review.counts(p).pending === 0) continue;
+			next.add(p.uri);
 		}
-	} finally {
-		promptInFlight = false;
 	}
+	const changed: vscode.Uri[] = [];
+	for (const u of next) {
+		if (!pendingReviewUris.has(u)) changed.push(vscode.Uri.parse(u));
+	}
+	for (const u of pendingReviewUris) {
+		if (!next.has(u)) changed.push(vscode.Uri.parse(u));
+	}
+	if (changed.length === 0) return;
+	pendingReviewUris = next;
+	pendingReviewDotsEmitter.fire(changed);
 }
 
 function getWorkspaceRoot(): string {
 	const ws = vscode.workspace.workspaceFolders?.[0];
 	return ws?.uri.fsPath ?? os.homedir();
+}
+
+// ── Panel Status Icon ────────────────────────────────────────
+
+/**
+ * Set the tab icon to a colored status dot (no logo):
+ * green = idle, yellow = generating, red = backend error.
+ */
+function setPanelIcon(
+	panel: vscode.WebviewPanel,
+	mode: "idle" | "busy" | "error",
+): void {
+	const uri = vscode.Uri.joinPath(
+		extensionContext!.extensionUri,
+		"media",
+		`pi-icon-${mode}.svg`,
+	);
+	panel.iconPath = { light: uri, dark: uri };
+}
+
+// ── Terminal Webview HTML ────────────────────────────────────
+
+/**
+ * HTML shell for the TUI webview. Loads the xterm.js bundle (dist/terminal.js)
+ * with a nonce against the CSP; xterm.css is embedded in the bundle.
+ *
+ * The session id is embedded as a meta tag so the webview content can persist
+ * it via `vscode.setState` — VS Code keeps that state with the panel and hands
+ * it back to the registered serializer on a window reload, which is how the
+ * tab knows which session to restore.
+ */
+function buildTerminalHtml(
+	extensionUri: vscode.Uri,
+	webview: vscode.Webview,
+	sessionId: string,
+): string {
+	const distUri = vscode.Uri.joinPath(extensionUri, "webview-ui", "dist");
+	const scriptUri = webview.asWebviewUri(
+		vscode.Uri.joinPath(distUri, "terminal.js"),
+	);
+	// Bundled terminal font: Fira Code Nerd Font (SIL OFL 1.1 — license in
+	// media/OFL-FiraCodeNerd.txt). One family with both the Fira Code text
+	// glyphs and the powerline/nerd symbols (branch U+E0A0 in the TUI footer,
+	// separators), shipped as woff2. The files live in media/ AND are copied
+	// into webview-ui/dist/ by the build (scripts/copy-fonts.mjs) — dist is
+	// permanently in the panel's localResourceRoots, so even panels created
+	// before media/ was added can fetch the font.
+	const fontUri = webview.asWebviewUri(
+		vscode.Uri.joinPath(distUri, "fira-code-nerd-regular.woff2"),
+	);
+	const fontBoldUri = webview.asWebviewUri(
+		vscode.Uri.joinPath(distUri, "fira-code-nerd-bold.woff2"),
+	);
+	const nonce = getNonce();
+	const safeSessionId = sessionId.replace(/"/g, "&quot;");
+	return /* html */ `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline'; font-src ${webview.cspSource}; script-src ${webview.cspSource} 'nonce-${nonce}';" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="codepi-session-id" content="${safeSessionId}" />
+  <title>PI</title>
+  <style>
+    /* Bundled terminal font — Fira Code Nerd Font (OFL 1.1). Preloaded
+       by terminal.ts so the xterm canvas builds its glyph atlas with the
+       real font from the first frame. */
+    @font-face {
+      font-family: "FiraCode Nerd Font";
+      font-display: block;
+      font-weight: 400;
+      src: url("${fontUri}") format("woff2");
+    }
+    @font-face {
+      font-family: "FiraCode Nerd Font";
+      font-display: block;
+      font-weight: 700;
+      src: url("${fontBoldUri}") format("woff2");
+    }
+    html, body { width: 100%; height: 100%; margin: 0; padding: 0; overflow: hidden; background: var(--vscode-terminal-background, var(--vscode-editor-background, #1e1e1e)); }
+    /* Absolute-fill: robust against webview percentage-height quirks. */
+    #terminal { position: absolute; top: 0; left: 0; right: 0; bottom: 0; }
+    #terminal .xterm { width: 100%; height: 100%; }
+    /* xterm.css paints .xterm-viewport #000 and it fills the whole .xterm,
+       while the grid canvas only covers whole rows — the leftover strip at
+       the bottom would render black. Make it transparent so the painted
+       layers behind it (html/body/#terminal/.xterm) show through; the
+       background is re-applied from the theme in terminal.ts. */
+    .xterm .xterm-viewport { background-color: transparent; }
+  </style>
+</head>
+<body>
+  <div id="terminal"></div>
+  <script nonce="${nonce}" src="${scriptUri}"></script>
+</body>
+</html>`;
+}
+
+function getNonce(): string {
+	let text = "";
+	const possible =
+		"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+	for (let i = 0; i < 32; i++) {
+		text += possible.charAt(Math.floor(Math.random() * possible.length));
+	}
+	return text;
 }
 
 // ── Deactivation ─────────────────────────────────────────────
