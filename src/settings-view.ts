@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { join } from "node:path";
 import {
 	ensurePiJsonFileInDir,
 	getCanonicalAgentDir,
@@ -125,6 +126,9 @@ export class SettingsViewProvider implements vscode.WebviewViewProvider {
 		enabled: boolean,
 	): Promise<void> {
 		const settingsPath = getSettingsPathForAgent(this.agentDir);
+		if (!isBundledResourceId(id)) {
+			throw new Error(`Unknown bundled resource: ${id}`);
+		}
 		const settings = readJsonFile<Record<string, unknown>>(settingsPath) ?? {};
 		const current = readBundledResourceConfig(settings);
 		const next: BundledResourceConfig = {
@@ -149,8 +153,14 @@ export class SettingsViewProvider implements vscode.WebviewViewProvider {
 	}
 }
 
+function isBundledResourceId(
+	id: string,
+): id is DashboardData["bundledResources"][number]["id"] {
+	return id === "custom-footer" || id === "filechanges" || id === "nebula-pulse";
+}
+
 function getSettingsPathForAgent(agentDir: string): string {
-	return `${agentDir}/settings.json`;
+	return join(agentDir, "settings.json");
 }
 
 function buildSettingsHtml(

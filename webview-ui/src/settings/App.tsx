@@ -1,285 +1,189 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { SETTINGS_SCHEMA, validateSettings } from "../../../src/shared/pi-settings-schema";
-import { FormSection } from "./components/FormSection";
-import { AuthKeys } from "./components/AuthKeys";
-import { ModelsEditor } from "./components/ModelsEditor";
-import type { AuthEntry, SettingsMessage, SettingsRecord, SettingsReply } from "./types";
+import React, { useCallback, useEffect, useState } from "react";
+import type {
+	BundledResourceRow,
+	DashboardData,
+	SettingsMessage,
+	SettingsReply,
+} from "./types";
 
 const vscode = acquireVsCodeApi();
 
-const TAB_STRIP = [
-	{ id: "sessions", label: "Sessions", active: false },
-	{ id: "settings", label: "Settings", active: true },
-];
+function post(message: SettingsMessage): void {
+	vscode.postMessage(message);
+}
+
+function formatPackageSummary(packages: DashboardData["packages"]): string {
+	if (packages.configured === 0) return "No Pi packages configured.";
+	const installed = `${packages.installed} installed`;
+	const missing = packages.missing > 0 ? `, ${packages.missing} missing` : "";
+	return `${packages.configured} configured · ${installed}${missing}`;
+}
+
+function ResourceToggle({ resource }: { resource: BundledResourceRow }): JSX.Element {
+	const description = resource.kind === "theme"
+		? "A CodePi-only theme bundled with the extension."
+		: "An extension bundled with CodePi for new sessions.";
+
+	return (
+		<label className="settings-resource-row">
+			<span className="settings-resource-copy">
+				<span className="settings-resource-label">{resource.label}</span>
+				<span className="settings-help">{description}</span>
+			</span>
+			<input
+				type="checkbox"
+				checked={resource.enabled}
+				onChange={(event) =>
+					post({
+						command: "settings:setBundledResource",
+						id: resource.id,
+						enabled: event.currentTarget.checked,
+					})
+				}
+				aria-label={`Enable ${resource.label}`}
+			/>
+		</label>
+	);
+}
+
+function FileButton({
+	file,
+	label,
+	exists,
+}: {
+	file: "settings" | "models" | "auth";
+	label: string;
+	exists: boolean;
+}): JSX.Element {
+	return (
+		<div className="settings-file-row">
+			<div>
+				<strong>{label}</strong>
+				<span className="settings-help">{exists ? "File exists" : "Created when opened"}</span>
+			</div>
+			<button
+				className="settings-button settings-button-secondary"
+				type="button"
+				onClick={() => post({ command: "settings:openFile", file })}
+			>
+				Open in VS Code
+			</button>
+		</div>
+	);
+}
 
 export function SettingsApp(): JSX.Element {
-	const [settings, setSettings] = useState<SettingsRecord | null>(null);
-	const [auth, setAuth] = useState<AuthEntry[]>([]);
-	const [models, setModels] = useState<unknown>({ providers: {} });
-	const [modelsError, setModelsError] = useState<string | undefined>(undefined);
-	const [catalog, setCatalog] = useState<Array<{ provider: string; modelId: string }>>([]);
-	const [dirty, setDirty] = useState(false);
-	const [status, setStatus] = useState<string>("");
-	const [tab, setTab] = useState<"form" | "json">("form");
-	const [loaded, setLoaded] = useState(false);
-	const [jsonPrefill, setJsonPrefill] = useState<string | undefined>(undefined);
+	const [data, setData] = useState<DashboardData | null>(null);
+	const [status, setStatus] = useState("");
+	const [error, setError] = useState("");
 
-	const post = useCallback((m: SettingsMessage) => vscode.postMessage(m), []);
+	const reload = useCallback(() => {
+		setError("");
+		post({ command: "settings:refresh" });
+	}, []);
 
 	useEffect(() => {
-		const onMsg = (e: MessageEvent<SettingsReply>) => {
-			const msg = e.data;
-			switch (msg.command) {
+		const onMessage = (event: MessageEvent<SettingsReply>) => {
+			const message = event.data;
+			switch (message.command) {
 				case "settings:data":
-					setSettings(msg.settings ?? {});
-					setAuth(msg.auth ?? []);
-					setModels(msg.models ?? { providers: {} });
-					setModelsError(msg.modelsError);
-					setCatalog(msg.catalog ?? []);
-					setLoaded(true);
-					setStatus("");
+					setData(message.data);
+					setError("");
 					break;
 				case "settings:saved":
-					setDirty(false);
-					setStatus(`Saved ${msg.file ?? ""}`.trim());
-					post({ command: "settings:get" });
+					setStatus(`${message.resource} preference saved; applies to new sessions.`);
+					break;
+				case "settings:opened":
+					setStatus(`Opened ${message.file}.json in VS Code.`);
 					break;
 				case "settings:error":
-					setStatus(`Error: ${msg.message}`);
-					break;
-				case "settings:importResult":
-					setStatus(`Imported: ${msg.message || "nothing new"}`);
-					setLoaded(true);
-					post({ command: "settings:get" });
+					setError(message.message);
 					break;
 			}
 		};
-		window.addEventListener("message", onMsg);
+		window.addEventListener("message", onMessage);
 		post({ command: "settings:get" });
-		return () => window.removeEventListener("message", onMsg);
-	}, [post]);
-
-	const onChange = useCallback((key: string, value: unknown) => {
-		setSettings((prev) => {
-			if (!prev) return prev;
-			return { ...prev, [key]: value };
-		});
-		setDirty(true);
+		return () => window.removeEventListener("message", onMessage);
 	}, []);
 
-	const save = useCallback(() => {
-		if (!settings) return;
-		const errors = validateSettings(settings);
-		if (errors.length > 0) {
-			setStatus(`Validation: ${errors.join("; ")}`);
-			return;
-		}
-		post({ command: "settings:saveSettings", settings });
-	}, [settings, post]);
-
-	const generalSection = useMemo(
-		() => SETTINGS_SCHEMA.find((s) => s.id === "general"),
-		[],
-	);
-	const advancedSections = useMemo(
-		() => SETTINGS_SCHEMA.filter((s) => s.id !== "general"),
-		[],
-	);
-
-	if (!loaded) {
+	if (!data) {
 		return (
-			<div className="settings-page">
-				<div className="settings-loading">Loading settings…</div>
+			<div className="settings-page settings-loading" role="status">
+				Loading CodePi settings…
 			</div>
 		);
 	}
 
 	return (
 		<div className="settings-page">
-			<div className="settings-tabstrip">
-				{TAB_STRIP.map((t) => (
-					<button
-						key={t.id}
-						className={`settings-tab ${t.active ? "settings-tab-active" : ""}`}
-						onClick={() => t.id === "sessions" && post({ command: "settings:openSessions" })}
-					>
-						{t.label}
-					</button>
-				))}
-			</div>
-			<div className="settings-inner-tabs">
-				<button
-					className={`settings-inner-tab ${tab === "form" ? "settings-inner-tab-active" : ""}`}
-					onClick={() => setTab("form")}
-				>
-					Form
-				</button>
-				<button
-					className={`settings-inner-tab ${tab === "json" ? "settings-inner-tab-active" : ""}`}
-					onClick={() => setTab("json")}
-				>
-					JSON editor
-				</button>
-			</div>
-			{tab === "form" ? (
-				<div className="settings-form">
-					{generalSection && (
-						<FormSection
-							title={generalSection.title}
-							fields={generalSection.fields}
-							settings={settings ?? {}}
-							onChange={onChange}
-						/>
-					)}
-					<AuthKeys auth={auth} catalog={catalog} post={post} />
-					<ModelsEditor
-						models={models}
-						modelsError={modelsError}
-						post={post}
-						openInJson={(provider) => {
-							setJsonPrefill(provider);
-							setTab("json");
-						}}
-					/>
-					{advancedSections.map((s) => (
-						<FormSection
-							key={s.id}
-							title={s.title}
-							fields={s.fields}
-							settings={settings ?? {}}
-							onChange={onChange}
-						/>
-					))}
-					<div className="settings-section">
-						<h3 className="settings-section-title">Import configuration</h3>
-						<p className="settings-help">
-							Copy settings, API keys, custom models (and optionally sessions) from the pi CLI's ~/.pi — or another folder — into CodePi's own storage.
-						</p>
-						<button
-							className="settings-save"
-							onClick={() => post({ command: "settings:importConfig" })}
-						>
-							Import pi configuration…
-						</button>
-					</div>
-					<div className="settings-actions">
-						<button className="settings-save" onClick={save} disabled={!dirty}>
-							Save settings
-						</button>
-						<button
-							className="settings-save"
-							onClick={() => {
-								post({ command: "settings:get" });
-								setDirty(false);
-							}}
-						>
-							Reload
-						</button>
-						<span className="settings-status">{status}</span>
-					</div>
-					<p className="settings-note">
-						Saved settings apply to new sessions. API keys apply to the next message.
+			<header className="settings-header">
+				<div>
+					<h1>CodePi settings</h1>
+					<p className="settings-help">
+						Pi resources are shared with the Pi CLI on this computer; CodePi sessions remain computer-specific.
 					</p>
 				</div>
-			) : (
-				<JsonEditor
-					settings={settings}
-					models={models}
-					prefillProvider={jsonPrefill}
-					post={post}
-					status={status}
-					setStatus={setStatus}
-					onDirty={() => setDirty(true)}
-				/>
-			)}
-		</div>
-	);
-}
-
-function JsonEditor(props: {
-	settings: SettingsRecord | null;
-	models: unknown;
-	prefillProvider?: string;
-	post: (m: SettingsMessage) => void;
-	status: string;
-	setStatus: (s: string) => void;
-	onDirty: () => void;
-}): JSX.Element {
-	const [file, setFile] = useState<"settings" | "models">("settings");
-	const [text, setText] = useState("");
-	const [modelsText, setModelsText] = useState("");
-	const [error, setError] = useState("");
-	// Prefill applies exactly once per provider value; a later settings:data
-	// (models refresh) must never clobber the text back to the single-provider view.
-	const appliedPrefill = useRef<string | undefined>(undefined);
-
-	useEffect(() => {
-		setText(JSON.stringify(props.settings ?? {}, null, 2));
-		// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, [props.settings]);
-	useEffect(() => {
-		if (props.prefillProvider && props.prefillProvider !== appliedPrefill.current) {
-			const m = props.models as { providers?: Record<string, unknown> } | null;
-			const cfg = m?.providers?.[props.prefillProvider];
-			setModelsText(
-				JSON.stringify(
-					{ providers: { [props.prefillProvider]: cfg ?? { models: [] } } },
-					null,
-					2,
-				),
-			);
-			setFile("models");
-			props.setStatus(`Editing ${props.prefillProvider} in models.json`);
-			appliedPrefill.current = props.prefillProvider;
-		} else if (props.prefillProvider === undefined) {
-			setModelsText(JSON.stringify(props.models ?? { providers: {} }, null, 2));
-			appliedPrefill.current = undefined;
-		}
-		// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, [props.models, props.prefillProvider]);
-
-	const current = file === "settings" ? text : modelsText;
-	const setCurrent = (v: string) => {
-		props.onDirty();
-		if (file === "settings") setText(v);
-		else setModelsText(v);
-		setError("");
-	};
-
-	return (
-		<div className="settings-json">
-			<div className="settings-inner-tabs">
-				<select value={file} onChange={(e) => setFile(e.target.value as "settings" | "models")}>
-					<option value="settings">settings.json</option>
-					<option value="models">models.json</option>
-				</select>
-			</div>
-			<textarea
-				className="settings-json-text"
-				value={current}
-				spellCheck={false}
-				onChange={(e) => setCurrent(e.target.value)}
-			/>
-			{error && (
-				<p className="settings-help" style={{ color: "#d29922", whiteSpace: "pre-wrap" }}>{error}</p>
-			)}
-			<div className="settings-actions">
 				<button
-					className="settings-save"
-					onClick={() => {
-						try {
-							JSON.parse(current);
-						} catch (err) {
-							setError(`Invalid JSON: ${err instanceof Error ? err.message : String(err)}`);
-							return;
-						}
-						props.post({ command: "settings:saveJson", file, text: current });
-					}}
+					className="settings-button settings-button-secondary"
+					type="button"
+					onClick={() => post({ command: "settings:openSessions" })}
 				>
-					Validate &amp; Save
+					Sessions
 				</button>
-				<span className="settings-status">{props.status}</span>
-			</div>
+			</header>
+
+			{error && <div className="settings-alert settings-alert-error" role="alert">{error}</div>}
+			{status && <div className="settings-alert settings-alert-status" role="status">{status}</div>}
+
+			<section className="settings-card" aria-labelledby="resources-title">
+				<div className="settings-card-heading">
+					<div>
+						<h2 id="resources-title">Pi resources</h2>
+						<p className="settings-help">The canonical resource directory for this computer.</p>
+					</div>
+					<button className="settings-button settings-button-secondary" type="button" onClick={reload}>
+						Refresh
+					</button>
+				</div>
+				<code className="settings-path">{data.agentDir}</code>
+				<p className="settings-summary">{formatPackageSummary(data.packages)}</p>
+				{data.packages.missing > 0 && (
+					<div className="settings-package-list">
+						{data.packages.entries.filter((entry) => !entry.installed).map((entry) => (
+							<div className="settings-package-missing" key={`${entry.scope}:${entry.source}`}>
+								<span>{entry.source}</span><span>{entry.scope} package missing</span>
+							</div>
+						))}
+					</div>
+				)}
+				<p className="settings-help">CodePi sessions are stored separately at <code>{data.sessionDir}</code>.</p>
+			</section>
+
+			<section className="settings-card" aria-labelledby="defaults-title">
+				<h2 id="defaults-title">CodePi defaults</h2>
+				<p className="settings-help">
+					These resources ship with CodePi and are not installed into the Pi CLI. Changes apply to new sessions.
+				</p>
+				<div className="settings-resource-list">
+					{data.bundledResources.map((resource) => (
+						<ResourceToggle key={resource.id} resource={resource} />
+					))}
+				</div>
+			</section>
+
+			<section className="settings-card" aria-labelledby="files-title">
+				<h2 id="files-title">Pi files</h2>
+				<p className="settings-help">Edit the real Pi files with VS Code’s JSON language service and diagnostics.</p>
+				<div className="settings-file-list">
+					<FileButton file="settings" label="settings.json" exists={data.files.settings.exists} />
+					<FileButton file="models" label="models.json" exists={data.files.models.exists} />
+					<FileButton file="auth" label="auth.json" exists={data.files.auth.exists} />
+				</div>
+			</section>
+
+			<footer className="settings-footer">
+				Settings and packages are per execution machine. With Remote-SSH, use the remote computer’s Pi directory and session storage.
+			</footer>
 		</div>
 	);
 }

@@ -45,5 +45,9 @@ export type SettingsMessage =
 export type SettingsReply =
 	| { command: "settings:data"; data: DashboardData }
 	| { command: "settings:saved"; ok: true; resource: BundledResourceRow["id"] }
-	| { command: "settings:opened"; file: "settings" | "models" | "auth"; path: string }
+	| {
+			command: "settings:opened";
+			file: "settings" | "models" | "auth";
+			path: string;
+	  }
 	| { command: "settings:error"; message: string };
