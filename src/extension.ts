@@ -39,6 +39,7 @@ import {
 	applyImplicitBundledTheme,
 	buildPiResourceLoaderOptions,
 	buildPiRuntimeResourcePaths,
+	installImplicitBundledThemeReload,
 } from "./pi-runtime-config";
 import { runImportFlow } from "./import-config";
 
@@ -1296,7 +1297,7 @@ async function startTuiBackend(state: SessionState): Promise<void> {
 		});
 		await loader.reload();
 		applyImplicitBundledTheme(settingsManager, bundledThemeEnabled);
-		return pi.createAgentSession({
+		const result = await pi.createAgentSession({
 			resourceLoader: loader,
 			settingsManager,
 			cwd: opts.cwd,
@@ -1306,6 +1307,16 @@ async function startTuiBackend(state: SessionState): Promise<void> {
 			sessionManager: opts.sessionManager,
 			sessionStartEvent: { type: "session_start", reason: "startup" },
 		});
+		installImplicitBundledThemeReload(
+			result.session,
+			settingsManager,
+			() => buildPiRuntimeResourcePaths(
+				extensionDir?.fsPath ?? "",
+				agentDir,
+				readJsonFile(getSettingsPath()) ?? {},
+			).bundledThemePaths.some((p) => fs.existsSync(p)),
+		);
+		return result;
 	};
 
 	const runtime = await pi.createAgentSessionRuntime(createRuntime, {

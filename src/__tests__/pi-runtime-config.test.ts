@@ -4,6 +4,7 @@ import {
 	applyImplicitBundledTheme,
 	buildPiResourceLoaderOptions,
 	buildPiRuntimeResourcePaths,
+	installImplicitBundledThemeReload,
 } from "../pi-runtime-config";
 
 describe("Pi runtime resource paths", () => {
@@ -65,17 +66,63 @@ describe("Pi runtime resource paths", () => {
 		expect(theme).toBe("nebula-pulse");
 	});
 
-	it("does not override an explicit user theme", () => {
-		let theme: string | undefined = "user-theme";
+	it("reapplies the theme through the later AgentSession.reload hook", async () => {
+		let theme: string | undefined;
+		let reloadCalls = 0;
 		const settingsManager = {
 			getThemeSetting: () => theme,
 			applyOverrides: (overrides: { theme: string }) => {
 				theme = overrides.theme;
 			},
 		};
+		const session = {
+			reload: async (options?: { beforeSessionStart?: () => void | Promise<void> }) => {
+				reloadCalls++;
+			theme = undefined;
+			await options?.beforeSessionStart?.();
+		},
+		};
 
-		applyImplicitBundledTheme(settingsManager, true);
-		expect(theme).toBe("user-theme");
+		installImplicitBundledThemeReload(session, settingsManager, () => true);
+		await session.reload();
+		expect(reloadCalls).toBe(1);
+		expect(theme).toBe("nebula-pulse");
+	});
+
+	it("does not reapply a disabled bundled theme or override an explicit user theme", async () => {
+		const makeSettingsManager = (persistedTheme?: string) => {
+			let theme = persistedTheme;
+			return {
+				settingsManager: {
+					getThemeSetting: () => theme,
+					applyOverrides: (overrides: { theme: string }) => {
+						theme = overrides.theme;
+					},
+				},
+				getTheme: () => theme,
+				resetFromDisk: () => {
+					theme = persistedTheme;
+				},
+			};
+		};
+		const makeSession = (resetFromDisk: () => void) => ({
+			reload: async (options?: { beforeSessionStart?: () => void | Promise<void> }) => {
+				resetFromDisk();
+				await options?.beforeSessionStart?.();
+			},
+		});
+
+		const disabled = makeSettingsManager();
+		const disabledSession = makeSession(disabled.resetFromDisk);
+		installImplicitBundledThemeReload(disabledSession, disabled.settingsManager, () => false);
+		await disabledSession.reload();
+		expect(disabled.getTheme()).toBeUndefined();
+
+		const explicit = makeSettingsManager("user-theme");
+		const explicitSession = makeSession(explicit.resetFromDisk);
+		installImplicitBundledThemeReload(explicitSession, explicit.settingsManager, () => true);
+		await explicitSession.reload();
+		expect(explicit.getTheme()).toBe("user-theme");
 	});
 
 	it("builds a canonical loader configuration with extensions enabled", () => {
