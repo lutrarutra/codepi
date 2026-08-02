@@ -164,27 +164,32 @@ export type CodePiSettingsUpdater = (
 	settings: Record<string, unknown>,
 ) => Record<string, unknown>;
 
-type SettingsSnapshot = {
-	exists: boolean;
-	mtimeMs?: number;
-	size?: number;
+export type CodePiSettingsMergeOptions = {
+	/** Test seam invoked after the initial read and before the change check. */
+	beforeWriteCheck?: (attempt: number) => void;
 };
 
-function getSettingsSnapshot(p: string): SettingsSnapshot {
+function readSettingsContent(p: string): string | undefined {
 	try {
-		const info = statSync(p);
-		return { exists: true, mtimeMs: info.mtimeMs, size: info.size };
-	} catch {
-		return { exists: false };
+		return readFileSync(p, "utf8");
+	} catch (err) {
+		if ((err as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+		throw err;
 	}
 }
 
-function sameSettingsSnapshot(a: SettingsSnapshot, b: SettingsSnapshot): boolean {
-	return (
-		a.exists === b.exists &&
-		a.mtimeMs === b.mtimeMs &&
-		a.size === b.size
-	);
+function parseSettingsContent(
+	settingsPath: string,
+	raw: string | undefined,
+): Record<string, unknown> {
+	if (raw === undefined) return {};
+	try {
+		return JSON.parse(raw) as Record<string, unknown>;
+	} catch (err) {
+		throw new Error(
+			`Failed to parse ${settingsPath}: ${err instanceof Error ? err.message : String(err)}`,
+		);
+	}
 }
 
 /**
@@ -192,24 +197,28 @@ function sameSettingsSnapshot(a: SettingsSnapshot, b: SettingsSnapshot): boolean
  *
  * The SDK's SettingsManager owns its lock when it writes known Pi settings.
  * CodePi's namespaced key is intentionally outside that API, so this helper
- * performs a stale-read check immediately before the atomic rename. A caller
- * that observes a concurrent writer gets one retry against the newest file
- * rather than clobbering the other writer's changes.
+ * re-reads the complete file immediately before the atomic rename. A caller
+ * that observes changed content gets one retry against the newest file rather
+ * than clobbering the other writer's changes.
  */
 export function writeCodePiSettingsMerge(
 	settingsPath: string,
 	updater: CodePiSettingsUpdater,
+	options?: CodePiSettingsMergeOptions,
 ): void {
 	for (let attempt = 0; attempt < 2; attempt++) {
-		const initialSnapshot = getSettingsSnapshot(settingsPath);
-		const current = readJsonFile<Record<string, unknown>>(settingsPath) ?? {};
+		const initialContent = readSettingsContent(settingsPath);
+		const current = parseSettingsContent(settingsPath, initialContent);
 		const next = updater({ ...current });
-		const beforeWrite = getSettingsSnapshot(settingsPath);
-		if (!sameSettingsSnapshot(initialSnapshot, beforeWrite)) continue;
+		options?.beforeWriteCheck?.(attempt);
+		const latestContent = readSettingsContent(settingsPath);
+		if (latestContent !== initialContent) continue;
 		writeJsonFileAtomic(settingsPath, next);
 		return;
 	}
-	throw new Error(`Settings changed while updating ${settingsPath}; please retry.`);
+	throw new Error(
+		`Settings changed while updating ${settingsPath}; please retry.`,
+	);
 }
 
 export type PiJsonFile = "settings" | "models" | "auth";

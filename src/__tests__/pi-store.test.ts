@@ -133,21 +133,38 @@ describe("CodePi settings merge and Pi JSON files", () => {
 	it("does not overwrite malformed settings", () => {
 		const settingsPath = join(dir, "settings.json");
 		writeFileSync(settingsPath, "{oops");
-		expect(() => updateBundledResourceConfig(settingsPath, {
-			bundledExtensions: { "custom-footer": false, filechanges: true },
-			bundledThemes: { "nebula-pulse": true },
-		})).toThrow(/Failed to parse/);
+		expect(() =>
+			updateBundledResourceConfig(settingsPath, {
+				bundledExtensions: { "custom-footer": false, filechanges: true },
+				bundledThemes: { "nebula-pulse": true },
+			}),
+		).toThrow(/Failed to parse/);
 		expect(readFileSync(settingsPath, "utf8")).toBe("{oops");
 	});
 
-	it("retries an updater against the latest file snapshot", () => {
+	it("re-reads after a concurrent writer and preserves its latest keys", () => {
 		const settingsPath = join(dir, "settings.json");
 		writeJsonFileAtomic(settingsPath, { before: true });
-		writeCodePiSettingsMerge(settingsPath, (settings) => ({
-			...settings,
+		let injected = false;
+		writeCodePiSettingsMerge(
+			settingsPath,
+			(settings) => ({ ...settings, updated: true }),
+			{
+				beforeWriteCheck: () => {
+					if (injected) return;
+					injected = true;
+					writeJsonFileAtomic(settingsPath, {
+						before: true,
+						fromConcurrentWriter: true,
+					});
+				},
+			},
+		);
+		expect(readJsonFile(settingsPath)).toEqual({
+			before: true,
+			fromConcurrentWriter: true,
 			updated: true,
-		}));
-		expect(readJsonFile(settingsPath)).toEqual({ before: true, updated: true });
+		});
 	});
 });
 
@@ -269,14 +286,23 @@ describe("ensureRuntimeTools", () => {
 		expect(statSync(join(dir, "bin", "rg")).size).toBe(rgBefore);
 	});
 
-	it("copies fd from a legacy ~/.pi/agent/bin when present", async () => {
+	it("copies fd from the actual legacy ~/.pi/agent/bin when present", async () => {
 		setAgentDir(dir);
-		// Simulate a legacy install under a fake home.
-		const legacy = join(dir, "fake-home", ".pi", "agent", "bin");
-		mkdirSync(legacy, { recursive: true });
-		const fakeFd = join(legacy, "fd");
-		writeFileSync(fakeFd, "#!/bin/sh\necho fake fd\n");
-		await ensureRuntimeTools(dir);
-		expect(existsSync(join(dir, "bin"))).toBe(true);
+		const previousHome = process.env.HOME;
+		const fakeHome = join(dir, "fake-home");
+		process.env.HOME = fakeHome;
+		try {
+			const legacy = join(fakeHome, ".pi", "agent", "bin");
+			mkdirSync(legacy, { recursive: true });
+			const fakeFd = join(legacy, "fd");
+			writeFileSync(fakeFd, "#!/bin/sh\necho fake fd\n", { mode: 0o755 });
+			await ensureRuntimeTools(dir);
+			const copiedFd = join(dir, "bin", "fd");
+			expect(readFileSync(copiedFd, "utf8")).toContain("fake fd");
+			expect(statSync(copiedFd).mode & 0o111).not.toBe(0);
+		} finally {
+			if (previousHome === undefined) delete process.env.HOME;
+			else process.env.HOME = previousHome;
+		}
 	});
 });
