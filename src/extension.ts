@@ -27,13 +27,18 @@ import {
 import { SettingsViewProvider } from "./settings-view";
 import {
 	detectLegacyConfig,
-	ensureDefaultTheme,
 	ensureRuntimeTools,
-	getAgentDir,
+	getCanonicalAgentDir,
 	getCodePiSessionDir,
+	getSettingsPath,
 	importLegacyConfig,
+	readJsonFile,
 	setAgentDir,
 } from "./pi-store";
+import {
+	buildPiResourceLoaderOptions,
+	buildPiRuntimeResourcePaths,
+} from "./pi-runtime-config";
 import { runImportFlow } from "./import-config";
 
 // ── Types ────────────────────────────────────────────────────
@@ -163,16 +168,12 @@ export async function activate(context: vscode.ExtensionContext) {
 	process.env.TERM_PROGRAM = "vscode";
 	process.env.COLORTERM = "truecolor";
 
-	// Point pi's config/session storage at VSCode's dedicated extension
-	// storage (globalStorageUri) instead of ~/.pi. Must run before any SDK
-	// call — pi reads PI_CODING_AGENT_DIR at call time.
-	const agentDir = path.join(context.globalStorageUri.fsPath, "agent");
+	// Point pi's config and user-resource storage at the executing computer's
+	// canonical ~/.pi/agent. Must run before any SDK call — pi reads
+	// PI_CODING_AGENT_DIR at call time.
+	const agentDir = getCanonicalAgentDir();
 	setAgentDir(agentDir);
 	fs.mkdirSync(agentDir, { recursive: true });
-
-	// Default TUI theme: select the bundled nebula-pulse unless the user has
-	// already chosen a theme (settings UI or legacy import set it).
-	ensureDefaultTheme();
 
 	// Copilot-style pending-edit dot on tabs/Explorer for files awaiting review.
 	registerPendingReviewDots(extensionContext);
@@ -296,9 +297,6 @@ export async function activate(context: vscode.ExtensionContext) {
 					const res = importLegacyConfig(legacyDir, agentDir, {
 						includeSessions: choice === "Import (config + sessions)",
 					});
-					// The import may have replaced settings.json with a legacy file
-					// that has no `theme` — restore the bundled default if so.
-					ensureDefaultTheme();
 					const list = res.imported.join(", ");
 					vscode.window.showInformationMessage(
 						`Imported into CodePi storage: ${list || "nothing new"}.`,
@@ -1237,79 +1235,73 @@ function cleanupSession(sessionId: string): void {
 async function startTuiBackend(state: SessionState): Promise<void> {
 	const pi = await getPi();
 	const workspaceRoot = getWorkspaceRoot();
-	const agentDir = getAgentDir();
+	const agentDir = getCanonicalAgentDir();
 
 	// Make fd/rg available in <agentDir>/bin BEFORE the TUI's init() looks
-	// for them — pi's ensureTool() otherwise downloads both binaries over
-	// the network during startup (the "unresponsive" gap). rg ships with
-	// this extension; fd is copied from a legacy ~/.pi/agent/bin when present.
+	// for them. The canonical agent directory is shared with the Pi CLI.
 	await ensureRuntimeTools(agentDir);
 
-	// Factory reused by the runtime for /new, /resume and /fork flows.
-	// Bundled pi resources shipped with this extension: the nebula-pulse
-	// theme (default) and the custom-footer + filechanges extensions. Passed
-	// as additional paths so they load even with `noExtensions: true` (they
-	// get temporary "cli" scope).
 	const extensionUri = extensionContext?.extensionUri;
 	const extensionDir = extensionUri
 		? vscode.Uri.joinPath(extensionUri, "resources", "extensions")
 		: undefined;
-	const customFooterPath = extensionDir
-		? vscode.Uri.joinPath(extensionDir, "custom-footer.ts").fsPath
-		: "";
-	const fileChangesPath = extensionDir
-		? vscode.Uri.joinPath(extensionDir, "filechanges.ts").fsPath
-		: "";
-	const nebulaPulsePath = extensionUri
-		? vscode.Uri.joinPath(
-				extensionUri,
-				"resources",
-				"themes",
-				"nebula-pulse.json",
-			).fsPath
-		: "";
-
-	const bundledExtensions = [customFooterPath, fileChangesPath].filter(
-		(p) => p,
+	const resourcePaths = buildPiRuntimeResourcePaths(
+		extensionDir?.fsPath ?? "",
+		agentDir,
+		readJsonFile(getSettingsPath()) ?? {},
 	);
-
-	// pi's real todo tool (tool + /todos + TUI overlay) ships as the
-	// rpiv-todo extension in the user's pi npm extensions dir. Load it when
-	// present instead of the old custom todo tool; without it the embedded
-	// agent simply has no todo tool (graceful degradation).
-	const rpivTodoPath = path.join(
-		os.homedir(),
-		".pi",
-		"agent",
-		"npm",
-		"node_modules",
-		"@juicesharp",
-		"rpiv-todo",
-		"index.ts",
+	const bundledExtensions = resourcePaths.bundledExtensionPaths.filter((p) =>
+		fs.existsSync(p),
 	);
-	if (fs.existsSync(rpivTodoPath)) {
-		bundledExtensions.push(rpivTodoPath);
+	const bundledThemes = resourcePaths.bundledThemePaths.filter((p) =>
+		fs.existsSync(p),
+	);
+	if (fs.existsSync(resourcePaths.rpivTodoPath)) {
+		bundledExtensions.push(resourcePaths.rpivTodoPath);
 	} else {
 		console.warn(
 			"[CodePi] rpiv-todo extension not found at",
-			rpivTodoPath,
+			resourcePaths.rpivTodoPath,
 			"— no todo tool will be available to the agent.",
 		);
 	}
 
 	const createRuntime: any = async (opts: any) => {
+		const settingsManager = pi.SettingsManager.create(opts.cwd, agentDir);
+		const hasExplicitTheme = settingsManager.getThemeSetting() !== undefined;
+		const bundledThemeEnabled = bundledThemes.length > 0;
+		if (!hasExplicitTheme && bundledThemeEnabled) {
+			settingsManager.applyOverrides({ theme: "nebula-pulse" });
+		}
+		const loaderOptions = buildPiResourceLoaderOptions(opts.cwd, agentDir, {
+			...resourcePaths,
+			bundledExtensionPaths: bundledExtensions,
+			bundledThemePaths: bundledThemes,
+		});
 		const loader = new pi.DefaultResourceLoader({
-			cwd: opts.cwd,
-			agentDir: opts.agentDir,
-			noExtensions: true,
-			additionalExtensionPaths: bundledExtensions,
-			additionalThemePaths: nebulaPulsePath ? [nebulaPulsePath] : [],
+			...loaderOptions,
+			settingsManager,
+			extensionsOverride: (base: any) => {
+				const bundled = new Set(bundledExtensions);
+				return {
+					...base,
+					extensions: [
+						...base.extensions.filter(
+							(extension: any) => !bundled.has(extension.resolvedPath ?? extension.path),
+						),
+						...base.extensions.filter(
+							(extension: any) => bundled.has(extension.resolvedPath ?? extension.path),
+						),
+					],
+				};
+			},
 		});
 		await loader.reload();
 		return pi.createAgentSession({
 			resourceLoader: loader,
+			settingsManager,
 			cwd: opts.cwd,
-			agentDir: opts.agentDir,
+			agentDir,
 			noTools: "builtin",
 			customTools: createVscodeTools(state.review),
 			sessionManager: opts.sessionManager,
