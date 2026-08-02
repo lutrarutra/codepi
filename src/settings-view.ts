@@ -8,7 +8,10 @@ import {
 	updateBundledResourceConfig,
 	type BundledResourceConfig,
 } from "./pi-store";
-import { buildDashboardData } from "./settings-dashboard";
+import {
+	buildDashboardData,
+	getDashboardFileStatus,
+} from "./settings-dashboard";
 import type {
 	DashboardData,
 	PackageStatusEntry,
@@ -16,7 +19,9 @@ import type {
 	SettingsReply,
 } from "./shared/settings-protocol";
 
-let sdkPromise: Promise<typeof import("@earendil-works/pi-coding-agent")> | undefined;
+let sdkPromise:
+	| Promise<typeof import("@earendil-works/pi-coding-agent")>
+	| undefined;
 function getSdk(): Promise<typeof import("@earendil-works/pi-coding-agent")> {
 	if (!sdkPromise) sdkPromise = import("@earendil-works/pi-coding-agent");
 	return sdkPromise;
@@ -43,9 +48,14 @@ export class SettingsViewProvider implements vscode.WebviewViewProvider {
 		this.view = webviewView;
 		webviewView.webview.options = {
 			enableScripts: true,
-			localResourceRoots: [vscode.Uri.joinPath(this.extensionUri, "webview-ui", "dist")],
+			localResourceRoots: [
+				vscode.Uri.joinPath(this.extensionUri, "webview-ui", "dist"),
+			],
 		};
-		webviewView.webview.html = buildSettingsHtml(this.extensionUri, webviewView.webview);
+		webviewView.webview.html = buildSettingsHtml(
+			this.extensionUri,
+			webviewView.webview,
+		);
 		webviewView.webview.onDidReceiveMessage((msg: SettingsMessage) => {
 			void this.handleMessage(msg);
 		});
@@ -85,7 +95,8 @@ export class SettingsViewProvider implements vscode.WebviewViewProvider {
 		const settingsPath = getSettingsPathForAgent(this.agentDir);
 		const settings = readJsonFile<Record<string, unknown>>(settingsPath) ?? {};
 		const sdk = await getSdk();
-		const cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? this.agentDir;
+		const cwd =
+			vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? this.agentDir;
 		const settingsManager = sdk.SettingsManager.create(cwd, this.agentDir);
 		const packageManager = new sdk.DefaultPackageManager({
 			cwd,
@@ -104,11 +115,7 @@ export class SettingsViewProvider implements vscode.WebviewViewProvider {
 			this.sessionDir,
 			settings,
 			packages,
-			{
-				settings: readJsonFile(settingsPath) !== undefined,
-				models: readJsonFile(`${this.agentDir}/models.json`) !== undefined,
-				auth: readJsonFile(`${this.agentDir}/auth.json`) !== undefined,
-			},
+			getDashboardFileStatus(this.agentDir),
 		);
 		this.post({ command: "settings:data", data });
 	}
@@ -134,7 +141,9 @@ export class SettingsViewProvider implements vscode.WebviewViewProvider {
 
 	private async openFile(file: "settings" | "models" | "auth"): Promise<void> {
 		const filePath = ensurePiJsonFileInDir(this.agentDir, file);
-		const document = await vscode.workspace.openTextDocument(vscode.Uri.file(filePath));
+		const document = await vscode.workspace.openTextDocument(
+			vscode.Uri.file(filePath),
+		);
 		await vscode.window.showTextDocument(document, { preview: false });
 		this.post({ command: "settings:opened", file, path: filePath });
 	}
@@ -144,10 +153,17 @@ function getSettingsPathForAgent(agentDir: string): string {
 	return `${agentDir}/settings.json`;
 }
 
-function buildSettingsHtml(extensionUri: vscode.Uri, webview: vscode.Webview): string {
+function buildSettingsHtml(
+	extensionUri: vscode.Uri,
+	webview: vscode.Webview,
+): string {
 	const distUri = vscode.Uri.joinPath(extensionUri, "webview-ui", "dist");
-	const scriptUri = webview.asWebviewUri(vscode.Uri.joinPath(distUri, "assets", "settings.js"));
-	const styleUri = webview.asWebviewUri(vscode.Uri.joinPath(distUri, "assets", "index.css"));
+	const scriptUri = webview.asWebviewUri(
+		vscode.Uri.joinPath(distUri, "assets", "settings.js"),
+	);
+	const styleUri = webview.asWebviewUri(
+		vscode.Uri.joinPath(distUri, "assets", "index.css"),
+	);
 	const nonce = getNonce();
 	return /* html */ `<!DOCTYPE html>
 <html lang="en">
@@ -167,7 +183,9 @@ function buildSettingsHtml(extensionUri: vscode.Uri, webview: vscode.Webview): s
 
 function getNonce(): string {
 	let text = "";
-	const possible = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
-	for (let i = 0; i < 32; i++) text += possible.charAt(Math.floor(Math.random() * possible.length));
+	const possible =
+		"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+	for (let i = 0; i < 32; i++)
+		text += possible.charAt(Math.floor(Math.random() * possible.length));
 	return text;
 }

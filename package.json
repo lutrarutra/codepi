@@ -140,10 +140,6 @@
       {
         "command": "codepi.openSessionsTab",
         "title": "Open CodePi Sessions"
-      },
-      {
-        "command": "codepi.importPiConfig",
-        "title": "CodePi: Import pi Configuration…"
       }
     ],
     "menus": {
