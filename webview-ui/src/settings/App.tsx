@@ -107,6 +107,22 @@ export function SettingsApp(): JSX.Element {
 	}, []);
 
 	if (!data) {
+		if (error) {
+			return (
+				<div className="settings-page settings-loading">
+					<div className="settings-alert settings-alert-error" role="alert">
+						{error}
+					</div>
+					<button
+						className="settings-button settings-button-secondary"
+						type="button"
+						onClick={reload}
+					>
+						Retry
+					</button>
+				</div>
+			);
+		}
 		return (
 			<div className="settings-page settings-loading" role="status">
 				Loading CodePi settings…
