@@ -12,7 +12,7 @@ import {
 import {
 	buildDashboardData,
 	getDashboardFileStatus,
-	mapConfiguredPackageStatus,
+	collectConfiguredPackageStatus,
 } from "./settings-dashboard";
 import type {
 	DashboardData,
@@ -98,14 +98,10 @@ export class SettingsViewProvider implements vscode.WebviewViewProvider {
 		const sdk = await getSdk();
 		const cwd =
 			vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? this.agentDir;
-		const settingsManager = sdk.SettingsManager.create(cwd, this.agentDir);
-		const packageManager = new sdk.DefaultPackageManager({
+		const packages = collectConfiguredPackageStatus(
+			sdk,
 			cwd,
-			agentDir: this.agentDir,
-			settingsManager,
-		});
-		const packages = mapConfiguredPackageStatus(
-			packageManager.listConfiguredPackages(),
+			this.agentDir,
 		);
 		const data = buildDashboardData(
 			this.agentDir,
@@ -152,9 +148,7 @@ export class SettingsViewProvider implements vscode.WebviewViewProvider {
 function isBundledResourceId(
 	id: string,
 ): id is DashboardData["bundledResources"][number]["id"] {
-	return (
-		id === "custom-footer" || id === "filechanges" || id === "nebula-pulse"
-	);
+	return id === "custom-footer" || id === "filechanges" || id === "nebula-pulse";
 }
 
 function getSettingsPathForAgent(agentDir: string): string {

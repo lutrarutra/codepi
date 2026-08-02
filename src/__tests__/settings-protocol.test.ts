@@ -1,10 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { getCodePiSessionDir, getCanonicalAgentDir } from "../pi-store";
 import {
 	buildDashboardData,
+	collectConfiguredPackageStatus,
 	getDashboardFileStatus,
 	mapConfiguredPackageStatus,
 } from "../settings-dashboard";
@@ -31,6 +32,36 @@ describe("settings dashboard protocol", () => {
 				expect.objectContaining({ id: "custom-footer", enabled: true }),
 			]),
 		);
+	});
+
+	it("collects package status from a fake agent without installing packages", async () => {
+		const agentDir = join(
+			tmpdir(),
+			`codepi-package-status-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+		);
+		const cwd = join(agentDir, "workspace");
+		mkdirSync(join(agentDir, "npm", "node_modules", "installed"), {
+			recursive: true,
+		});
+		mkdirSync(cwd, { recursive: true });
+		writeFileSync(
+			join(agentDir, "settings.json"),
+			JSON.stringify({ packages: ["npm:installed", "npm:missing"] }),
+		);
+		try {
+			const sdk = await import("@earendil-works/pi-coding-agent");
+			const packages = collectConfiguredPackageStatus(sdk, cwd, agentDir);
+			expect(packages).toEqual([
+				{ source: "npm:installed", scope: "user", installed: true },
+				{ source: "npm:missing", scope: "user", installed: false },
+			]);
+			expect(packages.filter((entry) => !entry.installed).map((entry) => entry.source)).toEqual([
+				"npm:missing",
+			]);
+			expect(existsSync(join(agentDir, "npm", "node_modules", "missing"))).toBe(false);
+		} finally {
+			rmSync(agentDir, { recursive: true, force: true });
+		}
 	});
 
 	it("maps configured package paths to installed and missing status", () => {

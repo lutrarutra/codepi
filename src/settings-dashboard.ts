@@ -18,6 +18,28 @@ export interface ConfiguredPackageStatusInput {
 	installedPath?: string;
 }
 
+/**
+ * Collect package status using the SDK's read-only package listing API.
+ * This deliberately does not call resolve/install, so dashboard refresh never
+ * performs network work merely to display status.
+ */
+export function collectConfiguredPackageStatus(
+	sdk: Pick<
+		typeof import("@earendil-works/pi-coding-agent"),
+		"SettingsManager" | "DefaultPackageManager"
+	>,
+	cwd: string,
+	agentDir: string,
+): PackageStatusEntry[] {
+	const settingsManager = sdk.SettingsManager.create(cwd, agentDir);
+	const packageManager = new sdk.DefaultPackageManager({
+		cwd,
+		agentDir,
+		settingsManager,
+	});
+	return mapConfiguredPackageStatus(packageManager.listConfiguredPackages());
+}
+
 /** Convert SDK package-manager entries into the credential-free dashboard shape. */
 export function mapConfiguredPackageStatus(
 	packages: ConfiguredPackageStatusInput[],

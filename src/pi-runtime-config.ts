@@ -54,6 +54,23 @@ export function buildPiRuntimeResourcePaths(
 	};
 }
 
+/**
+ * Build resource paths from settings read at call time. Runtime factories use
+ * this wrapper so each newly created session observes current toggles rather
+ * than an activation-time settings snapshot.
+ */
+export function buildCurrentPiRuntimeResourcePaths(
+	extensionResourcesDir: string,
+	agentDir: string,
+	readSettings: () => unknown,
+): PiRuntimeResourcePaths {
+	return buildPiRuntimeResourcePaths(
+		extensionResourcesDir,
+		agentDir,
+		readSettings(),
+	);
+}
+
 export function buildPiResourceLoaderOptions(
 	cwd: string,
 	agentDir: string,

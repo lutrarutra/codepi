@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { join } from "node:path";
 import {
 	applyImplicitBundledTheme,
+	buildCurrentPiRuntimeResourcePaths,
 	buildPiResourceLoaderOptions,
 	buildPiRuntimeResourcePaths,
 	installImplicitBundledThemeReload,
@@ -29,6 +30,31 @@ describe("Pi runtime resource paths", () => {
 				"rpiv-todo",
 				"index.ts",
 			),
+		);
+	});
+
+	it("rereads settings for each new runtime resource factory call", () => {
+		let settings: unknown = {};
+		const readSettings = () => settings;
+		const first = buildCurrentPiRuntimeResourcePaths(
+			extensionResources,
+			agentDir,
+			readSettings,
+		);
+		expect(first.bundledExtensionPaths).toContain(
+			join(extensionResources, "custom-footer.ts"),
+		);
+		settings = { codepi: { bundledExtensions: { "custom-footer": false } } };
+		const second = buildCurrentPiRuntimeResourcePaths(
+			extensionResources,
+			agentDir,
+			readSettings,
+		);
+		expect(second.bundledExtensionPaths).not.toContain(
+			join(extensionResources, "custom-footer.ts"),
+		);
+		expect(second.bundledExtensionPaths).toContain(
+			join(extensionResources, "filechanges.ts"),
 		);
 	});
 
@@ -76,11 +102,13 @@ describe("Pi runtime resource paths", () => {
 			},
 		};
 		const session = {
-			reload: async (options?: { beforeSessionStart?: () => void | Promise<void> }) => {
+			reload: async (options?: {
+				beforeSessionStart?: () => void | Promise<void>;
+			}) => {
 				reloadCalls++;
-			theme = undefined;
-			await options?.beforeSessionStart?.();
-		},
+				theme = undefined;
+				await options?.beforeSessionStart?.();
+			},
 		};
 
 		installImplicitBundledThemeReload(session, settingsManager, () => true);
@@ -106,7 +134,9 @@ describe("Pi runtime resource paths", () => {
 			};
 		};
 		const makeSession = (resetFromDisk: () => void) => ({
-			reload: async (options?: { beforeSessionStart?: () => void | Promise<void> }) => {
+			reload: async (options?: {
+				beforeSessionStart?: () => void | Promise<void>;
+			}) => {
 				resetFromDisk();
 				await options?.beforeSessionStart?.();
 			},
@@ -114,13 +144,21 @@ describe("Pi runtime resource paths", () => {
 
 		const disabled = makeSettingsManager();
 		const disabledSession = makeSession(disabled.resetFromDisk);
-		installImplicitBundledThemeReload(disabledSession, disabled.settingsManager, () => false);
+		installImplicitBundledThemeReload(
+			disabledSession,
+			disabled.settingsManager,
+			() => false,
+		);
 		await disabledSession.reload();
 		expect(disabled.getTheme()).toBeUndefined();
 
 		const explicit = makeSettingsManager("user-theme");
 		const explicitSession = makeSession(explicit.resetFromDisk);
-		installImplicitBundledThemeReload(explicitSession, explicit.settingsManager, () => true);
+		installImplicitBundledThemeReload(
+			explicitSession,
+			explicit.settingsManager,
+			() => true,
+		);
 		await explicitSession.reload();
 		expect(explicit.getTheme()).toBe("user-theme");
 	});

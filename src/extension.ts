@@ -37,6 +37,7 @@ import {
 } from "./pi-store";
 import {
 	applyImplicitBundledTheme,
+	buildCurrentPiRuntimeResourcePaths,
 	buildPiResourceLoaderOptions,
 	buildPiRuntimeResourcePaths,
 	installImplicitBundledThemeReload,
@@ -136,16 +137,18 @@ async function offerLegacyMigration(
 	const detected = detectLegacyConfig(legacyAgentDir);
 	const hasMissingConfig = Boolean(
 		detected &&
-		(["settings", "auth", "models"] as const).some(
-			(file) =>
-				detected[file] && !fs.existsSync(path.join(canonicalAgentDir, `${file}.json`)),
-		),
+			(["settings", "auth", "models"] as const).some(
+				(file) =>
+					detected[file] &&
+					!fs.existsSync(path.join(canonicalAgentDir, `${file}.json`)),
+			),
 	);
 	const hasLegacySessions =
 		fs.existsSync(legacySessionDir) &&
 		fs.statSync(legacySessionDir).isDirectory() &&
 		fs.readdirSync(legacySessionDir).length > 0 &&
-		(!fs.existsSync(codePiSessionDir) || fs.readdirSync(codePiSessionDir).length === 0);
+		(!fs.existsSync(codePiSessionDir) ||
+			fs.readdirSync(codePiSessionDir).length === 0);
 	if (!hasMissingConfig && !hasLegacySessions) {
 		await context.globalState.update(LEGACY_MIGRATION_PROMPTED_KEY, true);
 		return;
@@ -166,7 +169,10 @@ async function offerLegacyMigration(
 			codePiSessionDir,
 		);
 		await context.globalState.update(LEGACY_MIGRATION_PROMPTED_KEY, true);
-		const copied = [...result.copiedFiles, ...result.copiedSessions.map((name) => `sessions/${name}`)];
+		const copied = [
+			...result.copiedFiles,
+			...result.copiedSessions.map((name) => `sessions/${name}`),
+		];
 		vscode.window.showInformationMessage(
 			copied.length > 0
 				? `CodePi migrated ${copied.join(", ")} from its legacy storage.`
@@ -1260,10 +1266,10 @@ async function startTuiBackend(state: SessionState): Promise<void> {
 	// and bundled-resource toggles rather than activation-time snapshots.
 	const createRuntime: any = async (opts: any) => {
 		const settingsManager = pi.SettingsManager.create(opts.cwd, agentDir);
-		const resourcePaths = buildPiRuntimeResourcePaths(
+		const resourcePaths = buildCurrentPiRuntimeResourcePaths(
 			extensionDir?.fsPath ?? "",
 			agentDir,
-			readJsonFile(getSettingsPath()) ?? {},
+			() => readJsonFile(getSettingsPath()) ?? {},
 		);
 		const bundledExtensions = resourcePaths.bundledExtensionPaths.filter((p) =>
 			fs.existsSync(p),
