@@ -17,8 +17,105 @@ import {
 } from "node:fs";
 import { dirname, join } from "node:path";
 
+/** Resolve the canonical Pi config directory for the executing computer. */
+export function getCanonicalAgentDir(): string {
+	return join(homedir(), ".pi", "agent");
+}
+
+/** Resolve CodePi's per-extension session directory below VS Code storage. */
+export function getCodePiSessionDir(globalStoragePath: string): string {
+	return join(globalStoragePath, "sessions");
+}
+
+export interface BundledResourceMetadata {
+	id: "custom-footer" | "filechanges" | "nebula-pulse";
+	label: string;
+	kind: "extension" | "theme";
+	enabledByDefault: boolean;
+}
+
+export const BUNDLED_RESOURCES: readonly BundledResourceMetadata[] = [
+	{
+		id: "custom-footer",
+		label: "Custom footer",
+		kind: "extension",
+		enabledByDefault: true,
+	},
+	{
+		id: "filechanges",
+		label: "File changes",
+		kind: "extension",
+		enabledByDefault: true,
+	},
+	{
+		id: "nebula-pulse",
+		label: "Nebula Pulse theme",
+		kind: "theme",
+		enabledByDefault: true,
+	},
+];
+
+export interface BundledResourceConfig {
+	bundledExtensions: {
+		"custom-footer": boolean;
+		filechanges: boolean;
+	};
+	bundledThemes: {
+		"nebula-pulse": boolean;
+	};
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/** Read CodePi's bundled-resource toggles without trusting malformed settings. */
+export function readBundledResourceConfig(settings: unknown): BundledResourceConfig {
+	const defaults: BundledResourceConfig = {
+		bundledExtensions: { "custom-footer": true, filechanges: true },
+		bundledThemes: { "nebula-pulse": true },
+	};
+	if (!isRecord(settings) || !isRecord(settings.codepi)) return defaults;
+
+	const codepi = settings.codepi;
+	const extensions = isRecord(codepi.bundledExtensions)
+		? codepi.bundledExtensions
+		: undefined;
+	const themes = isRecord(codepi.bundledThemes) ? codepi.bundledThemes : undefined;
+	return {
+		bundledExtensions: {
+			"custom-footer":
+				typeof extensions?.["custom-footer"] === "boolean"
+					? extensions["custom-footer"]
+					: defaults.bundledExtensions["custom-footer"],
+			filechanges:
+				typeof extensions?.filechanges === "boolean"
+					? extensions.filechanges
+					: defaults.bundledExtensions.filechanges,
+		},
+		bundledThemes: {
+			"nebula-pulse":
+				typeof themes?.["nebula-pulse"] === "boolean"
+					? themes["nebula-pulse"]
+					: defaults.bundledThemes["nebula-pulse"],
+		},
+	};
+}
+
+/** Return the bundled resources enabled by the current CodePi settings. */
+export function getEnabledBundledResources(
+	settings: unknown,
+): BundledResourceMetadata[] {
+	const config = readBundledResourceConfig(settings);
+	return BUNDLED_RESOURCES.filter((resource) =>
+		resource.kind === "extension"
+			? config.bundledExtensions[resource.id as "custom-footer" | "filechanges"]
+			: config.bundledThemes["nebula-pulse"],
+	).map((resource) => ({ ...resource }));
+}
+
 export function getAgentDir(): string {
-	return process.env.PI_CODING_AGENT_DIR || join(homedir(), ".pi", "agent");
+	return process.env.PI_CODING_AGENT_DIR || getCanonicalAgentDir();
 }
 
 export function setAgentDir(dir: string): void {
