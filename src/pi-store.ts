@@ -262,28 +262,6 @@ export function updateBundledResourceConfig(
 }
 
 /**
- * The theme shipped with this extension (resources/themes/nebula-pulse.json)
- * and used as the TUI default via settings.json's `theme` key.
- */
-export const DEFAULT_THEME = "nebula-pulse";
-
-/**
- * Make the bundled theme the TUI default: ensure settings.json selects it.
- * Only writes when the `theme` key is absent, so a theme chosen later in the
- * settings UI (or imported from a legacy config) is never overwritten.
- */
-export function ensureDefaultTheme(): void {
-	const settingsPath = getSettingsPath();
-	const settings = readJsonFile<Record<string, unknown>>(settingsPath) ?? {};
-	if (typeof settings.theme === "string") {
-		// A theme was chosen explicitly — respect it.
-		return;
-	}
-	settings.theme = DEFAULT_THEME;
-	writeJsonFileAtomic(settingsPath, settings);
-}
-
-/**
  * Seed `<agentDir>/bin` with the fd/rg binaries pi's TUI waits for at
  * startup. pi's `ensureTool()` otherwise downloads them over the network
  * while init() awaits them — which makes the first seconds of a session

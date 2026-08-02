@@ -47,6 +47,36 @@ Open the project in VSCode and press **F5**
 after running the watch task). Then run the command **CodePi: Open Panel**
 from the Command Palette (`Ctrl/Cmd+Shift+P`).
 
+## Storage, packages, and settings
+
+CodePi uses the Pi resource directory on the **current computer** as its
+canonical shared resource root: `~/.pi/agent`. Pi package declarations,
+models, authentication, and installed packages are read from that directory,
+so the Pi CLI is optional; CodePi does not require a separate CLI binary.
+Package declarations and configuration are still per computer, so when using
+SSH hosts you must synchronize them separately on each host.
+
+CodePi session files are intentionally separate from Pi resources. They are
+stored below the VS Code extension global storage (`sessions/`) and are never
+put in `~/.pi/agent/sessions`. With Remote-SSH, both the extension storage and
+`~/.pi/agent` belong to the remote computer, so local and remote sessions and
+resources do not cross machines.
+
+The CodePi Settings view is a compact dashboard. It reports configured Pi
+package status, lets you enable or disable CodePi's bundled `custom-footer`,
+`filechanges`, and `nebula-pulse` defaults, and opens the real `settings.json`,
+`models.json`, and `auth.json` files in VS Code. The bundled resources are
+CodePi-only and are not copied into `~/.pi/agent` or exposed to the Pi CLI.
+Their preferences are stored under the `codepi` namespace in `settings.json`;
+missing preferences mean enabled, while an explicit `false` disables a
+resource. The default `nebula-pulse` theme is applied in memory and is not
+written into shared Pi settings, so an explicit Pi theme always wins.
+
+On first activation after an upgrade, CodePi can offer a non-destructive
+migration of legacy CodePi configuration into the canonical Pi files and old
+CodePi sessions into the new VS Code storage location. It never copies the
+canonical Pi session directory and keeps the legacy source files in place.
+
 ## How frontend ↔ backend messaging works
 
 **Frontend → Backend:** call `vscode.postMessage({ command, ... })`

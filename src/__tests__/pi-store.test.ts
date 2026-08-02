@@ -12,7 +12,6 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
 	detectLegacyConfig,
-	ensureDefaultTheme,
 	ensureRuntimeTools,
 	getAgentDir,
 	getCodePiSessionDir,
@@ -23,7 +22,6 @@ import {
 	writeCodePiSettingsMerge,
 	writeJsonFileAtomic,
 } from "../pi-store";
-import { DEFAULT_THEME } from "../pi-store";
 
 let dir: string;
 beforeEach(() => {
@@ -184,40 +182,6 @@ describe("detectLegacyConfig", () => {
 			auth: false,
 			models: false,
 		});
-	});
-});
-
-describe("ensureDefaultTheme", () => {
-	it("writes the default theme when settings.json is missing", () => {
-		setAgentDir(dir);
-		ensureDefaultTheme();
-		const settings = readJsonFile<Record<string, unknown>>(
-			join(dir, "settings.json"),
-		);
-		expect(settings?.theme).toBe(DEFAULT_THEME);
-	});
-	it("adds the theme to existing settings without clobbering other keys", () => {
-		setAgentDir(dir);
-		writeJsonFileAtomic(join(dir, "settings.json"), {
-			defaultModel: "claude-sonnet-4",
-		});
-		ensureDefaultTheme();
-		const settings = readJsonFile<Record<string, unknown>>(
-			join(dir, "settings.json"),
-		);
-		expect(settings?.theme).toBe(DEFAULT_THEME);
-		expect(settings?.defaultModel).toBe("claude-sonnet-4");
-	});
-	it("respects an explicitly chosen theme", () => {
-		setAgentDir(dir);
-		writeJsonFileAtomic(join(dir, "settings.json"), {
-			theme: "tokyo-night",
-		});
-		ensureDefaultTheme();
-		const settings = readJsonFile<Record<string, unknown>>(
-			join(dir, "settings.json"),
-		);
-		expect(settings?.theme).toBe("tokyo-night");
 	});
 });
 
