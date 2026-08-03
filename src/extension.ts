@@ -75,9 +75,9 @@ interface SessionState {
 	sessionPath: string;
 	disposables: vscode.Disposable[];
 	review: ReviewManager;
-	/** proposalIds already mirrored to the TUI filechanges tracker. */
+	/** proposalIds already mirrored to the TUI codepi-diff tracker. */
 	fcSeenEntries: Set<string>;
-	/** last session branch head id seen by the filechanges sync poll. */
+	/** last session branch head id seen by the codepi-diff sync poll. */
 	fcLastHead: string | undefined;
 }
 
@@ -624,7 +624,7 @@ export async function activate(context: vscode.ExtensionContext) {
 // ── Session Creation ─────────────────────────────────────────
 
 /**
- * Sync the editor review state with the TUI filechanges tracker.
+ * Sync the editor review state with the TUI codepi-diff tracker.
  *
  * The filechanges extension appends `filechanges:resolved` custom session
  * entries when the user runs /filechanges-accept or /filechanges-decline in
@@ -1054,7 +1054,7 @@ async function setupSessionPanel(
 							} else {
 								reviewDecorations?.setProposal(proposal);
 							}
-							// Mirror the review state to the TUI filechanges tracker on
+							// Mirror the review state to the TUI codepi-diff tracker on
 							// every change (proposal created, hunk accepted/rejected).
 							// The entry carries the REMAINING pending counts so the
 							// widget's line counter counts down to zero, at which point
@@ -1378,7 +1378,7 @@ async function startTuiBackend(state: SessionState): Promise<void> {
 				contextSnapshot ? [...base, contextSnapshot] : base,
 			extensionsOverride: (base: any) => {
 				// A user can have the same feature installed as a standalone
-				// extension (e.g. a 3rd-party filechanges) while CodePi also
+				// extension (e.g. a 3rd-party codepi-diff) while CodePi also
 				// bundles its own copy. Both then register the same
 				// commands/tools, which pi disambiguates by suffixing
 				// (`/filechanges-accept:1` / `:2`) — duplicate entries in the
@@ -1413,7 +1413,9 @@ async function startTuiBackend(state: SessionState): Promise<void> {
 		if (isContextExtensionEnabled(settings)) {
 			const extensionResult = loader.getExtensions();
 			const contextLoaded = extensionResult.extensions.some((extension: any) =>
-				(extension.resolvedPath ?? extension.path)?.endsWith("codepi-context.ts"),
+				(extension.resolvedPath ?? extension.path)?.endsWith(
+					"codepi-context.ts",
+				),
 			);
 			if (!contextLoaded) {
 				console.warn(
@@ -1437,7 +1439,9 @@ async function startTuiBackend(state: SessionState): Promise<void> {
 			(customTools as Array<unknown>).push(...hostContextTools);
 		}
 		if (!isBashExtensionEnabled(settings)) {
-			(customTools as Array<unknown>).push(pi.createBashToolDefinition(opts.cwd));
+			(customTools as Array<unknown>).push(
+				pi.createBashToolDefinition(opts.cwd),
+			);
 		}
 
 		const result = await pi.createAgentSession({
@@ -1645,8 +1649,10 @@ function buildTerminalHtml(
 	} catch {
 		/* malformed settings — fall back to defaults */
 	}
-	const useBundledFont =
-		fontFamily.toLowerCase().replace(/\s+/g, "").includes("firacode");
+	const useBundledFont = fontFamily
+		.toLowerCase()
+		.replace(/\s+/g, "")
+		.includes("firacode");
 	const safeFamily = fontFamily.replace(/"/g, "&quot;");
 	const nonce = getNonce();
 	const safeSessionId = sessionId.replace(/"/g, "&quot;");
@@ -1661,7 +1667,8 @@ function buildTerminalHtml(
   <meta name="codepi-font-size" content="${fontSize}" />
   <title>PI</title>
   <style>
-${useBundledFont
+${
+	useBundledFont
 		? `    /* Bundled terminal font — Fira Code Nerd Font (OFL 1.1). Preloaded
        by terminal.ts so the xterm canvas builds its glyph atlas with the
        real font from the first frame. */
@@ -1678,7 +1685,8 @@ ${useBundledFont
       src: url("${fontBoldUri}") format("woff2");
     }
 `
-		: ""}
+		: ""
+}
     html, body { width: 100%; height: 100%; margin: 0; padding: 0; overflow: hidden; background: var(--vscode-terminal-background, var(--vscode-editor-background, #1e1e1e)); }
     /* Absolute-fill: robust against webview percentage-height quirks. */
     #terminal { position: absolute; top: 0; left: 0; right: 0; bottom: 0; }

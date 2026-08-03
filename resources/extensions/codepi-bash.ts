@@ -14,7 +14,7 @@
  * Per-session approval modes:
  *   - ask (default): the 4-option dialog (Yes / No / Revise / auto-approve all)
  *   - auto: commands run without asking
- * Toggle with /codepi-bash-ask and /codepi-bash-auto; the active mode is
+ * Toggle with /codepi-bash-ask and /codepi-bash-allow; the active mode is
  * persisted to the session branch and shown in the custom footer via the
  * "codepi-bash" status key.
  *
@@ -90,11 +90,13 @@ const BASH_SCHEMA = Type.Object({
 	command: Type.Union(
 		[
 			Type.String({
-				description: "The bash command to execute (string or array of strings joined with &&)",
+				description:
+					"The bash command to execute (string or array of strings joined with &&)",
 			}),
 			Type.Array(
 				Type.String({
-					description: "Multiple commands, joined with ' && ' and run sequentially",
+					description:
+						"Multiple commands, joined with ' && ' and run sequentially",
 				}),
 			),
 		],
@@ -102,7 +104,8 @@ const BASH_SCHEMA = Type.Object({
 	),
 	cwd: Type.Optional(
 		Type.String({
-			description: "Working directory for the command (absolute, or relative to the session cwd). Default: the session cwd.",
+			description:
+				"Working directory for the command (absolute, or relative to the session cwd). Default: the session cwd.",
 		}),
 	),
 	timeout: Type.Optional(
@@ -114,7 +117,9 @@ const BASH_SCHEMA = Type.Object({
 
 // ── Pure helpers (unit-tested) ───────────────────────────────
 
-export type JoinResult = { ok: true; command: string } | { ok: false; error: string };
+export type JoinResult =
+	| { ok: true; command: string }
+	| { ok: false; error: string };
 
 /**
  * Normalize the `command` parameter: a single string, or an array of strings
@@ -148,7 +153,9 @@ export function joinCommands(command: unknown): JoinResult {
 	return { ok: true, command: command.trim() };
 }
 
-export type CwdResult = { ok: true; cwd: string } | { ok: false; error: string };
+export type CwdResult =
+	| { ok: true; cwd: string }
+	| { ok: false; error: string };
 
 /** Resolve the `cwd` parameter (default: session cwd) and validate it exists. */
 export function resolveCwd(cwd: unknown, sessionCwd: string): CwdResult {
@@ -163,7 +170,10 @@ export function resolveCwd(cwd: unknown, sessionCwd: string): CwdResult {
 			};
 		}
 	} catch {
-		return { ok: false, error: `Working directory does not exist: ${absolute}` };
+		return {
+			ok: false,
+			error: `Working directory does not exist: ${absolute}`,
+		};
 	}
 	return { ok: true, cwd: absolute };
 }
@@ -177,22 +187,22 @@ const PROMPT_LINE_RE = /^[\w@~/.\-:]+[%$#>]\s*$/;
  * endings, drop the echoed command line, and trim trailing prompt artifacts.
  */
 export function cleanTerminalOutput(raw: string, command: string): string {
-	let text = raw
+	const text = raw
 		.replace(ANSI_ESCAPE_RE, "")
 		.replace(/\r\n/g, "\n")
 		.replace(/\r/g, "\n");
 	const lines = text.split("\n");
-		// Drop the echoed command line (shell integration echoes the typed command,
-		// often prefixed with the prompt: "user@host:dir$ ls").
-		if (lines.length > 0) {
-			const first = lines[0].trim();
-			if (first === command.trim()) {
-				lines.shift();
-			} else {
-				const m = first.match(/^(.*[%$#>]\s*)(.+)$/);
-				if (m && m[2].trim() === command.trim()) lines.shift();
-			}
+	// Drop the echoed command line (shell integration echoes the typed command,
+	// often prefixed with the prompt: "user@host:dir$ ls").
+	if (lines.length > 0) {
+		const first = lines[0].trim();
+		if (first === command.trim()) {
+			lines.shift();
+		} else {
+			const m = first.match(/^(.*[%$#>]\s*)(.+)$/);
+			if (m && m[2].trim() === command.trim()) lines.shift();
 		}
+	}
 	// A leading prompt may remain when the echo was already consumed.
 	if (lines.length > 0 && PROMPT_LINE_RE.test(lines[0].trim())) {
 		lines.shift();
@@ -208,12 +218,12 @@ export function cleanTerminalOutput(raw: string, command: string): string {
 }
 
 /**
- * Footer badge text — terminal icon + mode label (`\u{F120} ask` /
- * `\u{F120} allow`). The icon is nf-fa-terminal, the same glyph
- * custom-footer.ts renders for the "codepi-bash" footer status.
+ * Footer badge text — terminal icon + mode label (`\u{EBCA} ask` /
+ * `\u{EBCA} allow`). The icon is nf-cod-terminal_bash, the same glyph
+ * codepi-footer.ts renders for the "codepi-bash" footer status.
  */
 export function formatBashBadge(mode: BashMode): string {
-	const icon = "\u{F120}";
+	const icon = "\u{EBCA}";
 	return mode === "ask" ? `${icon} ask` : `${icon} allow`;
 }
 
@@ -522,11 +532,12 @@ export function createVscodeBashOperations(options?: {
 				).catch(() => undefined);
 				if (shellIntegration) {
 					try {
-						return await runViaShellIntegration(
-							shellIntegration,
-							command,
-							{ onData, signal, timeout, dispose },
-						);
+						return await runViaShellIntegration(shellIntegration, command, {
+							onData,
+							signal,
+							timeout,
+							dispose,
+						});
 					} catch (err) {
 						dispose();
 						throw err;
@@ -574,9 +585,7 @@ async function runViaShellIntegration(
 	})();
 
 	let timedOut = false;
-	let aborted = false;
 	const onAbort = () => {
-		aborted = true;
 		dispose();
 	};
 	if (signal) {
@@ -584,7 +593,8 @@ async function runViaShellIntegration(
 		else signal.addEventListener("abort", onAbort, { once: true });
 	}
 	let timer: ReturnType<typeof setTimeout> | undefined;
-	const timeoutMs = timeout !== undefined ? Math.round(timeout * 1000) : undefined;
+	const timeoutMs =
+		timeout !== undefined ? Math.round(timeout * 1000) : undefined;
 	if (timeoutMs !== undefined && timeoutMs > 0) {
 		timer = setTimeout(() => {
 			timedOut = true;
@@ -680,7 +690,8 @@ async function runViaSendText(
 			if (signal.aborted) onAbort();
 			else signal.addEventListener("abort", onAbort, { once: true });
 		}
-		const timeoutMs = timeout !== undefined ? Math.round(timeout * 1000) : undefined;
+		const timeoutMs =
+			timeout !== undefined ? Math.round(timeout * 1000) : undefined;
 		if (timeoutMs !== undefined && timeoutMs > 0) {
 			timer = setTimeout(() => {
 				fail(new Error(`timeout:${Math.round(timeoutMs / 1000)}`));
@@ -784,9 +795,9 @@ function formatBashCall(
 	return commandDisplay + timeoutSuffix;
 }
 
-function getTextOutput(
-	result: { content: Array<{ type: string; text?: string }> },
-): string {
+function getTextOutput(result: {
+	content: Array<{ type: string; text?: string }>;
+}): string {
 	let out = "";
 	for (const c of result.content) {
 		if (c.type === "text" && typeof c.text === "string") out += c.text;
@@ -811,9 +822,17 @@ function rebuildBashResultRenderComponent(
 	let output = getTextOutput(result).trim();
 	const truncation = result.details?.truncation;
 	const fullOutputPath = result.details?.fullOutputPath;
-	if (!options.isPartial && truncation?.truncated && fullOutputPath && output.endsWith("]")) {
+	if (
+		!options.isPartial &&
+		truncation?.truncated &&
+		fullOutputPath &&
+		output.endsWith("]")
+	) {
 		const footerStart = output.lastIndexOf("\n\n[");
-		if (footerStart !== -1 && output.slice(footerStart).includes(fullOutputPath)) {
+		if (
+			footerStart !== -1 &&
+			output.slice(footerStart).includes(fullOutputPath)
+		) {
 			output = output.slice(0, footerStart).trimEnd();
 		}
 	}
@@ -829,10 +848,7 @@ function rebuildBashResultRenderComponent(
 		} else {
 			component.addChild({
 				render: (width: number) => {
-					if (
-						state.cachedLines === undefined ||
-						state.cachedWidth !== width
-					) {
+					if (state.cachedLines === undefined || state.cachedWidth !== width) {
 						const preview = truncateToVisualLines(
 							styledOutput,
 							BASH_PREVIEW_LINES,
@@ -879,7 +895,9 @@ function rebuildBashResultRenderComponent(
 				);
 			}
 		}
-		component.addChild(new Text(`\n${theme.fg("warning", `[${warnings.join(". ")}]`)}`, 0, 0));
+		component.addChild(
+			new Text(`\n${theme.fg("warning", `[${warnings.join(". ")}]`)}`, 0, 0),
+		);
 	}
 
 	if (startedAt !== undefined) {
@@ -924,7 +942,8 @@ export function createCodepiBashToolDefinition(
 		name: "bash",
 		label: "Bash",
 		description: BASH_DESCRIPTION,
-		promptSnippet: "Run shell commands — only when dedicated tools cannot (last resort)",
+		promptSnippet:
+			"Run shell commands — only when dedicated tools cannot (last resort)",
 		promptGuidelines: BASH_PROMPT_GUIDELINES,
 		parameters: BASH_SCHEMA,
 		executionMode: "sequential",
@@ -935,7 +954,11 @@ export function createCodepiBashToolDefinition(
 			onUpdate,
 			ctx,
 		): Promise<AgentToolResult<unknown>> {
-			const { command: rawCommand, cwd: rawCwd, timeout } = (params ?? {}) as {
+			const {
+				command: rawCommand,
+				cwd: rawCwd,
+				timeout,
+			} = (params ?? {}) as {
 				command?: unknown;
 				cwd?: unknown;
 				timeout?: unknown;
@@ -971,11 +994,9 @@ export function createCodepiBashToolDefinition(
 					setMode("auto", ctx);
 				}
 				if (decision === "revise") {
-					const revised = await ctx.ui.input(
-						"Revise bash command",
-						command,
-						{ signal },
-					);
+					const revised = await ctx.ui.input("Revise bash command", command, {
+						signal,
+					});
 					if (revised === undefined || revised.trim() === "") {
 						throw new Error("Command execution denied by the user.");
 					}
@@ -1062,10 +1083,12 @@ export function createCodepiBashToolDefinition(
 				// the truncated view stays within the limits).
 				const cleaned = cleanTerminalOutput(snapshot.content || "", command);
 				let text = cleaned || emptyText;
-				let details: {
-					truncation?: TruncationResult;
-					fullOutputPath?: string;
-				} | undefined;
+				let details:
+					| {
+							truncation?: TruncationResult;
+							fullOutputPath?: string;
+					  }
+					| undefined;
 				if (truncation.truncated) {
 					details = {
 						truncation,
@@ -1108,10 +1131,7 @@ export function createCodepiBashToolDefinition(
 					if (err instanceof Error && err.message.startsWith("timeout:")) {
 						const secs = err.message.split(":")[1];
 						throw new Error(
-							appendStatus(
-								text,
-								`Command timed out after ${secs} seconds`,
-							),
+							appendStatus(text, `Command timed out after ${secs} seconds`),
 						);
 					}
 					throw err;
@@ -1129,10 +1149,7 @@ export function createCodepiBashToolDefinition(
 						);
 					}
 					throw new Error(
-						appendStatus(
-							outputText,
-							`Command exited with code ${exitCode}`,
-						),
+						appendStatus(outputText, `Command exited with code ${exitCode}`),
 					);
 				}
 				return { content: [{ type: "text", text: outputText }], details };
@@ -1153,7 +1170,11 @@ export function createCodepiBashToolDefinition(
 		},
 		renderResult(result, options, theme, context) {
 			const state = context.state;
-			if (state.startedAt !== undefined && options.isPartial && !state.interval) {
+			if (
+				state.startedAt !== undefined &&
+				options.isPartial &&
+				!state.interval
+			) {
 				state.interval = setInterval(() => context.invalidate(), 1000);
 			}
 			if (!options.isPartial || context.isError) {
@@ -1218,7 +1239,7 @@ export default function (pi: ExtensionAPI) {
 		handler: async (_args, ctx) => transitionTo("ask", ctx),
 	});
 
-	pi.registerCommand("codepi-bash-auto", {
+	pi.registerCommand("codepi-bash-allow", {
 		description: "Auto-approve all bash commands",
 		handler: async (_args, ctx) => transitionTo("auto", ctx),
 	});

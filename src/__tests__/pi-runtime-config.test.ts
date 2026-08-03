@@ -16,8 +16,8 @@ describe("Pi runtime resource paths", () => {
 	it("enables CodePi bundled resources by default", () => {
 		const paths = buildPiRuntimeResourcePaths(extensionResources, agentDir, {});
 		expect(paths.bundledExtensionPaths).toEqual([
-			join(extensionResources, "custom-footer.ts"),
-			join(extensionResources, "filechanges.ts"),
+			join(extensionResources, "codepi-footer.ts"),
+			join(extensionResources, "codepi-diff.ts"),
 			join(extensionResources, "codepi-modes.ts"),
 			join(extensionResources, "codepi-bash.ts"),
 			join(extensionResources, "codepi-context.ts"),
@@ -46,31 +46,31 @@ describe("Pi runtime resource paths", () => {
 			readSettings,
 		);
 		expect(first.bundledExtensionPaths).toContain(
-			join(extensionResources, "custom-footer.ts"),
+			join(extensionResources, "codepi-footer.ts"),
 		);
-		settings = { codepi: { bundledExtensions: { "custom-footer": false } } };
+		settings = { codepi: { bundledExtensions: { "codepi-footer": false } } };
 		const second = buildCurrentPiRuntimeResourcePaths(
 			extensionResources,
 			agentDir,
 			readSettings,
 		);
 		expect(second.bundledExtensionPaths).not.toContain(
-			join(extensionResources, "custom-footer.ts"),
+			join(extensionResources, "codepi-footer.ts"),
 		);
 		expect(second.bundledExtensionPaths).toContain(
-			join(extensionResources, "filechanges.ts"),
+			join(extensionResources, "codepi-diff.ts"),
 		);
 	});
 
 	it("removes explicitly disabled bundled resources", () => {
 		const paths = buildPiRuntimeResourcePaths(extensionResources, agentDir, {
 			codepi: {
-				bundledExtensions: { "custom-footer": false },
+				bundledExtensions: { "codepi-footer": false },
 				bundledThemes: { "nebula-pulse": false },
 			},
 		});
 		expect(paths.bundledExtensionPaths).toEqual([
-			join(extensionResources, "filechanges.ts"),
+			join(extensionResources, "codepi-diff.ts"),
 			join(extensionResources, "codepi-modes.ts"),
 			join(extensionResources, "codepi-bash.ts"),
 			join(extensionResources, "codepi-context.ts"),
@@ -191,10 +191,9 @@ describe("Pi runtime resource paths", () => {
 // ── filterConflictingExtensions ─────────────────────────────
 
 describe("filterConflictingExtensions", () => {
-	const bundledFilechanges = "/ext/resources/extensions/filechanges.ts";
+	const bundledDiff = "/ext/resources/extensions/codepi-diff.ts";
 	const bundledBash = "/ext/resources/extensions/codepi-bash.ts";
-	const thirdPartyFilechanges =
-		"/home/user/.pi/agent/extensions/filechanges/index.ts";
+	const thirdPartyDiff = "/home/user/.pi/agent/extensions/filechanges/index.ts";
 	const unrelated = "/home/user/.pi/agent/extensions/local-models.ts";
 
 	function ext(
@@ -213,40 +212,34 @@ describe("filterConflictingExtensions", () => {
 	it("drops a 3rd-party extension registering the same commands as a bundled one", () => {
 		const { extensions, droppedPaths } = filterConflictingExtensions(
 			[
-				ext(thirdPartyFilechanges, [
+				ext(thirdPartyDiff, [
 					"filechanges",
 					"filechanges-accept",
 					"filechanges-decline",
 				]),
 				ext(unrelated, ["local-models"]),
-				ext(bundledFilechanges, [
+				ext(bundledDiff, [
 					"filechanges",
 					"filechanges-accept",
 					"filechanges-decline",
 				]),
 			],
-			[bundledFilechanges],
+			[bundledDiff],
 		);
-		expect(droppedPaths).toEqual([thirdPartyFilechanges]);
-		expect(extensions.map((e) => e.path)).toEqual([
-			unrelated,
-			bundledFilechanges,
-		]);
+		expect(droppedPaths).toEqual([thirdPartyDiff]);
+		expect(extensions.map((e) => e.path)).toEqual([unrelated, bundledDiff]);
 	});
 
 	it("keeps non-bundled extensions that do not collide", () => {
 		const { extensions, droppedPaths } = filterConflictingExtensions(
 			[
 				ext(unrelated, ["local-models"]),
-				ext(bundledFilechanges, ["filechanges-accept"]),
+				ext(bundledDiff, ["filechanges-accept"]),
 			],
-			[bundledFilechanges],
+			[bundledDiff],
 		);
 		expect(droppedPaths).toEqual([]);
-		expect(extensions.map((e) => e.path)).toEqual([
-			unrelated,
-			bundledFilechanges,
-		]);
+		expect(extensions.map((e) => e.path)).toEqual([unrelated, bundledDiff]);
 	});
 
 	it("also drops on tool-name collisions (e.g. a 3rd-party bash tool)", () => {
@@ -260,11 +253,11 @@ describe("filterConflictingExtensions", () => {
 	});
 
 	it("keeps the standalone extension when the bundled copy is not loaded", () => {
-		// e.g. codepi's bundled filechanges disabled in Settings — the
+		// e.g. codepi's bundled codepi-diff disabled in Settings — the
 		// 3rd-party one is then the only copy and must be kept.
 		const { extensions, droppedPaths } = filterConflictingExtensions(
-			[ext(thirdPartyFilechanges, ["filechanges-accept"])],
-			[bundledFilechanges],
+			[ext(thirdPartyDiff, ["filechanges-accept"])],
+			[bundledDiff],
 		);
 		expect(droppedPaths).toEqual([]);
 		expect(extensions).toHaveLength(1);

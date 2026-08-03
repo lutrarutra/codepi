@@ -128,7 +128,9 @@ export class SettingsViewProvider implements vscode.WebviewViewProvider {
 		fontSize: number,
 	): Promise<void> {
 		const settingsPath = getSettingsPathForAgent(this.agentDir);
-		const family = String(fontFamily ?? "").trim().slice(0, 200);
+		const family = String(fontFamily ?? "")
+			.trim()
+			.slice(0, 200);
 		if (family === "") {
 			throw new Error("Font family must not be empty");
 		}
@@ -165,7 +167,11 @@ export class SettingsViewProvider implements vscode.WebviewViewProvider {
 		}
 		updateAskModeAllowedTools(settingsPath, cleaned);
 		this.onConfigSaved();
-		this.post({ command: "settings:saved", ok: true, resource: "askAllowedTools" });
+		this.post({
+			command: "settings:saved",
+			ok: true,
+			resource: "askAllowedTools",
+		});
 		await this.sendData();
 	}
 
@@ -205,8 +211,8 @@ function isBundledResourceId(
 	id: string,
 ): id is DashboardData["bundledResources"][number]["id"] {
 	return (
-		id === "custom-footer" ||
-		id === "filechanges" ||
+		id === "codepi-footer" ||
+		id === "codepi-diff" ||
 		id === "codepi-modes" ||
 		id === "codepi-bash" ||
 		id === "codepi-context" ||

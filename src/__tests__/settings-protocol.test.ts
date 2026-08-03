@@ -37,7 +37,7 @@ describe("settings dashboard protocol", () => {
 		expect(data.askAllowedTools).toEqual([...ASK_MODE_DEFAULT_ALLOWED_TOOLS]);
 		expect(data.bundledResources).toEqual(
 			expect.arrayContaining([
-				expect.objectContaining({ id: "custom-footer", enabled: true }),
+				expect.objectContaining({ id: "codepi-footer", enabled: true }),
 			]),
 		);
 	});
@@ -112,12 +112,8 @@ describe("settings dashboard protocol", () => {
 		expect(dashboard.packages.entries).toEqual(packages);
 		expect(dashboard.autoVerify).toBe("nextTurn");
 		expect(
-			buildDashboardData(
-				"/x",
-				"/y",
-				{ codepi: { autoVerify: "followUp" } },
-				[],
-			).autoVerify,
+			buildDashboardData("/x", "/y", { codepi: { autoVerify: "followUp" } }, [])
+				.autoVerify,
 		).toBe("followUp");
 	});
 
@@ -144,10 +140,14 @@ describe("settings dashboard protocol", () => {
 			{ command: "settings:get" },
 			{
 				command: "settings:setBundledResource",
-				id: "filechanges",
+				id: "codepi-diff",
 				enabled: false,
 			},
-			{ command: "settings:setTerminalPrefs", fontFamily: "Menlo", fontSize: 15 },
+			{
+				command: "settings:setTerminalPrefs",
+				fontFamily: "Menlo",
+				fontSize: 15,
+			},
 			{ command: "settings:setAutoVerify", mode: "nextTurn" },
 			{ command: "settings:openFile", file: "auth" },
 			{ command: "settings:refresh" },

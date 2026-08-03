@@ -100,11 +100,11 @@ describe("CodePi settings merge and Pi JSON files", () => {
 
 		updateBundledResourceConfig(settingsPath, {
 			bundledExtensions: {
-				"custom-footer": false,
-				filechanges: true,
+				"codepi-footer": false,
+				"codepi-diff": true,
 				"codepi-modes": true,
 				"codepi-bash": true,
-			"codepi-context": true,
+				"codepi-context": true,
 			},
 			bundledThemes: { "nebula-pulse": true },
 		});
@@ -115,11 +115,11 @@ describe("CodePi settings merge and Pi JSON files", () => {
 			unknownFutureKey: { enabled: true },
 			codepi: {
 				bundledExtensions: {
-					"custom-footer": false,
-					filechanges: true,
+					"codepi-footer": false,
+					"codepi-diff": true,
 					"codepi-modes": true,
 					"codepi-bash": true,
-				"codepi-context": true,
+					"codepi-context": true,
 				},
 				bundledThemes: { "nebula-pulse": true },
 			},
@@ -133,11 +133,11 @@ describe("CodePi settings merge and Pi JSON files", () => {
 		});
 		updateBundledResourceConfig(settingsPath, {
 			bundledExtensions: {
-				"custom-footer": true,
-				filechanges: false,
+				"codepi-footer": true,
+				"codepi-diff": false,
 				"codepi-modes": true,
 				"codepi-bash": true,
-			"codepi-context": true,
+				"codepi-context": true,
 			},
 			bundledThemes: { "nebula-pulse": false },
 		});
@@ -145,11 +145,11 @@ describe("CodePi settings merge and Pi JSON files", () => {
 			codepi: {
 				futureOption: { enabled: true },
 				bundledExtensions: {
-					"custom-footer": true,
-					filechanges: false,
+					"codepi-footer": true,
+					"codepi-diff": false,
 					"codepi-modes": true,
 					"codepi-bash": true,
-				"codepi-context": true,
+					"codepi-context": true,
 				},
 				bundledThemes: { "nebula-pulse": false },
 			},
@@ -193,15 +193,20 @@ describe("CodePi settings merge and Pi JSON files", () => {
 		const settingsPath = join(dir, "settings.json");
 		writeJsonFileAtomic(settingsPath, {
 			defaultModel: "gpt-5",
-			codepi: { bundledExtensions: { "custom-footer": true, filechanges: true } },
+			codepi: {
+				bundledExtensions: { "codepi-footer": true, "codepi-diff": true },
+			},
 		});
 
-		updateTerminalPrefs(settingsPath, { fontFamily: "JetBrains Mono", fontSize: 16 });
+		updateTerminalPrefs(settingsPath, {
+			fontFamily: "JetBrains Mono",
+			fontSize: 16,
+		});
 
 		expect(readJsonFile(settingsPath)).toEqual({
 			defaultModel: "gpt-5",
 			codepi: {
-				bundledExtensions: { "custom-footer": true, filechanges: true },
+				bundledExtensions: { "codepi-footer": true, "codepi-diff": true },
 				fontFamily: "JetBrains Mono",
 				fontSize: 16,
 			},
@@ -253,7 +258,9 @@ describe("CodePi settings merge and Pi JSON files", () => {
 	it("validates ask-mode allowed tools entries defensively", () => {
 		expect(
 			readAskModeAllowedTools({
-				codepi: { modes: { ask: { allowedTools: [42, "  ", "read", "read"] } } },
+				codepi: {
+					modes: { ask: { allowedTools: [42, "  ", "read", "read"] } },
+				},
 			}),
 		).toEqual(["read"]);
 		expect(
@@ -277,9 +284,9 @@ describe("CodePi settings merge and Pi JSON files", () => {
 		// Missing block → seed defaults.
 		seedAskModeAllowedToolsIfMissing(settingsPath);
 		const seeded = readJsonFile<Record<string, unknown>>(settingsPath);
-		expect(
-			readAskModeAllowedTools(seeded),
-		).toEqual([...ASK_MODE_DEFAULT_ALLOWED_TOOLS]);
+		expect(readAskModeAllowedTools(seeded)).toEqual([
+			...ASK_MODE_DEFAULT_ALLOWED_TOOLS,
+		]);
 		expect(ASK_MODE_DEFAULT_ALLOWED_TOOLS).toContain("read");
 		expect(ASK_MODE_DEFAULT_ALLOWED_TOOLS).toContain("grep");
 		expect(ASK_MODE_DEFAULT_ALLOWED_TOOLS).toContain("web_search");
@@ -287,9 +294,9 @@ describe("CodePi settings merge and Pi JSON files", () => {
 
 		// Seeding again is a no-op.
 		seedAskModeAllowedToolsIfMissing(settingsPath);
-		expect(
-			readAskModeAllowedTools(readJsonFile(settingsPath)),
-		).toEqual([...ASK_MODE_DEFAULT_ALLOWED_TOOLS]);
+		expect(readAskModeAllowedTools(readJsonFile(settingsPath))).toEqual([
+			...ASK_MODE_DEFAULT_ALLOWED_TOOLS,
+		]);
 
 		// Update replaces the list and preserves unrelated codepi keys.
 		updateAskModeAllowedTools(settingsPath, ["web_search"]);
@@ -314,9 +321,9 @@ describe("CodePi settings merge and Pi JSON files", () => {
 			},
 		});
 		seedAskModeAllowedToolsIfMissing(settingsPath);
-		expect(
-			readAskModeAllowedTools(readJsonFile(settingsPath)),
-		).toEqual([...ASK_MODE_DEFAULT_ALLOWED_TOOLS]);
+		expect(readAskModeAllowedTools(readJsonFile(settingsPath))).toEqual([
+			...ASK_MODE_DEFAULT_ALLOWED_TOOLS,
+		]);
 		expect(ASK_MODE_DEFAULT_ALLOWED_TOOLS).toContain("get_editor_context");
 		expect(ASK_MODE_DEFAULT_ALLOWED_TOOLS).toContain("get_git_diff");
 	});
@@ -335,9 +342,9 @@ describe("CodePi settings merge and Pi JSON files", () => {
 			},
 		});
 		seedAskModeAllowedToolsIfMissing(settingsPath);
-		expect(
-			readAskModeAllowedTools(readJsonFile(settingsPath)),
-		).toEqual([...ASK_MODE_DEFAULT_ALLOWED_TOOLS]);
+		expect(readAskModeAllowedTools(readJsonFile(settingsPath))).toEqual([
+			...ASK_MODE_DEFAULT_ALLOWED_TOOLS,
+		]);
 		expect(ASK_MODE_DEFAULT_ALLOWED_TOOLS).toContain("head");
 	});
 
@@ -351,9 +358,10 @@ describe("CodePi settings merge and Pi JSON files", () => {
 			},
 		});
 		seedAskModeAllowedToolsIfMissing(settingsPath);
-		expect(
-			readAskModeAllowedTools(readJsonFile(settingsPath)),
-		).toEqual(["read", "web_search"]);
+		expect(readAskModeAllowedTools(readJsonFile(settingsPath))).toEqual([
+			"read",
+			"web_search",
+		]);
 	});
 
 	it("creates missing settings and models files as objects", () => {
@@ -373,11 +381,11 @@ describe("CodePi settings merge and Pi JSON files", () => {
 		expect(() =>
 			updateBundledResourceConfig(settingsPath, {
 				bundledExtensions: {
-					"custom-footer": false,
-					filechanges: true,
+					"codepi-footer": false,
+					"codepi-diff": true,
 					"codepi-modes": true,
 					"codepi-bash": true,
-				"codepi-context": true,
+					"codepi-context": true,
 				},
 				bundledThemes: { "nebula-pulse": true },
 			}),

@@ -136,9 +136,7 @@ export default function (pi: ExtensionAPI) {
 							color: "success",
 						},
 					};
-					const modeStyle = modeStatus
-						? modeStyles[modeStatus]
-						: undefined;
+					const modeStyle = modeStatus ? modeStyles[modeStatus] : undefined;
 					const modeBadge = modeStyle
 						? theme.fg(
 								modeStyle.color as any,
@@ -157,7 +155,7 @@ export default function (pi: ExtensionAPI) {
 					const bashStatus = footerData
 						.getExtensionStatuses()
 						.get("codepi-bash");
-					const BASH_ICON = "\u{F120}"; // nf-fa-terminal
+					const BASH_ICON = "\u{EBCA}"; // nf-cod-terminal_bash (terminal + $ prompt)
 					const bashBadge =
 						bashStatus === "ask"
 							? theme.fg("warning", BASH_ICON + " ") +

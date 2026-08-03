@@ -30,7 +30,13 @@ export function getCodePiSessionDir(globalStoragePath: string): string {
 }
 
 export interface BundledResourceMetadata {
-	id: "custom-footer" | "filechanges" | "codepi-modes" | "codepi-bash" | "codepi-context" | "nebula-pulse";
+	id:
+		| "codepi-footer"
+		| "codepi-diff"
+		| "codepi-modes"
+		| "codepi-bash"
+		| "codepi-context"
+		| "nebula-pulse";
 	label: string;
 	kind: "extension" | "theme";
 	enabledByDefault: boolean;
@@ -38,13 +44,13 @@ export interface BundledResourceMetadata {
 
 export const BUNDLED_RESOURCES: readonly BundledResourceMetadata[] = [
 	{
-		id: "custom-footer",
+		id: "codepi-footer",
 		label: "Custom footer",
 		kind: "extension",
 		enabledByDefault: true,
 	},
 	{
-		id: "filechanges",
+		id: "codepi-diff",
 		label: "File changes",
 		kind: "extension",
 		enabledByDefault: true,
@@ -142,7 +148,9 @@ export const DEFAULT_AUTO_VERIFY_MODE: AutoVerifyMode = "nextTurn";
  */
 export function readAutoVerifyMode(settings: unknown): AutoVerifyMode {
 	const codepi =
-		isRecord(settings) && isRecord(settings.codepi) ? settings.codepi : undefined;
+		isRecord(settings) && isRecord(settings.codepi)
+			? settings.codepi
+			: undefined;
 	const raw = codepi?.autoVerify;
 	return typeof raw === "string" &&
 		(AUTO_VERIFY_MODES as readonly string[]).includes(raw)
@@ -269,7 +277,9 @@ export function updateAskModeAllowedTools(
 	settingsPath: string,
 	tools: readonly string[],
 ): void {
-	const cleaned = [...new Set(tools.map((t) => t.trim()).filter((t) => t !== ""))];
+	const cleaned = [
+		...new Set(tools.map((t) => t.trim()).filter((t) => t !== "")),
+	];
 	writeCodePiSettingsMerge(settingsPath, (settings) => {
 		const codepi = isRecord(settings.codepi) ? { ...settings.codepi } : {};
 		const modes = isRecord(codepi.modes) ? { ...codepi.modes } : {};
@@ -315,8 +325,8 @@ export function seedAskModeAllowedToolsIfMissing(settingsPath: string): void {
 
 export interface BundledResourceConfig {
 	bundledExtensions: {
-		"custom-footer": boolean;
-		filechanges: boolean;
+		"codepi-footer": boolean;
+		"codepi-diff": boolean;
 		"codepi-modes": boolean;
 		"codepi-bash": boolean;
 		"codepi-context": boolean;
@@ -336,8 +346,8 @@ export function readBundledResourceConfig(
 ): BundledResourceConfig {
 	const defaults: BundledResourceConfig = {
 		bundledExtensions: {
-			"custom-footer": true,
-			filechanges: true,
+			"codepi-footer": true,
+			"codepi-diff": true,
 			"codepi-modes": true,
 			"codepi-bash": true,
 			"codepi-context": true,
@@ -355,14 +365,14 @@ export function readBundledResourceConfig(
 		: undefined;
 	return {
 		bundledExtensions: {
-			"custom-footer":
-				typeof extensions?.["custom-footer"] === "boolean"
-					? extensions["custom-footer"]
-					: defaults.bundledExtensions["custom-footer"],
-			filechanges:
-				typeof extensions?.filechanges === "boolean"
-					? extensions.filechanges
-					: defaults.bundledExtensions.filechanges,
+			"codepi-footer":
+				typeof extensions?.["codepi-footer"] === "boolean"
+					? extensions["codepi-footer"]
+					: defaults.bundledExtensions["codepi-footer"],
+			"codepi-diff":
+				typeof extensions?.["codepi-diff"] === "boolean"
+					? extensions["codepi-diff"]
+					: defaults.bundledExtensions["codepi-diff"],
 			"codepi-modes":
 				typeof extensions?.["codepi-modes"] === "boolean"
 					? extensions["codepi-modes"]
@@ -396,7 +406,9 @@ export function isBashExtensionEnabled(settings: unknown): boolean {
 
 /** Whether the codepi-context bundled extension is enabled in settings */
 export function isContextExtensionEnabled(settings: unknown): boolean {
-	return readBundledResourceConfig(settings).bundledExtensions["codepi-context"];
+	return readBundledResourceConfig(settings).bundledExtensions[
+		"codepi-context"
+	];
 }
 
 /** Return the bundled resources enabled by the current CodePi settings. */
@@ -408,8 +420,8 @@ export function getEnabledBundledResources(
 		resource.kind === "extension"
 			? config.bundledExtensions[
 					resource.id as
-						| "custom-footer"
-						| "filechanges"
+						| "codepi-footer"
+						| "codepi-diff"
 						| "codepi-modes"
 						| "codepi-bash"
 						| "codepi-context"

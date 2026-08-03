@@ -9,6 +9,7 @@ panel, terminal-backed bash, and a Settings dashboard.
 ## Features
 
 ### The agent, in your editor
+
 - **Embedded pi runtime** — no separate CLI needed. CodePi bundles the pi SDK
   and reads your canonical pi resources (`~/.pi/agent`): models, auth,
   skills, prompt templates, packages, and custom extensions.
@@ -27,6 +28,7 @@ panel, terminal-backed bash, and a Settings dashboard.
   your own tools/commands/events through pi's extension API.
 
 ### Deep VS Code context (`codepi-context`)
+
 - **Session-start `<editor_context>` snapshot** injected into the system
   prompt: active file + cursor, every selection with its file and range,
   all open editors, recent file switches, git branch and changed files with
@@ -43,6 +45,7 @@ panel, terminal-backed bash, and a Settings dashboard.
   restoring, so the snapshot is never spuriously empty.
 
 ### Edit review — Copilot-style inline diffs
+
 - When the agent calls `write`/`edit`, the change is **applied and saved
   immediately**, then tracked for review:
   - Green/red **editor decorations** on added/removed lines.
@@ -57,6 +60,7 @@ panel, terminal-backed bash, and a Settings dashboard.
     **stale** and never overwritten.
 
 ### File-change tracking (`filechanges`)
+
 - CodePi remembers what the agent created/edited (baseline + diff per file).
 - `/filechanges` — interactive modification log with per-file diff viewer.
 - `/filechanges-accept` — keep current files, resolve all pending snippet
@@ -68,6 +72,7 @@ panel, terminal-backed bash, and a Settings dashboard.
   decorations and the review bar clear in step.
 
 ### Agent modes (`codepi-modes`)
+
 - **Implement** (default) — full tool access.
 - **Plan** — planning only: explore, ask clarifying questions, write the plan
   to `docs/plans/`, track with todos; never modifies source code.
@@ -81,16 +86,18 @@ panel, terminal-backed bash, and a Settings dashboard.
   persists across session reloads.
 
 ### bash through the VS Code terminal (`codepi-bash`)
+
 - Commands run in a hidden VS Code terminal with **shell integration** — the
   same shell environment you'd type into — and the terminal is disposed on
   timeout/abort.
 - **Approval modes** per session: `ask` (default) or `allow`, toggled in the
-  footer or with `/codepi-bash-ask` / `/codepi-bash-auto`. In `ask` mode
+  footer or with `/codepi-bash-ask` / `/codepi-bash-allow`. In `ask` mode
   every command gets a dialog: **Yes / No / Revise / Approve & auto-approve
   all**.
 - Disable `codepi-bash` in Settings to fall back to pi's stock bash tool.
 
 ### Diagnostics & verification
+
 - **`get_diagnostics`** reads the VS Code Problems panel (errors, warnings,
   info, hints from language servers and problem matchers), grouped by file.
   A path-scoped check opens the file invisibly and waits for the language
@@ -100,6 +107,7 @@ panel, terminal-backed bash, and a Settings dashboard.
   (the agent keeps working to fix problems), or `off`.
 
 ### Search
+
 - **`grep`** — CodePi's replacement for pi's stock `grep`: search file
   contents with optional regex (`isRegExp`), case-sensitive matching
   (`isCaseSensitive`), include/exclude globs (`**/*.ts`), path scoping, and a
@@ -111,6 +119,7 @@ panel, terminal-backed bash, and a Settings dashboard.
   .git, dist, build, …).
 
 ### Settings dashboard
+
 - A compact webview in the sidebar that reports pi package status, toggles
   CodePi's **bundled resources** (`custom-footer`, `filechanges`,
   `codepi-modes`, `codepi-bash`, `codepi-context`, and the `nebula-pulse`
@@ -123,6 +132,7 @@ panel, terminal-backed bash, and a Settings dashboard.
   disables.
 
 ### Extensible to the core
+
 - Everything CodePi ships is itself a **pi extension** — plain `.ts` files
   under `resources/extensions/` that register tools, commands, and event
   handlers through pi's extension API. Add your own alongside them.
@@ -131,13 +141,15 @@ panel, terminal-backed bash, and a Settings dashboard.
   templates — all composable.
 
 ## TODO Features
+
 - Calm mode
-    - collapse the coding agent's streaming thoughts and tool calls into a single line. Only show output when the coding agent is done.
+  - collapse the coding agent's streaming thoughts and tool calls into a single line. Only show output when the coding agent is done.
 - Better git integration
 - Feedback for changes
-    - Allow the user to provide feedback on the coding agent's suggestions and changes, snippet-by-snippet or file-by-file.
+  - Allow the user to provide feedback on the coding agent's suggestions and changes, snippet-by-snippet or file-by-file.
 
 ## Requirements
+
 - VS Code 1.93 or newer.
 
 ## Dev Setup
@@ -172,3 +184,12 @@ make install         # install the built .vsix into VS Code
 make clean           # remove build outputs and .vsix files
 make help            # list all rules
 ```
+
+### Dependencies
+
+- [pi.dev](https://pi.dev) — the customizable coding agent.
+- [@vscode/ripgrep-universal](https://www.npmjs.com/package/@vscode/ripgrep-universal) — ripgrep for Node.js, used for `grep` and `find_files`.
+- [@vscode/webview-ui-toolkit](https://www.npmjs.com/package/@vscode/webview-ui-toolkit) — toolkit for building VS Code webviews.
+- [custom footer, filechanges extension, @abhinand5](https://github.com/abhinand5/pi-setup)
+  - `codepi-footer` based on @abhinand5's custom footer
+  - `codepi-diff` based on @abhinand5's filechanges extension

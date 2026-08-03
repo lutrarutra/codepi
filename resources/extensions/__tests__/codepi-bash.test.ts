@@ -35,9 +35,7 @@ afterEach(() => {
 });
 
 /** A fake BashOperations backend that records calls and streams canned data. */
-function createMockOps(
-	impl?: BashOperations["exec"],
-): {
+function createMockOps(impl?: BashOperations["exec"]): {
 	ops: BashOperations;
 	exec: ReturnType<typeof vi.fn>;
 } {
@@ -142,15 +140,13 @@ async function runCommand(
 }
 
 /** Execute the tool directly with a controllable mode + ops. */
-async function runTool(
-	options: {
-		mode?: "ask" | "auto";
-		params?: Record<string, unknown>;
-		ops?: BashOperations;
-		setModeSpy?: (mode: "ask" | "auto", ctx: any) => void;
-		signal?: AbortSignal;
-	},
-) {
+async function runTool(options: {
+	mode?: "ask" | "auto";
+	params?: Record<string, unknown>;
+	ops?: BashOperations;
+	setModeSpy?: (mode: "ask" | "auto", ctx: any) => void;
+	signal?: AbortSignal;
+}) {
 	const { mode = "ask", params = {}, ops, setModeSpy, signal } = options;
 	const { ctx, select, input } = createCtx();
 	const setMode = setModeSpy ?? vi.fn();
@@ -159,9 +155,7 @@ async function runTool(
 		getMode: () => mode,
 		setMode: setMode as any,
 	});
-	const execSpy = ops
-		? (ops.exec as any)
-		: undefined;
+	const execSpy = ops ? (ops.exec as any) : undefined;
 	let error: unknown;
 	let result: any;
 	try {
@@ -202,12 +196,12 @@ describe("codepi-bash: joinCommands", () => {
 	});
 
 	it("rejects arrays longer than 32 commands", () => {
-		expect(joinCommands(Array.from({ length: 33 }, (_, i) => `cmd${i}`)).ok).toBe(
-			false,
-		);
-		expect(joinCommands(Array.from({ length: 32 }, (_, i) => `cmd${i}`)).ok).toBe(
-			true,
-		);
+		expect(
+			joinCommands(Array.from({ length: 33 }, (_, i) => `cmd${i}`)).ok,
+		).toBe(false);
+		expect(
+			joinCommands(Array.from({ length: 32 }, (_, i) => `cmd${i}`)).ok,
+		).toBe(true);
 	});
 });
 
@@ -263,7 +257,9 @@ describe("codepi-bash: cleanTerminalOutput", () => {
 	});
 
 	it("drops the echoed command line", () => {
-		expect(cleanTerminalOutput("$ ls\nfile1\nfile2", "ls")).toBe("file1\nfile2");
+		expect(cleanTerminalOutput("$ ls\nfile1\nfile2", "ls")).toBe(
+			"file1\nfile2",
+		);
 	});
 
 	it("trims leading and trailing prompt artifacts", () => {
@@ -283,8 +279,8 @@ describe("codepi-bash: cleanTerminalOutput", () => {
 
 describe("codepi-bash: formatBashBadge", () => {
 	it("renders terminal icon + mode label (ask/allow)", () => {
-		expect(formatBashBadge("ask")).toBe("\u{F120} ask");
-		expect(formatBashBadge("auto")).toBe("\u{F120} allow");
+		expect(formatBashBadge("ask")).toBe("\u{EBCA} ask");
+		expect(formatBashBadge("auto")).toBe("\u{EBCA} allow");
 	});
 });
 
@@ -295,7 +291,9 @@ describe("codepi-bash: readModeFromBranch", () => {
 
 	it("replays a persisted mode and uses the latest entry", () => {
 		expect(
-			readModeFromBranch([createBranchEntry(MODE_ENTRY_TYPE, { mode: "auto" })]),
+			readModeFromBranch([
+				createBranchEntry(MODE_ENTRY_TYPE, { mode: "auto" }),
+			]),
 		).toBe("auto");
 		expect(
 			readModeFromBranch([
@@ -365,7 +363,7 @@ describe("codepi-bash: BashOutputAccumulator", () => {
 describe("codepi-bash: registration", () => {
 	it("registers the mode commands, session handler, and the bash tool", () => {
 		const mock = load();
-		for (const name of ["codepi-bash-ask", "codepi-bash-auto"]) {
+		for (const name of ["codepi-bash-ask", "codepi-bash-allow"]) {
 			expect(mock.commands.has(name), `/${name}`).toBe(true);
 		}
 		expect(mock.handlers.has("session_start")).toBe(true);
@@ -410,7 +408,7 @@ describe("codepi-bash: commands", () => {
 			"info",
 		);
 
-		const autoRun = await runCommand(mock, "codepi-bash-auto", []);
+		const autoRun = await runCommand(mock, "codepi-bash-allow", []);
 		expect(autoRun.statuses).toContainEqual({ key: STATUS_KEY, text: "auto" });
 		expect(mock.entries).toContainEqual(
 			expect.objectContaining({
@@ -488,8 +486,16 @@ describe("codepi-bash: approval dialog (ask mode)", () => {
 			setMode: () => {},
 		});
 		await def.execute("t1", { command: "ls" }, undefined, undefined, ctx);
-		expect(input).toHaveBeenCalledWith("Revise bash command", "ls", expect.any(Object));
-		expect(mockOps.exec).toHaveBeenCalledWith("ls -la", fixtureDir, expect.any(Object));
+		expect(input).toHaveBeenCalledWith(
+			"Revise bash command",
+			"ls",
+			expect.any(Object),
+		);
+		expect(mockOps.exec).toHaveBeenCalledWith(
+			"ls -la",
+			fixtureDir,
+			expect.any(Object),
+		);
 	});
 
 	it("denies when the revise input is cancelled or empty", async () => {
@@ -520,16 +526,26 @@ describe("codepi-bash: approval dialog (ask mode)", () => {
 			getMode: () => "ask",
 			setMode: setMode as any,
 		});
-		await def.execute("t1", { command: "git status" }, undefined, undefined, ctx);
+		await def.execute(
+			"t1",
+			{ command: "git status" },
+			undefined,
+			undefined,
+			ctx,
+		);
 		expect(setMode).toHaveBeenCalledWith("auto", ctx);
-		expect(mockOps.exec).toHaveBeenCalledWith("git status", fixtureDir, expect.any(Object));
+		expect(mockOps.exec).toHaveBeenCalledWith(
+			"git status",
+			fixtureDir,
+			expect.any(Object),
+		);
 	});
 });
 
 describe("codepi-bash: execution results", () => {
 	it("auto mode skips the dialog entirely", async () => {
 		const mockOps = createMockOps();
-		const { result, ctx, select } = await runTool({
+		const { result, select } = await runTool({
 			mode: "auto",
 			params: { command: "ls" },
 			ops: mockOps.ops,
@@ -553,13 +569,17 @@ describe("codepi-bash: execution results", () => {
 	});
 
 	it("throws for a non-zero exit code with the output attached", async () => {
-		const { exec, ops } = createMockOps(
+		const { ops } = createMockOps(
 			async (_cmd: string, _cwd: string, options: any) => {
 				options.onData(Buffer.from("build failed\n"));
 				return { exitCode: 1 };
 			},
 		);
-		const { error } = await runTool({ mode: "auto", params: { command: "npm run build" }, ops });
+		const { error } = await runTool({
+			mode: "auto",
+			params: { command: "npm run build" },
+			ops,
+		});
 		expect(String(error)).toContain("Command exited with code 1");
 		expect(String(error)).toContain("build failed");
 	});
@@ -571,7 +591,11 @@ describe("codepi-bash: execution results", () => {
 				return { exitCode: null };
 			},
 		);
-		const { error } = await runTool({ mode: "auto", params: { command: "make" }, ops });
+		const { error } = await runTool({
+			mode: "auto",
+			params: { command: "make" },
+			ops,
+		});
 		expect(String(error)).toContain("Could not determine");
 		expect(String(error)).toContain("partial");
 	});
@@ -594,17 +618,19 @@ describe("codepi-bash: execution results", () => {
 		const { ops } = createMockOps(async () => {
 			throw new Error("aborted");
 		});
-		const { error } = await runTool({ mode: "auto", params: { command: "git pull" }, ops });
+		const { error } = await runTool({
+			mode: "auto",
+			params: { command: "git pull" },
+			ops,
+		});
 		expect(String(error)).toContain("Command aborted");
 	});
 
 	it("passes through the caller's abort signal to the backend", async () => {
-		const exec = vi.fn(
-			async (_cmd: string, _cwd: string, options: any) => {
-				options?.onData?.(Buffer.from("x"));
-				return { exitCode: 0 };
-			},
-		);
+		const exec = vi.fn(async (_cmd: string, _cwd: string, options: any) => {
+			options?.onData?.(Buffer.from("x"));
+			return { exitCode: 0 };
+		});
 		const ops = { exec } as any;
 		const controller = new AbortController();
 		await runTool({
@@ -629,7 +655,11 @@ describe("codepi-bash: execution results", () => {
 				return { exitCode: 0 };
 			},
 		);
-		const { result } = await runTool({ mode: "auto", params: { command: "make noise" }, ops });
+		const { result } = await runTool({
+			mode: "auto",
+			params: { command: "make noise" },
+			ops,
+		});
 		const text = result.content[0].text;
 		expect(text).toContain("Showing lines");
 		expect(text).toMatch(/Showing lines \d+-\d+ of 5000/);
@@ -730,17 +760,19 @@ describe("codepi-bash: createVscodeBashOperations", () => {
 						shellIntegration: undefined,
 						dispose: vi.fn(),
 						sendText: vi.fn(),
-				};
-				terminals.push(t);
-				return t;
-			}),
-			// Never fires — shell integration never activates.
-			onDidChangeTerminalShellIntegration: vi.fn(() => ({ dispose: () => {} })),
-			onDidWriteTerminalData: vi.fn((listener: any) => {
-				dataListener = listener;
-				return { dispose: () => {} };
-			}),
-		},
+					};
+					terminals.push(t);
+					return t;
+				}),
+				// Never fires — shell integration never activates.
+				onDidChangeTerminalShellIntegration: vi.fn(() => ({
+					dispose: () => {},
+				})),
+				onDidWriteTerminalData: vi.fn((listener: any) => {
+					dataListener = listener;
+					return { dispose: () => {} };
+				}),
+			},
 		};
 		(globalThis as any).__codepiVscode = { vscode };
 
@@ -759,7 +791,10 @@ describe("codepi-bash: createVscodeBashOperations", () => {
 		// Simulate the shell: prompt, echoed command, output, prompt,
 		// echoed sentinel, then the marker line with the exit code.
 		dataListener!({ terminal: term, data: "\n$ git status\n M file.txt\n$ " });
-		dataListener!({ terminal: term, data: `echo "${marker}:$?"\n${marker}:0\n$ ` });
+		dataListener!({
+			terminal: term,
+			data: `echo "${marker}:$?"\n${marker}:0\n$ `,
+		});
 
 		const result = await resultP;
 		expect(result.exitCode).toBe(0);
@@ -775,11 +810,18 @@ describe("codepi-bash: createVscodeBashOperations", () => {
 		const vscode = {
 			window: {
 				createTerminal: vi.fn((options: any) => {
-					const t = { options, shellIntegration: undefined, dispose: vi.fn(), sendText: vi.fn() };
+					const t = {
+						options,
+						shellIntegration: undefined,
+						dispose: vi.fn(),
+						sendText: vi.fn(),
+					};
 					terminals.push(t);
 					return t;
 				}),
-				onDidChangeTerminalShellIntegration: vi.fn(() => ({ dispose: () => {} })),
+				onDidChangeTerminalShellIntegration: vi.fn(() => ({
+					dispose: () => {},
+				})),
 				onDidWriteTerminalData: vi.fn((listener: any) => {
 					dataListener = listener;
 					return { dispose: () => {} };
@@ -806,7 +848,12 @@ describe("codepi-bash: createVscodeBashOperations", () => {
 		const vscode = {
 			window: {
 				createTerminal: vi.fn((options: any) => {
-					const t = { options, shellIntegration: undefined, dispose: vi.fn(), sendText: vi.fn() };
+					const t = {
+						options,
+						shellIntegration: undefined,
+						dispose: vi.fn(),
+						sendText: vi.fn(),
+					};
 					terminals.push(t);
 					return t;
 				}),
@@ -841,8 +888,13 @@ describe("codepi-bash: createVscodeBashOperations", () => {
 	it("errors clearly when neither shell integration nor data events exist", async () => {
 		const vscode = {
 			window: {
-				createTerminal: vi.fn(() => ({ shellIntegration: undefined, dispose: () => {} })),
-				onDidChangeTerminalShellIntegration: vi.fn(() => ({ dispose: () => {} })),
+				createTerminal: vi.fn(() => ({
+					shellIntegration: undefined,
+					dispose: () => {},
+				})),
+				onDidChangeTerminalShellIntegration: vi.fn(() => ({
+					dispose: () => {},
+				})),
 				// no onDidWriteTerminalData
 			},
 		};

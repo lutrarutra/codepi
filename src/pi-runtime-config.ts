@@ -31,8 +31,8 @@ export function buildPiRuntimeResourcePaths(
 	const enabled = getEnabledBundledResources(settings);
 	const enabledIds = new Set(enabled.map((resource) => resource.id));
 	const bundledExtensionPaths = [
-		["custom-footer", "custom-footer.ts"],
-		["filechanges", "filechanges.ts"],
+		["codepi-footer", "codepi-footer.ts"],
+		["codepi-diff", "codepi-diff.ts"],
 		["codepi-modes", "codepi-modes.ts"],
 		["codepi-bash", "codepi-bash.ts"],
 		["codepi-context", "codepi-context.ts"],
@@ -40,8 +40,8 @@ export function buildPiRuntimeResourcePaths(
 		.filter(([id]) =>
 			enabledIds.has(
 				id as
-					| "custom-footer"
-					| "filechanges"
+					| "codepi-footer"
+					| "codepi-diff"
 					| "codepi-modes"
 					| "codepi-bash"
 					| "codepi-context",
@@ -127,7 +127,7 @@ function registrationNames(ext: LoadedExtensionLike): string[] {
  * The SDK keeps every loaded extension and disambiguates same-named
  * commands/tools by suffixing (`/filechanges-accept:1` / `:2`), so a
  * 3rd-party extension that ships the same feature as a bundled one (e.g.
- * filechanges) shows up as duplicate command-palette entries. CodePi's
+ * codepi-diff) shows up as duplicate command-palette entries. CodePi's
  * bundled copy wins: any non-bundled extension registering a command or tool
  * name also registered by a bundled extension is removed, and the caller
  * should drop its loader diagnostics along with it.

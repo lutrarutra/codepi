@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import customFooterFactory from "../custom-footer";
+import customFooterFactory from "../codepi-footer";
 
 // ── Mocks ────────────────────────────────────────────────────
 
@@ -51,7 +51,9 @@ async function loadFooter(
 	const mock = createMockPi();
 	customFooterFactory(mock.api as any);
 
-	let footerFactory: ((tui: any, theme: any, footerData: any) => any) | undefined;
+	let footerFactory:
+		| ((tui: any, theme: any, footerData: any) => any)
+		| undefined;
 	const ctx = {
 		sessionManager: { getBranch: () => [] },
 		getContextUsage: () => undefined,
@@ -74,13 +76,13 @@ async function loadFooter(
 
 // ── Tests ────────────────────────────────────────────────────
 
-// Nerd-font glyphs used by the mode badge (must match custom-footer.ts).
+// Nerd-font glyphs used by the mode badge (must match codepi-footer.ts).
 const ICON_ASK = "\u{F059}"; // fa-question-circle
 const ICON_PLAN = "\u{F0CA}"; // fa-list-ul
 const ICON_IMPLEMENT = "\u{F121}"; // fa-code
-const ICON_BASH = "\u{F120}"; // fa-terminal (bash approval badge)
+const ICON_BASH = "\u{EBCA}"; // cod-terminal_bash (bash approval badge)
 
-describe("custom-footer: mode badge", () => {
+describe("codepi-footer: mode badge", () => {
 	it("renders the ASK badge in accent (blue) with icon and lowercase label", async () => {
 		const { component } = await loadFooter("ASK");
 		const [line] = component.render(200);
@@ -102,7 +104,9 @@ describe("custom-footer: mode badge", () => {
 	it("places the mode badge leftmost, before the model name", async () => {
 		const mock = createMockPi();
 		customFooterFactory(mock.api as any);
-		let footerFactory: ((tui: any, theme: any, footerData: any) => any) | undefined;
+		let footerFactory:
+			| ((tui: any, theme: any, footerData: any) => any)
+			| undefined;
 		const ctx = {
 			sessionManager: { getBranch: () => [] },
 			getContextUsage: () => undefined,
@@ -143,8 +147,12 @@ describe("custom-footer: mode badge", () => {
 		const { component } = await loadFooter(undefined, "ask", "main");
 		const [line] = component.render(400);
 		// Active `ask` is bold + warning; inactive `allow` is dimmed.
-		expect(line).toContain(`{warning:${ICON_BASH} }{warning:*ask*}{dim:/allow}`);
-		const bashIdx = line.indexOf(`{warning:${ICON_BASH} }{warning:*ask*}{dim:/allow}`);
+		expect(line).toContain(
+			`{warning:${ICON_BASH} }{warning:*ask*}{dim:/allow}`,
+		);
+		const bashIdx = line.indexOf(
+			`{warning:${ICON_BASH} }{warning:*ask*}{dim:/allow}`,
+		);
 		const branchIdx = line.indexOf("{toolDiffAdded: main}");
 		expect(bashIdx).toBeGreaterThanOrEqual(0);
 		expect(branchIdx).toBeGreaterThan(bashIdx);
@@ -153,7 +161,9 @@ describe("custom-footer: mode badge", () => {
 	it("renders the bash badge with the allow option highlighted in success", async () => {
 		const { component } = await loadFooter(undefined, "auto");
 		const [line] = component.render(200);
-		expect(line).toContain(`{success:${ICON_BASH} }{dim:ask/}{success:*allow*}`);
+		expect(line).toContain(
+			`{success:${ICON_BASH} }{dim:ask/}{success:*allow*}`,
+		);
 	});
 
 	it("renders no bash badge when the codepi-bash extension is absent", async () => {

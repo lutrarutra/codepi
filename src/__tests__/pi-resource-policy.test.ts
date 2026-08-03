@@ -23,15 +23,15 @@ describe("canonical Pi and CodePi paths", () => {
 
 describe("bundled resource policy", () => {
 	it("declares stable metadata for every CodePi bundled resource", () => {
-			expect(BUNDLED_RESOURCES).toEqual([
+		expect(BUNDLED_RESOURCES).toEqual([
 			{
-				id: "custom-footer",
+				id: "codepi-footer",
 				label: "Custom footer",
 				kind: "extension",
 				enabledByDefault: true,
 			},
 			{
-				id: "filechanges",
+				id: "codepi-diff",
 				label: "File changes",
 				kind: "extension",
 				enabledByDefault: true,
@@ -64,10 +64,10 @@ describe("bundled resource policy", () => {
 	});
 
 	it("enables every bundled resource when codepi settings are absent", () => {
-			expect(readBundledResourceConfig({})).toEqual({
+		expect(readBundledResourceConfig({})).toEqual({
 			bundledExtensions: {
-				"custom-footer": true,
-				filechanges: true,
+				"codepi-footer": true,
+				"codepi-diff": true,
 				"codepi-modes": true,
 				"codepi-bash": true,
 				"codepi-context": true,
@@ -77,17 +77,17 @@ describe("bundled resource policy", () => {
 	});
 
 	it("honors explicit false values and ignores malformed values safely", () => {
-			expect(
+		expect(
 			readBundledResourceConfig({
 				codepi: {
-					bundledExtensions: { "custom-footer": false },
+					bundledExtensions: { "codepi-footer": false },
 					bundledThemes: { "nebula-pulse": "off" },
 				},
 			}),
 		).toEqual({
 			bundledExtensions: {
-				"custom-footer": false,
-				filechanges: true,
+				"codepi-footer": false,
+				"codepi-diff": true,
 				"codepi-modes": true,
 				"codepi-bash": true,
 				"codepi-context": true,

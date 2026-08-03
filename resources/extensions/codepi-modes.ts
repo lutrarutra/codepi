@@ -16,7 +16,7 @@ type Mode = "ask" | "plan" | "implement";
 /** Custom session entry type used to persist the active mode. */
 const MODE_ENTRY_TYPE = "codepi-modes:mode";
 
-/** Footer status key — read by custom-footer.ts to render the mode badge. */
+/** Footer status key — read by codepi-footer.ts to render the mode badge. */
 const STATUS_KEY = "codepi-modes";
 
 /** Custom message type sent into the conversation when the mode changes. */
@@ -157,9 +157,7 @@ const MODE_LABELS: Record<Mode, string> = {
 };
 
 function isMode(value: unknown): value is Mode {
-	return (
-		value === "ask" || value === "plan" || value === "implement"
-	);
+	return value === "ask" || value === "plan" || value === "implement";
 }
 
 // ── Mode instructions injected into the system prompt ────────

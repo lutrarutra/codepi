@@ -11,35 +11,49 @@ const require = createRequire(import.meta.url);
 // Mirror the alias map pi's extension loader uses (loader.ts getAliases), so
 // jiti resolves the @earendil-works packages and typebox the same way at
 // runtime. resolve() walks up from the coding-agent package for nested deps.
-const resolveFromPi = (specifier) => require.resolve(
-	specifier,
-	{ paths: [join(root, "node_modules", "@earendil-works", "pi-coding-agent")] },
-);
-const nestedPi = (name, rel) => join(
-	root,
-	"node_modules",
-	"@earendil-works",
-	"pi-coding-agent",
-	"node_modules",
-	"@earendil-works",
-	name,
-	rel,
-);
+const resolveFromPi = (specifier) =>
+	require.resolve(specifier, {
+		paths: [join(root, "node_modules", "@earendil-works", "pi-coding-agent")],
+	});
+const nestedPi = (name, rel) =>
+	join(
+		root,
+		"node_modules",
+		"@earendil-works",
+		"pi-coding-agent",
+		"node_modules",
+		"@earendil-works",
+		name,
+		rel,
+	);
 
 const aliases = {
-	"@earendil-works/pi-coding-agent": join(root, "node_modules", "@earendil-works", "pi-coding-agent", "dist", "index.js"),
+	"@earendil-works/pi-coding-agent": join(
+		root,
+		"node_modules",
+		"@earendil-works",
+		"pi-coding-agent",
+		"dist",
+		"index.js",
+	),
 	"@earendil-works/pi-agent-core": nestedPi("pi-agent-core", "dist/index.js"),
 	"@earendil-works/pi-tui": nestedPi("pi-tui", "dist/index.js"),
 	"@earendil-works/pi-ai/compat": nestedPi("pi-ai", "dist/compat.js"),
 	"@earendil-works/pi-ai/oauth": nestedPi("pi-ai", "dist/oauth.js"),
-	"@earendil-works/pi-ai/providers/all": nestedPi("pi-ai", "dist/providers/all.js"),
+	"@earendil-works/pi-ai/providers/all": nestedPi(
+		"pi-ai",
+		"dist/providers/all.js",
+	),
 	"@earendil-works/pi-ai": nestedPi("pi-ai", "dist/compat.js"),
 	typebox: resolveFromPi("typebox"),
 	"typebox/compile": resolveFromPi("typebox/compile"),
 	"typebox/value": resolveFromPi("typebox/value"),
 };
 
-const jiti = createJiti(import.meta.url, { moduleCache: false, alias: aliases });
+const jiti = createJiti(import.meta.url, {
+	moduleCache: false,
+	alias: aliases,
+});
 
 // Minimal mock pi — enough to run the factory bodies.
 function createMockPi() {
@@ -65,14 +79,20 @@ async function loadExtension(relPath, label, expected) {
 	const extUrl = new URL(relPath, import.meta.url);
 	const factory = await jiti.import(extUrl.pathname, { default: true });
 	if (typeof factory !== "function") {
-		console.error(`FAIL (${label}): extension does not export a factory function`);
+		console.error(
+			`FAIL (${label}): extension does not export a factory function`,
+		);
 		process.exit(1);
 	}
 	const { api, registered } = createMockPi();
 	await factory(api);
 	console.log(`${label}: jiti load: OK`);
-	console.log(`${label}: commands: ${[...registered.commands].sort().join(", ")}`);
-	console.log(`${label}: tools: ${[...registered.tools].sort().join(", ") || "(none)"}`);
+	console.log(
+		`${label}: commands: ${[...registered.commands].sort().join(", ")}`,
+	);
+	console.log(
+		`${label}: tools: ${[...registered.tools].sort().join(", ") || "(none)"}`,
+	);
 	for (const c of expected.commands ?? []) {
 		if (!registered.commands.includes(c)) {
 			console.error(`FAIL (${label}): missing command /${c}`);
@@ -99,7 +119,7 @@ await loadExtension("../codepi-modes.ts", "codepi-modes", {
 });
 
 await loadExtension("../codepi-bash.ts", "codepi-bash", {
-	commands: ["codepi-bash-ask", "codepi-bash-auto"],
+	commands: ["codepi-bash-ask", "codepi-bash-allow"],
 	events: ["session_start"],
 	tools: ["bash"],
 });

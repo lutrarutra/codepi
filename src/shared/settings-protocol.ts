@@ -1,7 +1,13 @@
 /** Settings dashboard protocol shared by the extension and settings webview. */
 
 export interface BundledResourceRow {
-	id: "custom-footer" | "filechanges" | "codepi-modes" | "codepi-bash" | "codepi-context" | "nebula-pulse";
+	id:
+		| "codepi-footer"
+		| "codepi-diff"
+		| "codepi-modes"
+		| "codepi-bash"
+		| "codepi-context"
+		| "nebula-pulse";
 	label: string;
 	kind: "extension" | "theme";
 	enabled: boolean;
@@ -71,7 +77,11 @@ export type SettingsReply =
 	| {
 			command: "settings:saved";
 			ok: true;
-			resource: BundledResourceRow["id"] | "terminal" | "autoVerify" | "askAllowedTools";
+			resource:
+				| BundledResourceRow["id"]
+				| "terminal"
+				| "autoVerify"
+				| "askAllowedTools";
 	  }
 	| {
 			command: "settings:opened";
