@@ -13,6 +13,7 @@ import { tmpdir } from "node:os";
 import {
 	ASK_MODE_DEFAULT_ALLOWED_TOOLS,
 	ASK_MODE_DEFAULT_ALLOWED_TOOLS_PRE_CONTEXT,
+	ASK_MODE_DEFAULT_ALLOWED_TOOLS_PRE_HEAD,
 	detectLegacyConfig,
 	ensureRuntimeTools,
 	getAgentDir,
@@ -318,6 +319,26 @@ describe("CodePi settings merge and Pi JSON files", () => {
 		).toEqual([...ASK_MODE_DEFAULT_ALLOWED_TOOLS]);
 		expect(ASK_MODE_DEFAULT_ALLOWED_TOOLS).toContain("get_editor_context");
 		expect(ASK_MODE_DEFAULT_ALLOWED_TOOLS).toContain("get_git_diff");
+	});
+
+	it("migrates the pre-head seeded allowlist to include head", () => {
+		const settingsPath = join(dir, "settings.json");
+		// The auto-seeded default before `head` was added (has context tools,
+		// but no head).
+		writeJsonFileAtomic(settingsPath, {
+			codepi: {
+				modes: {
+					ask: {
+						allowedTools: [...ASK_MODE_DEFAULT_ALLOWED_TOOLS_PRE_HEAD],
+					},
+				},
+			},
+		});
+		seedAskModeAllowedToolsIfMissing(settingsPath);
+		expect(
+			readAskModeAllowedTools(readJsonFile(settingsPath)),
+		).toEqual([...ASK_MODE_DEFAULT_ALLOWED_TOOLS]);
+		expect(ASK_MODE_DEFAULT_ALLOWED_TOOLS).toContain("head");
 	});
 
 	it("leaves a user-customized allowlist untouched", () => {

@@ -109,6 +109,74 @@ export const readFileTool: VscodeTool = {
 	},
 };
 
+/** Unix `head` default: first 10 lines. */
+const HEAD_DEFAULT_LINES = 10;
+/** Safety cap so an oversized request can't dump a huge file. */
+const HEAD_MAX_LINES = 1000;
+
+/**
+ * Tool: head — read the first N lines of a file.
+ *
+ * Pure-JS implementation (no shelling out to the OS `head` binary), so it
+ * works identically on Linux, macOS, and Windows — `head` is not built into
+ * Windows cmd/PowerShell, and bundling a per-platform binary isn't worth it
+ * for a line slice.
+ */
+export const headTool: VscodeTool = {
+	name: "head",
+	label: "Head",
+	description:
+		"Read the first N lines of a file (default 10, like the Unix head command). " +
+		"Pure JS implementation — works on all platforms, no external binary needed. " +
+		"Use to preview the top of a large file instead of read with a limit. " +
+		"Pass `lines` to control how many lines are returned (1–1000).",
+	parameters: {
+		type: "object",
+		properties: {
+			path: {
+				type: "string",
+				description: "Path to the file to read (relative or absolute)",
+			},
+			lines: {
+				type: "number",
+				description: `Number of lines to read from the top of the file (default: ${HEAD_DEFAULT_LINES}, max: ${HEAD_MAX_LINES})`,
+			},
+		},
+		required: ["path"],
+	},
+	async execute(_toolCallId, params) {
+		const { path: filePath, lines } = params as {
+			path: string;
+			lines?: number;
+		};
+		const count =
+			lines === undefined
+				? HEAD_DEFAULT_LINES
+				: Math.min(Math.max(1, Math.floor(lines)), HEAD_MAX_LINES);
+		const uri = resolveUri(filePath);
+		try {
+			const content = await vscode.workspace.fs.readFile(uri);
+			const text = new TextDecoder().decode(content);
+			const sliced = selectLines(text, 1, count);
+			return {
+				...sliced,
+				details: {
+					totalLines: text.split("\n").length,
+					linesRead: count,
+				},
+			};
+		} catch {
+			return {
+				content: [
+					{ type: "text" as const, text: `File not found: ${filePath}` },
+				],
+				isError: true,
+				details: {},
+			};
+		}
+	},
+};
+
 /** Create or overwrite a file in the workspace. */
 export function createWriteFileTool(review: ReviewManager): VscodeTool {
 	return {
@@ -866,6 +934,7 @@ export const getDiagnosticsTool: VscodeTool = {
 export function createVscodeTools(review: ReviewManager): VscodeTool[] {
 	return [
 		readFileTool,
+		headTool,
 		createWriteFileTool(review),
 		createEditFileTool(review),
 		listDirTool,

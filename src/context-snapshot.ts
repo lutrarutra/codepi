@@ -36,6 +36,12 @@ export const DIFF_LINES_MAX = 2000;
 export const DIFF_TOTAL_MAX = 4000;
 /** Per-repo git diff-stat cache TTL (each stat spawns a git subprocess). */
 export const GIT_STATS_TTL_MS = 3000;
+/**
+ * Max time the session-start snapshot waits for the window to restore its
+ * editor layout before collecting anyway (unknown state must never block
+ * session creation).
+ */
+export const RESTORE_WAIT_MS = 1200;
 
 /** Numeric `Status` codes from the vscode.git API v1 const enum. */
 const GIT_STATUS_CODES: Record<number, string> = {
@@ -532,11 +538,13 @@ export async function collectEditorContext(
 		errors.push(`activeEditor: ${errorMessage(err)}`);
 	}
 
-	// Open editors (tabs)
+	// Open editors (tabs). When the tab model is unavailable or still empty
+	// (the window is restoring its layout at session start), fall back to the
+	// workspace's open text documents so the list is never spuriously empty.
 	let openEditors: EditorContext["openEditors"] = [];
 	try {
 		const tabs: any[] = vscode?.window?.tabs ?? [];
-		if (Array.isArray(tabs)) {
+		if (Array.isArray(tabs) && tabs.length > 0) {
 			const activeInput = vscode?.window?.tabGroups?.activeTabGroup?.activeTab?.input;
 			for (const tab of tabs) {
 				const input = tab?.input;
@@ -548,6 +556,24 @@ export async function collectEditorContext(
 					active,
 					dirty: !!tab.isDirty,
 				});
+			}
+		}
+		if (openEditors.length === 0) {
+			const activePath = vscode?.window?.activeTextEditor?.document?.uri?.fsPath;
+			const docs: any[] = vscode?.workspace?.textDocuments ?? [];
+			if (Array.isArray(docs)) {
+				for (const doc of docs) {
+					const uri = doc?.uri;
+					if (uri?.scheme !== "file") continue;
+					if (typeof uri?.fsPath !== "string") continue;
+					// Dedupe — a restored document can also be reported by tabs.
+					if (openEditors.some((e) => e.path === uri.fsPath)) continue;
+					openEditors.push({
+						path: uri.fsPath,
+						active: uri.fsPath === activePath,
+						dirty: !!doc.isDirty,
+					});
+				}
 			}
 		}
 	} catch (err) {
@@ -852,16 +878,59 @@ export async function collectGitDiffs(
 // ── Host helper ─────────────────────────────────────────────
 
 /**
+ * Wait (bounded) until VS Code has restored its editor layout. At the very
+ * start of a window, `window.tabs` and `workspace.textDocuments` can still be
+ * empty while the user's files are being restored; collecting the session
+ * snapshot then would report "no open editors". Polls cheaply and resolves as
+ * soon as any tab or file-backed document appears, or when the timeout elapses
+ * (unknown state must never block session creation).
+ */
+export function waitForEditorRestore(
+	vscode: any,
+	timeoutMs = RESTORE_WAIT_MS,
+	pollMs = 75,
+): Promise<void> {
+	const hasEditors = (): boolean => {
+		try {
+			const tabs: unknown = vscode?.window?.tabs;
+			if (Array.isArray(tabs) && tabs.length > 0) return true;
+			const docs: unknown = vscode?.workspace?.textDocuments;
+			return (
+				Array.isArray(docs) &&
+				docs.some(
+					(d: any) =>
+						d?.uri?.scheme === "file" && typeof d?.uri?.fsPath === "string",
+				)
+			);
+		} catch {
+			/* API unavailable — don't block */
+		}
+		return false;
+	};
+	return new Promise((resolve) => {
+		if (hasEditors()) return resolve();
+		const deadline = Date.now() + Math.max(0, timeoutMs);
+		const timer = setInterval(() => {
+			if (hasEditors() || Date.now() >= deadline) {
+				clearInterval(timer);
+				resolve();
+			}
+		}, Math.max(1, pollMs));
+	});
+}
+
+/**
  * Render the system-prompt snapshot for a freshly created session. Returns
  * undefined (never throws) when collection fails or the API is unavailable.
  */
 export async function renderSystemPromptSnapshot(
 	vscode: any,
 	cwd: string,
-	options?: EditorContextOptions,
+	options?: EditorContextOptions & { waitForRestore?: boolean },
 ): Promise<string | undefined> {
 	try {
 		if (!vscode?.window) return undefined;
+		if (options?.waitForRestore) await waitForEditorRestore(vscode);
 		const ctx = await collectEditorContext(vscode, cwd, options);
 		return formatContextSnapshot(ctx, cwd);
 	} catch {

@@ -15,9 +15,11 @@ import {
 	getRecentFiles,
 	renderSystemPromptSnapshot,
 	trackContextEvents,
+	waitForEditorRestore,
 	__resetContextStateForTests,
 	GIT_FILES_MAX,
 	OPEN_EDITORS_MAX,
+	RESTORE_WAIT_MS,
 	SELECTION_TEXT_MAX,
 } from "../context-snapshot";
 
@@ -77,6 +79,7 @@ function makeMockVscode(options: {
 	trusted?: boolean;
 	active?: { path: string; languageId?: string; lineCount?: number; isDirty?: boolean; content?: string };
 	tabs?: Array<{ path: string; isDirty?: boolean }>;
+	textDocuments?: Array<{ path: string; isDirty?: boolean }>;
 	visibleEditors?: Array<{ path: string; selection?: any; languageId?: string; lineCount?: number }>;
 	terminals?: string[];
 	repos?: any[];
@@ -90,6 +93,7 @@ function makeMockVscode(options: {
 		trusted = true,
 		active,
 		tabs = [],
+		textDocuments = [],
 		visibleEditors = [],
 		terminals = [],
 		repos = [],
@@ -155,6 +159,10 @@ function makeMockVscode(options: {
 			workspaceFolders: folders.map((f) => ({ uri: { fsPath: f } })),
 			isTrusted: trusted,
 			name: undefined,
+			textDocuments: textDocuments.map((d) => ({
+				uri: { fsPath: d.path, scheme: "file" },
+				isDirty: d.isDirty ?? false,
+			})),
 		},
 		extensions: {
 			getExtension: (id: string) =>
@@ -346,6 +354,21 @@ describe("formatContextSnapshot", () => {
 		const text = formatContextSnapshot(ctx, "/p");
 		expect(text).toContain(`open(${OPEN_EDITORS_MAX + 5}): *f0.ts (dirty), f1.ts`);
 		expect(text).toContain("… +5 more");
+	});
+
+	it("falls back to open text documents when the tab model is empty", async () => {
+		const vscode = makeMockVscode({
+			folders: ["/p"],
+			active: { path: "/p/a.ts" },
+			tabs: [], // window still restoring its layout — tab model not populated
+			textDocuments: [
+				{ path: "/p/a.ts", isDirty: true },
+				{ path: "/p/b.ts" },
+			],
+		});
+		const ctx = await collectEditorContext(vscode, "/p");
+		const text = formatContextSnapshot(ctx, "/p");
+		expect(text).toContain("open(2): *a.ts (dirty), b.ts");
 	});
 
 	it("renders git branch, divergence, changed files with ±stats", async () => {
@@ -576,6 +599,57 @@ describe("trackContextEvents", () => {
 		trackContextEvents(vscode);
 		trackContextEvents(vscode);
 		expect(count).toBe(1);
+	});
+});
+
+// ── waitForEditorRestore ────────────────────────────────────
+
+describe("waitForEditorRestore", () => {
+	it("resolves immediately when editors are already present", async () => {
+		const vscode = makeMockVscode({
+			folders: ["/p"],
+			tabs: [{ path: "/p/a.ts" }],
+		});
+		await expect(waitForEditorRestore(vscode)).resolves.toBeUndefined();
+	});
+
+	it("resolves when file documents appear during the poll", async () => {
+		vi.useFakeTimers();
+		try {
+			const docs: any[] = [];
+			const vscode = {
+				window: { tabs: [], tabGroups: {} },
+				workspace: { textDocuments: docs },
+			};
+			let resolved = false;
+			const done = waitForEditorRestore(vscode, 1000, 25).then(() => {
+				resolved = true;
+			});
+			// A restored document appears mid-poll (e.g. the window finishing
+			// its layout restore) — the wait must end early.
+			docs.push({ uri: { fsPath: "/p/x.ts", scheme: "file" } });
+			await vi.advanceTimersByTimeAsync(50);
+			await done;
+			expect(resolved).toBe(true);
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
+	it("gives up after the timeout when nothing appears", async () => {
+		vi.useFakeTimers();
+		try {
+			const vscode = makeMockVscode({ folders: ["/p"] }); // no tabs, no docs
+			let resolved = false;
+			const done = waitForEditorRestore(vscode, 200, 25).then(() => {
+				resolved = true;
+			});
+			await vi.advanceTimersByTimeAsync(RESTORE_WAIT_MS + 500);
+			await done;
+			expect(resolved).toBe(true);
+		} finally {
+			vi.useRealTimers();
+		}
 	});
 });
 

@@ -2,3 +2,5 @@ node_modules
 dist
 *.vsix
 submodules/
+.pi-subagents/
+.vscode/

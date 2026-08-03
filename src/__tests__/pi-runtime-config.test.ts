@@ -5,6 +5,7 @@ import {
 	buildCurrentPiRuntimeResourcePaths,
 	buildPiResourceLoaderOptions,
 	buildPiRuntimeResourcePaths,
+	filterConflictingExtensions,
 	installImplicitBundledThemeReload,
 } from "../pi-runtime-config";
 
@@ -184,5 +185,88 @@ describe("Pi runtime resource paths", () => {
 			additionalExtensionPaths: resources.bundledExtensionPaths,
 			additionalThemePaths: resources.bundledThemePaths,
 		});
+	});
+});
+
+// ── filterConflictingExtensions ─────────────────────────────
+
+describe("filterConflictingExtensions", () => {
+	const bundledFilechanges = "/ext/resources/extensions/filechanges.ts";
+	const bundledBash = "/ext/resources/extensions/codepi-bash.ts";
+	const thirdPartyFilechanges =
+		"/home/user/.pi/agent/extensions/filechanges/index.ts";
+	const unrelated = "/home/user/.pi/agent/extensions/local-models.ts";
+
+	function ext(
+		path: string,
+		commands: string[] = [],
+		tools: string[] = [],
+	): any {
+		return {
+			path,
+			resolvedPath: path,
+			commands: new Map(commands.map((name) => [name, { name }])),
+			tools: new Map(tools.map((name) => [name, { name }])),
+		};
+	}
+
+	it("drops a 3rd-party extension registering the same commands as a bundled one", () => {
+		const { extensions, droppedPaths } = filterConflictingExtensions(
+			[
+				ext(thirdPartyFilechanges, [
+					"filechanges",
+					"filechanges-accept",
+					"filechanges-decline",
+				]),
+				ext(unrelated, ["local-models"]),
+				ext(bundledFilechanges, [
+					"filechanges",
+					"filechanges-accept",
+					"filechanges-decline",
+				]),
+			],
+			[bundledFilechanges],
+		);
+		expect(droppedPaths).toEqual([thirdPartyFilechanges]);
+		expect(extensions.map((e) => e.path)).toEqual([
+			unrelated,
+			bundledFilechanges,
+		]);
+	});
+
+	it("keeps non-bundled extensions that do not collide", () => {
+		const { extensions, droppedPaths } = filterConflictingExtensions(
+			[
+				ext(unrelated, ["local-models"]),
+				ext(bundledFilechanges, ["filechanges-accept"]),
+			],
+			[bundledFilechanges],
+		);
+		expect(droppedPaths).toEqual([]);
+		expect(extensions.map((e) => e.path)).toEqual([
+			unrelated,
+			bundledFilechanges,
+		]);
+	});
+
+	it("also drops on tool-name collisions (e.g. a 3rd-party bash tool)", () => {
+		const thirdPartyBash = "/home/user/.pi/agent/extensions/bash/index.ts";
+		const { droppedPaths, extensions } = filterConflictingExtensions(
+			[ext(thirdPartyBash, [], ["bash"]), ext(bundledBash, [], ["bash"])],
+			[bundledBash],
+		);
+		expect(droppedPaths).toEqual([thirdPartyBash]);
+		expect(extensions.map((e) => e.path)).toEqual([bundledBash]);
+	});
+
+	it("keeps the standalone extension when the bundled copy is not loaded", () => {
+		// e.g. codepi's bundled filechanges disabled in Settings — the
+		// 3rd-party one is then the only copy and must be kept.
+		const { extensions, droppedPaths } = filterConflictingExtensions(
+			[ext(thirdPartyFilechanges, ["filechanges-accept"])],
+			[bundledFilechanges],
+		);
+		expect(droppedPaths).toEqual([]);
+		expect(extensions).toHaveLength(1);
 	});
 });

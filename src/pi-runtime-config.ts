@@ -97,6 +97,71 @@ export function buildPiResourceLoaderOptions(
 	};
 }
 
+/** A loaded SDK extension object, as seen by DefaultResourceLoader's
+ * extensionsOverride — only the registration surfaces we care about. */
+export interface LoadedExtensionLike {
+	resolvedPath?: string;
+	path?: string;
+	commands?: Map<string, unknown> | { keys(): Iterable<string> };
+	tools?: Map<string, unknown> | { keys(): Iterable<string> };
+}
+
+function registrationNames(ext: LoadedExtensionLike): string[] {
+	const names: string[] = [];
+	for (const table of [ext.commands, ext.tools]) {
+		if (!table) continue;
+		const keys =
+			table instanceof Map
+				? table.keys()
+				: (table as { keys(): Iterable<string> }).keys();
+		for (const name of keys) {
+			if (typeof name === "string") names.push(name);
+		}
+	}
+	return names;
+}
+
+/**
+ * Drop user-installed extensions that collide with CodePi's bundled ones.
+ *
+ * The SDK keeps every loaded extension and disambiguates same-named
+ * commands/tools by suffixing (`/filechanges-accept:1` / `:2`), so a
+ * 3rd-party extension that ships the same feature as a bundled one (e.g.
+ * filechanges) shows up as duplicate command-palette entries. CodePi's
+ * bundled copy wins: any non-bundled extension registering a command or tool
+ * name also registered by a bundled extension is removed, and the caller
+ * should drop its loader diagnostics along with it.
+ */
+export function filterConflictingExtensions(
+	extensions: LoadedExtensionLike[],
+	bundledPaths: Iterable<string>,
+): { extensions: LoadedExtensionLike[]; droppedPaths: string[] } {
+	const bundled = new Set(bundledPaths);
+	const isBundled = (ext: LoadedExtensionLike) =>
+		bundled.has(ext.resolvedPath ?? ext.path ?? "");
+
+	const bundledNames = new Set<string>();
+	for (const ext of extensions) {
+		if (!isBundled(ext)) continue;
+		for (const name of registrationNames(ext)) bundledNames.add(name);
+	}
+
+	const kept: LoadedExtensionLike[] = [];
+	const droppedPaths: string[] = [];
+	for (const ext of extensions) {
+		if (isBundled(ext)) {
+			kept.push(ext);
+			continue;
+		}
+		if (registrationNames(ext).some((name) => bundledNames.has(name))) {
+			droppedPaths.push(ext.resolvedPath ?? ext.path ?? "");
+			continue;
+		}
+		kept.push(ext);
+	}
+	return { extensions: kept, droppedPaths };
+}
+
 /**
  * Apply CodePi's implicit bundled theme without persisting it to settings.json.
  * Call this after any SDK reload, because SettingsManager.reload() replaces

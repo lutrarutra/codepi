@@ -172,6 +172,7 @@ export function updateAutoVerifyMode(
  */
 export const ASK_MODE_DEFAULT_ALLOWED_TOOLS: readonly string[] = [
 	"read",
+	"head",
 	"grep",
 	"find",
 	"ls",
@@ -204,6 +205,27 @@ export const ASK_MODE_DEFAULT_ALLOWED_TOOLS_PRE_CONTEXT: readonly string[] = [
 	"ask_user_question",
 	"web_search",
 	"fetch_content",
+];
+
+/**
+ * The Ask-mode allowlist as seeded before `head` was added (the default with
+ * context tools but without head). Used to migrate settings.json files that
+ * were auto-seeded with that default, so `head` becomes available in Ask mode
+ * too.
+ */
+export const ASK_MODE_DEFAULT_ALLOWED_TOOLS_PRE_HEAD: readonly string[] = [
+	"read",
+	"grep",
+	"find",
+	"ls",
+	"list_dir",
+	"find_files",
+	"get_diagnostics",
+	"ask_user_question",
+	"web_search",
+	"fetch_content",
+	"get_editor_context",
+	"get_git_diff",
 ];
 
 /** Settings path to the Ask-mode allowlist: codepi.modes.ask.allowedTools. */
@@ -270,15 +292,23 @@ export function seedAskModeAllowedToolsIfMissing(settingsPath: string): void {
 		updateAskModeAllowedTools(settingsPath, ASK_MODE_DEFAULT_ALLOWED_TOOLS);
 		return;
 	}
-	// Migrate a settings.json that was auto-seeded with the pre-context
-	// default: the context tools are pure reads, so they belong in the
-	// read-only allowlist. Only exact matches of the old default are touched;
-	// user-customized lists are left alone.
-	const oldDefault = new Set(ASK_MODE_DEFAULT_ALLOWED_TOOLS_PRE_CONTEXT);
-	if (
-		current.length === oldDefault.size &&
-		current.every((tool) => oldDefault.has(tool))
-	) {
+	// Migrate a settings.json that was auto-seeded with a previous default
+	// (pre-context, or the default without `head`): the missing tools are pure
+	// reads, so they belong in the read-only allowlist. Only exact matches of
+	// a known historical default are touched; user-customized lists are left
+	// alone.
+	const HISTORICAL_DEFAULTS: readonly (readonly string[])[] = [
+		ASK_MODE_DEFAULT_ALLOWED_TOOLS_PRE_CONTEXT,
+		ASK_MODE_DEFAULT_ALLOWED_TOOLS_PRE_HEAD,
+	];
+	const matchesHistoricalDefault = HISTORICAL_DEFAULTS.some((historical) => {
+		const oldDefault = new Set(historical);
+		return (
+			current.length === oldDefault.size &&
+			current.every((tool) => oldDefault.has(tool))
+		);
+	});
+	if (matchesHistoricalDefault) {
 		updateAskModeAllowedTools(settingsPath, ASK_MODE_DEFAULT_ALLOWED_TOOLS);
 	}
 }

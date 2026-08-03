@@ -40,6 +40,7 @@ const ASK_ALLOWED_TOOLS_KEY = ["codepi", "modes", "ask", "allowedTools"];
  */
 export const READ_ONLY_TOOL_BASELINE: readonly string[] = [
 	"read",
+	"head",
 	"grep",
 	"find",
 	"ls",
@@ -132,8 +133,9 @@ The user switched you to **Ask mode**. Only read-only tools are allowed — the
 \`edit\`/\`write\` tools, shell commands (\`bash\`), and third-party extension tools
 are all BLOCKED. You may read files, search, run diagnostics, and ask the user
 questions, but you cannot modify or create files, and you cannot delegate work
-that would do so. If the user wants changes, tell them to run /codepi-implement
-(or /codepi-plan to plan first).`,
+that would do so. If the user wants changes, tell them THEY must switch to
+Implement mode with /codepi-implement (or /codepi-plan to plan first) — mode
+switches are user-only, you cannot make them for the user.`,
 	plan: `## MODE CHANGED: PLAN (PLANNING ONLY)
 
 The user switched you to **Plan mode**. Produce a detailed, actionable plan (explore with read/grep/find/ls, ask clarifying questions with ask_user_question, document it in docs/plans/, track steps with todo) and do NOT implement it. You may write plan/documentation files, but must not modify source code.`,
@@ -174,8 +176,14 @@ You are in **Ask (read-only) mode**.
   find_files, get_diagnostics, ask_user_question — plus anything the user
   whitelists in \`codepi.modes.ask.allowedTools\` (settings.json).
 - Do not attempt to change files, and never suggest that you will.
-- You cannot switch modes yourself. If the user wants to plan or implement,
-  tell them to run the command: /codepi-plan (plan) or /codepi-implement (implement).`;
+- You cannot switch modes — /codepi-ask, /codepi-plan, and /codepi-implement
+  are user-only commands. If the user wants to plan or implement, tell them
+  THEY need to switch, e.g. "if you wish to proceed with the implementation,
+  switch to Implement mode with /codepi-implement" (or /codepi-plan to plan
+  first). Never phrase it as "want me to switch to implement mode" — the
+  switch is always the user's action. (The one exception: from Plan mode,
+  CodePi switches to Implement automatically after you ask the user
+  "proceed?" and they confirm.)`;
 
 const PLAN_INSTRUCTIONS = `## MODE: PLAN (PLANNING ONLY)
 
@@ -192,8 +200,10 @@ Workflow:
 4. **Track**: add implementation todos using the todo tool so each planned step
    becomes a tracked task.
 5. **Confirm**: when the plan is complete, ask the user (ask_user_question)
-   whether they are satisfied with it. If they are, tell them to run
-   \`/codepi-implement\` to start implementing.
+   whether they are satisfied and want to proceed. If they do, tell them to
+   run \`/codepi-implement\`; CodePi asks "Switch to Implement mode?" and
+   performs the switch on their confirmation — plan → implement is the one
+   mode change CodePi can make for the user, and only with their yes.
 
 Rules:
 - You MAY write/edit documentation and planning files (.md, .txt, notes).

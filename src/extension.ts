@@ -48,6 +48,7 @@ import {
 	buildCurrentPiRuntimeResourcePaths,
 	buildPiResourceLoaderOptions,
 	buildPiRuntimeResourcePaths,
+	filterConflictingExtensions,
 	installImplicitBundledThemeReload,
 } from "./pi-runtime-config";
 import {
@@ -1354,7 +1355,11 @@ async function startTuiBackend(state: SessionState): Promise<void> {
 		// bundled extension or the host fallback below.
 		let contextSnapshot: string | undefined;
 		if (isContextExtensionEnabled(settings)) {
-			contextSnapshot = await renderSystemPromptSnapshot(vscode, opts.cwd);
+			contextSnapshot = await renderSystemPromptSnapshot(vscode, opts.cwd, {
+				// Tabs/documents can still be restoring when a session starts right
+				// after window load; wait briefly so the snapshot isn't empty.
+				waitForRestore: true,
+			});
 			if (contextSnapshot === undefined) {
 				console.warn(
 					"[CodePi] editor-context snapshot unavailable — skipping system-prompt injection.",
@@ -1372,18 +1377,31 @@ async function startTuiBackend(state: SessionState): Promise<void> {
 			appendSystemPromptOverride: (base: string[]) =>
 				contextSnapshot ? [...base, contextSnapshot] : base,
 			extensionsOverride: (base: any) => {
-				const bundled = new Set(bundledExtensions);
+				// A user can have the same feature installed as a standalone
+				// extension (e.g. a 3rd-party filechanges) while CodePi also
+				// bundles its own copy. Both then register the same
+				// commands/tools, which pi disambiguates by suffixing
+				// (`/filechanges-accept:1` / `:2`) — duplicate entries in the
+				// command palette. CodePi's bundled copy wins: drop any
+				// non-bundled extension that registers a command or tool name
+				// also provided by a bundled extension, and clear the loader's
+				// conflict diagnostics for the dropped extension.
+				const { extensions, droppedPaths } = filterConflictingExtensions(
+					base.extensions ?? [],
+					bundledExtensions,
+				);
+				for (const extPath of droppedPaths) {
+					console.warn(
+						`[CodePi] dropping extension ${extPath}: it registers commands/tools also provided by a CodePi bundled extension (bundled copy wins).`,
+					);
+				}
+				const dropped = new Set(droppedPaths);
 				return {
 					...base,
-					extensions: [
-						...base.extensions.filter(
-							(extension: any) =>
-								!bundled.has(extension.resolvedPath ?? extension.path),
-						),
-						...base.extensions.filter((extension: any) =>
-							bundled.has(extension.resolvedPath ?? extension.path),
-						),
-					],
+					extensions,
+					errors: (base.errors ?? []).filter(
+						(error: any) => !dropped.has(error?.path),
+					),
 				};
 			},
 		});

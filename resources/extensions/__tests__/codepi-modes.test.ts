@@ -594,6 +594,7 @@ describe("codepi-modes: ask allowlist settings", () => {
 	it("default allowlist includes SDK read-only set + host tools + read-only web tools", () => {
 		expect(READ_ONLY_TOOL_BASELINE).toEqual([
 			"read",
+			"head",
 			"grep",
 			"find",
 			"ls",
