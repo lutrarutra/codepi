@@ -211,6 +211,14 @@
 	font-size: 11px;
 }
 
+.settings-toggle {
+	flex: 0 0 auto;
+	width: 34px;
+	height: 18px;
+	accent-color: var(--vscode-focusBorder, var(--vscode-button-background));
+	cursor: pointer;
+}
+
 .settings-package-missing {
 	display: flex;
 	justify-content: space-between;

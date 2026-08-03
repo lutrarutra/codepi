@@ -61,7 +61,9 @@ function Card({
 			<div className="card-title">
 				<span className="card-name">{title}</span>
 				<span className="badge">{badge}</span>
-				{disabled && <span className="tag tag-disabled">disabled in settings</span>}
+				{disabled && (
+					<span className="tag tag-disabled">disabled in settings</span>
+				)}
 			</div>
 			{commands.length > 0 && (
 				<div className="group">

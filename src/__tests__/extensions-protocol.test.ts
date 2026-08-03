@@ -7,7 +7,10 @@ import type {
 
 describe("extensions protocol", () => {
 	it("message union covers getSnapshot and refresh", () => {
-		const msgs: ExtensionsMessage[] = [{ type: "getSnapshot" }, { type: "refresh" }];
+		const msgs: ExtensionsMessage[] = [
+			{ type: "getSnapshot" },
+			{ type: "refresh" },
+		];
 		expect(msgs.map((m) => m.type)).toEqual(["getSnapshot", "refresh"]);
 	});
 
@@ -43,7 +46,14 @@ describe("extensions protocol", () => {
 					source: "bundled",
 					enabled: true,
 					commands: [{ name: "codepi-bash-allow", source: "extension" }],
-					tools: [{ name: "bash", label: "Bash", description: "d", askMode: "blocked" }],
+					tools: [
+						{
+							name: "bash",
+							label: "Bash",
+							description: "d",
+							askMode: "blocked",
+						},
+					],
 					events: 2,
 					flags: 0,
 					shortcuts: 1,
@@ -52,7 +62,9 @@ describe("extensions protocol", () => {
 			],
 			core: {
 				commands: [{ name: "help", description: "h", source: "extension" }],
-				tools: [{ name: "read", label: "Read", description: "r", askMode: "safe" }],
+				tools: [
+					{ name: "read", label: "Read", description: "r", askMode: "safe" },
+				],
 			},
 			loadErrors: [{ path: "/bad.ts", error: "x" }],
 		};

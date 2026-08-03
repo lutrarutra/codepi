@@ -9,7 +9,9 @@ import {
 } from "./pi-runtime-config";
 import type { LoadedExtensionRich } from "./extension-snapshot";
 
-let sdkPromise: Promise<typeof import("@earendil-works/pi-coding-agent")> | undefined;
+let sdkPromise:
+	| Promise<typeof import("@earendil-works/pi-coding-agent")>
+	| undefined;
 function getSdk(): Promise<typeof import("@earendil-works/pi-coding-agent")> {
 	if (!sdkPromise) sdkPromise = import("@earendil-works/pi-coding-agent");
 	return sdkPromise;
@@ -34,7 +36,9 @@ export interface ProbeResult {
  * same bundled-path construction, same conflict filtering) but WITHOUT
  * creating a session. Uses public SDK loader APIs only.
  */
-export async function probeExtensions(opts: ProbeOptions): Promise<ProbeResult> {
+export async function probeExtensions(
+	opts: ProbeOptions,
+): Promise<ProbeResult> {
 	const pi = await getSdk();
 	const settingsManager = pi.SettingsManager.create(opts.cwd, opts.agentDir);
 	const resourcePaths = buildCurrentPiRuntimeResourcePaths(
@@ -42,8 +46,8 @@ export async function probeExtensions(opts: ProbeOptions): Promise<ProbeResult> 
 		opts.agentDir,
 		opts.readSettings,
 	);
-	const bundledExtensions = resourcePaths.bundledExtensionPaths.filter((p: string) =>
-		existsSync(p),
+	const bundledExtensions = resourcePaths.bundledExtensionPaths.filter(
+		(p: string) => existsSync(p),
 	);
 	// The runtime factory also appends the rpiv-todo package extension when
 	// present — mirror it so the probe shows exactly what a session loads.

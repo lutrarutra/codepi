@@ -1,5 +1,490 @@
+diff --git a/node_modules/@earendil-works/pi-coding-agent/dist/core/extensions/types.d.ts b/node_modules/@earendil-works/pi-coding-agent/dist/core/extensions/types.d.ts
+index 32c62be..ee051d6 100644
+--- a/node_modules/@earendil-works/pi-coding-agent/dist/core/extensions/types.d.ts
++++ b/node_modules/@earendil-works/pi-coding-agent/dist/core/extensions/types.d.ts
+@@ -188,6 +188,10 @@ export interface ExtensionUIContext {
+     getToolsExpanded(): boolean;
+     /** Set tool output expansion state. */
+     setToolsExpanded(expanded: boolean): void;
++    /** Enable or disable compact mode (per-turn transcript summaries). */
++    setCompactMode(compact: boolean): void;
++    /** Get the current compact mode state. */
++    isCompactMode(): boolean;
+ }
+ export interface ContextUsage {
+     /** Estimated context tokens, or null if unknown (e.g. right after compaction, before next LLM response). */
+diff --git a/node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/compact-summary.d.ts b/node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/compact-summary.d.ts
+new file mode 100644
+index 0000000..623fa1e
+--- /dev/null
++++ b/node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/compact-summary.d.ts
+@@ -0,0 +1,54 @@
++/**
++ * Compact mode: per-turn transcript summaries for the interactive mode.
++ */
++import type { Container } from "@earendil-works/pi-tui";
++import type { AssistantMessage, Message, ToolResultMessage, UserMessage } from "@earendil-works/pi-ai";
++export interface CompactTurnSegment {
++    kind: "turn";
++    userMessage?: UserMessage;
++    /** Collapsed assistant/toolResult messages of the turn. */
++    entries: Message[];
++    /** Last assistant message of the turn without tool calls, if any. */
++    finalResponse?: AssistantMessage;
++}
++export interface CompactMessageSegment {
++    kind: "message";
++    message: Message;
++}
++export type CompactSegment = CompactTurnSegment | CompactMessageSegment;
++export interface CompactTurnStats {
++    input: number;
++    output: number;
++    reasoning: number;
++    cacheRead: number;
++    cacheWrite: number;
++    cost: number;
++    toolCalls: number;
++    toolFailures: number;
++    model: string | undefined;
++    latest: { kind: "thought" | "tool" | "output" | "aborted"; text: string } | undefined;
++}
++export interface CompactTurnSummaryOptions {
++    stats?: CompactTurnStats;
++    finished?: boolean;
++    startTime?: number;
++    endTime?: number;
++}
++export declare function formatTokenCount(count: number): string;
++export declare function formatCompactDuration(ms: number): string;
++export declare function summarizeToolCall(name: string, args: unknown): string;
++export declare function groupTurnsForCompact(messages: Message[]): CompactSegment[];
++export declare function aggregateCompactTurn(entries: Message[]): CompactTurnStats;
++export declare class CompactTurnSummary extends Container {
++    constructor(ui: { requestRender(): void }, initial?: CompactTurnSummaryOptions);
++    startTurn(): void;
++    setModel(model: string | undefined): void;
++    addThinkingDelta(delta: string): void;
++    noteToolCall(name: string, args: unknown): void;
++    notePartialResult(partial: unknown): void;
++    toolEnded(name: string, isError: boolean): void;
++    addUsage(usage: { input?: number; output?: number; reasoning?: number; cacheRead?: number; cacheWrite?: number; cost?: { total?: number } }): void;
++    setFinished(aborted?: boolean): void;
++    applyStats(stats: CompactTurnStats): void;
++    dispose(): void;
++}
+diff --git a/node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/compact-summary.js b/node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/compact-summary.js
+new file mode 100644
+index 0000000..dfb1949
+--- /dev/null
++++ b/node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/compact-summary.js
+@@ -0,0 +1,404 @@
++/**
++ * Compact mode: per-turn transcript summaries for the interactive mode.
++ *
++ * When compact mode is enabled, each turn renders as a single summary row
++ * (spinner, token/tool counts, cost, elapsed, model) plus the final response.
++ * This module holds the pure grouping/aggregation logic (unit-testable) and
++ * the CompactTurnSummary UI component.
++ */
++import { Container, Text } from "@earendil-works/pi-tui";
++import { theme } from "./theme/theme.js";
++
++// ============================================================================
++// Pure helpers
++// ============================================================================
++
++/** Format token counts for compact display (same style as the footer). */
++export function formatTokenCount(count) {
++    if (count < 1000)
++        return count.toString();
++    if (count < 10000)
++        return `${(count / 1000).toFixed(1)}k`;
++    if (count < 1000000)
++        return `${Math.round(count / 1000)}k`;
++    if (count < 10000000)
++        return `${(count / 1000000).toFixed(1)}M`;
++    return `${Math.round(count / 1000000)}M`;
++}
++
++/** Format a duration in milliseconds as "32s", "1m05s", "2h03m". */
++export function formatCompactDuration(ms) {
++    const totalSeconds = Math.max(0, Math.round(ms / 1000));
++    if (totalSeconds < 60)
++        return `${totalSeconds}s`;
++    const minutes = Math.floor(totalSeconds / 60);
++    const seconds = totalSeconds % 60;
++    if (minutes < 60)
++        return seconds > 0 ? `${minutes}m${String(seconds).padStart(2, "0")}s` : `${minutes}m`;
++    const hours = Math.floor(minutes / 60);
++    const remMinutes = minutes % 60;
++    return remMinutes > 0 ? `${hours}h${String(remMinutes).padStart(2, "0")}m` : `${hours}h`;
++}
++
++const ACTIVITY_ARG_KEYS = [
++    "pattern",
++    "command",
++    "path",
++    "file",
++    "dir",
++    "glob",
++    "query",
++    "url",
++    "name",
++    "title",
++    "message",
++    "id",
++];
++
++/** One-line description of a tool call for the muted "latest activity" line. */
++export function summarizeToolCall(name, args) {
++    let arg = "";
++    if (args && typeof args === "object") {
++        for (const key of ACTIVITY_ARG_KEYS) {
++            const value = args[key];
++            if (typeof value === "string" && value.trim()) {
++                arg = value.trim();
++                break;
++            }
++        }
++    }
++    return truncateActivity(arg ? `${name} ${arg}` : name);
++}
++
++function truncateActivity(text) {
++    const single = String(text).replace(/[\r\n\t]+/g, " ").trim();
++    return single.length > 120 ? `${single.slice(0, 117)}…` : single;
++}
++
++function firstLineOf(text) {
++    return truncateActivity(String(text).split("\n")[0]);
++}
++
++/**
++ * Group a context message list into segments for compact rendering.
++ *
++ * Returns an ordered list of segments preserving original order:
++ * - { kind: "message", message } for messages rendered as-is (user, custom,
++ *   compactionSummary, branchSummary, bashExecution, unknown roles)
++ * - { kind: "turn", userMessage, entries, finalResponse } where entries are the
++ *   collapsed assistant/toolResult messages and finalResponse is the last
++ *   assistant message of the turn that contains no tool calls (undefined when
++ *   the turn never produced a text response).
++ */
++export function groupTurnsForCompact(messages) {
++    const segments = [];
++    let turn = undefined;
++    const closeTurn = () => {
++        if (turn) {
++            segments.push(turn);
++            turn = undefined;
++        }
++    };
++    for (const message of messages) {
++        const role = message.role;
++        if (role === "assistant" || role === "toolResult") {
++            if (!turn) {
++                turn = { kind: "turn", userMessage: undefined, entries: [], finalResponse: undefined };
++            }
++            turn.entries.push(message);
++            if (role === "assistant") {
++                const hasToolCalls = message.content.some((c) => c.type === "toolCall");
++                // The final response is the last assistant message without tool
++                // calls; a subsequent tool-calling message supersedes it.
++                turn.finalResponse = hasToolCalls ? undefined : message;
++            }
++            continue;
++        }
++        closeTurn();
++        if (role === "user") {
++            turn = { kind: "turn", userMessage: message, entries: [], finalResponse: undefined };
++        }
++        else {
++            segments.push({ kind: "message", message });
++        }
++    }
++    closeTurn();
++    return segments;
++}
++
++/**
++ * Aggregate the collapsed messages of a turn into summary statistics.
++ * @param entries Assistant/toolResult messages belonging to the turn.
++ */
++export function aggregateCompactTurn(entries) {
++    let input = 0;
++    let output = 0;
++    let reasoning = 0;
++    let cacheRead = 0;
++    let cacheWrite = 0;
++    let cost = 0;
++    let toolCalls = 0;
++    let toolFailures = 0;
++    let model = undefined;
++    let latest = undefined;
++    for (const message of entries) {
++        if (message.role === "assistant") {
++            const usage = message.usage;
++            if (usage) {
++                input += usage.input || 0;
++                output += usage.output || 0;
++                reasoning += usage.reasoning || 0;
++                cacheRead += usage.cacheRead || 0;
++                cacheWrite += usage.cacheWrite || 0;
++                cost += usage.cost?.total || 0;
++            }
++            model = message.responseModel ?? message.model;
++            for (const content of message.content) {
++                if (content.type === "toolCall") {
++                    toolCalls++;
++                    latest = { kind: "tool", text: summarizeToolCall(content.name, content.arguments) };
++                }
++                else if (content.type === "thinking" && typeof content.thinking === "string" && content.thinking.trim()) {
++                    latest = { kind: "thought", text: firstLineOf(content.thinking) };
++                }
++            }
++        }
++        else if (message.role === "toolResult" && message.isError) {
++            toolFailures++;
++        }
++    }
++    return {
++        input,
++        output,
++        reasoning,
++        cacheRead,
++        cacheWrite,
++        cost,
++        toolCalls,
++        toolFailures,
++        model,
++        latest,
++    };
++}
++
++function truncateModel(model) {
++    return typeof model === "string" && model.length > 16 ? `${model.slice(0, 15)}…` : model;
++}
++
++// ============================================================================
++// CompactTurnSummary component
++// ============================================================================
++
++/** Fg-color helper that degrades gracefully when the theme is not yet
++ * initialized (e.g. component constructed during tests or early startup). */
++function safeThemeFg(color, text) {
++    try {
++        return theme.fg(color, text);
++    }
++    catch {
++        return text;
++    }
++}
++
++const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
++const SPINNER_INTERVAL_MS = 80;
++
++/**
++ * Per-turn summary row shown in compact mode:
++ *   ⠋ ✓11 ✗1 tools · ↑12.3k ↓4.5k 🧠1.2k · $0.42 · 32s · model
++ *   latest thought / tool call line (text-muted)
++ *
++ * Live turns animate the spinner and elapsed time; finished turns render a
++ * static record. The component stays in the transcript after finishing.
++ */
++export class CompactTurnSummary extends Container {
++    constructor(ui, initial = {}) {
++        super();
++        this.ui = ui;
++        this.usage = { input: 0, output: 0, reasoning: 0, cacheRead: 0, cacheWrite: 0, cost: 0 };
++        this.toolsOk = 0;
++        this.toolsFail = 0;
++        this.toolsRunning = 0;
++        this.latestActivity = undefined;
++        this.model = undefined;
++        this.thinkingBuffer = "";
++        this.startedAt = initial.startTime;
++        this.endedAt = initial.endTime;
++        this.finished = false;
++        this.spinnerFrame = 0;
++        this.spinnerInterval = undefined;
++        this.statsLine = new Text("", 1, 0);
++        this.activityLine = new Text("", 2, 0);
++        this.addChild(this.statsLine);
++        this.addChild(this.activityLine);
++        if (initial.stats) {
++            this.applyStats(initial.stats);
++        }
++        if (initial.finished) {
++            this.finished = true;
++        }
++        this.updateStatsLine();
++    }
++
++    /** Begin a live turn: reset counters and start spinner/elapsed. */
++    startTurn() {
++        this.finished = false;
++        this.startedAt = Date.now();
++        this.endedAt = undefined;
++        this.spinnerFrame = 0;
++        this.startSpinner();
++    }
++
++    setModel(model) {
++        if (model && model !== this.model) {
++            this.model = model;
++            this.updateStatsLine();
++        }
++    }
++
++    /** Feed a thinking_delta while the model is reasoning. */
++    addThinkingDelta(delta) {
++        if (!delta)
++            return;
++        this.thinkingBuffer = `${this.thinkingBuffer}${delta}`.slice(-600);
++        this.latestActivity = { kind: "thought", text: firstLineOf(this.thinkingBuffer) };
++        this.updateStatsLine();
++    }
++
++    /** A tool call was emitted (may still be running). */
++    noteToolCall(name, args) {
++        this.toolsRunning++;
++        this.latestActivity = { kind: "tool", text: summarizeToolCall(name, args) };
++        this.updateStatsLine();
++    }
++
++    /** Partial streaming output from a running tool. */
++    notePartialResult(partial) {
++        if (!partial || typeof partial !== "object")
++            return;
++        const textContent = partial.content?.find?.((c) => c.type === "text");
++        if (textContent && typeof textContent.text === "string" && textContent.text.trim()) {
++            this.latestActivity = { kind: "output", text: firstLineOf(textContent.text) };
++            this.updateStatsLine();
++        }
++    }
++
++    /** A tool finished executing. */
++    toolEnded(_name, isError) {
++        this.toolsRunning = Math.max(0, this.toolsRunning - 1);
++        if (isError) {
++            this.toolsFail++;
++        }
++        else {
++            this.toolsOk++;
++        }
++        this.updateStatsLine();
++    }
++
++    /** Accumulate token usage from an assistant message. */
++    addUsage(usage) {
++        if (!usage)
++            return;
++        this.usage.input += usage.input || 0;
++        this.usage.output += usage.output || 0;
++        this.usage.reasoning += usage.reasoning || 0;
++        this.usage.cacheRead += usage.cacheRead || 0;
++        this.usage.cacheWrite += usage.cacheWrite || 0;
++        this.usage.cost += usage.cost?.total || 0;
++        this.updateStatsLine();
++    }
++
++    /** Stop the spinner and freeze the summary as a static record. */
++    setFinished(aborted) {
++        if (this.finished)
++            return;
++        this.finished = true;
++        this.endedAt = Date.now();
++        this.stopSpinner();
++        if (aborted && !this.latestActivity) {
++            this.latestActivity = { kind: "aborted", text: "aborted" };
++        }
++        this.updateStatsLine();
++    }
++
++    applyStats(stats) {
++        this.usage = {
++            input: stats.input || 0,
++            output: stats.output || 0,
++            reasoning: stats.reasoning || 0,
++            cacheRead: stats.cacheRead || 0,
++            cacheWrite: stats.cacheWrite || 0,
++            cost: stats.cost || 0,
++        };
++        this.toolsOk = Math.max(0, (stats.toolCalls || 0) - (stats.toolFailures || 0));
++        this.toolsFail = stats.toolFailures || 0;
++        this.model = stats.model;
++        this.latestActivity = stats.latest;
++        if (stats.latest?.kind === "thought") {
++            this.thinkingBuffer = stats.latest.text;
++        }
++    }
++
++    dispose() {
++        this.stopSpinner();
++    }
++
++    startSpinner() {
++        this.stopSpinner();
++        this.spinnerInterval = setInterval(() => {
++            this.spinnerFrame = (this.spinnerFrame + 1) % SPINNER_FRAMES.length;
++            this.updateStatsLine();
++        }, SPINNER_INTERVAL_MS);
++    }
++
++    stopSpinner() {
++        if (this.spinnerInterval) {
++            clearInterval(this.spinnerInterval);
++            this.spinnerInterval = undefined;
++        }
++    }
++
++    getStatsText() {
++        const parts = [];
++        if (!this.finished) {
++            parts.push(safeThemeFg("accent", SPINNER_FRAMES[this.spinnerFrame] ?? ""));
++        }
++        if (this.toolsOk > 0 || this.toolsFail > 0 || this.toolsRunning > 0) {
++            const toolParts = [];
++            if (this.toolsOk > 0)
++                toolParts.push(`✓${this.toolsOk}`);
++            if (this.toolsFail > 0)
++                toolParts.push(`✗${this.toolsFail}`);
++            if (this.toolsRunning > 0)
++                toolParts.push(`…${this.toolsRunning}`);
++            parts.push(`${toolParts.join(" ")} tools`);
++        }
++        const tokens = [];
++        if (this.usage.input > 0)
++            tokens.push(`↑${formatTokenCount(this.usage.input)}`);
++        if (this.usage.output > 0)
++            tokens.push(`↓${formatTokenCount(this.usage.output)}`);
++        if (this.usage.reasoning > 0)
++            tokens.push(`🧠${formatTokenCount(this.usage.reasoning)}`);
++        if (tokens.length > 0)
++            parts.push(tokens.join(" "));
++        if (this.usage.cost > 0)
++            parts.push(`$${this.usage.cost.toFixed(2)}`);
++        if (this.startedAt) {
++            const end = this.endedAt ?? Date.now();
++            parts.push(formatCompactDuration(end - this.startedAt));
++        }
++        if (this.model)
++            parts.push(truncateModel(this.model));
++        return parts.join(" · ");
++    }
++
++    updateStatsLine() {
++        const text = this.getStatsText();
++        this.statsLine.setText(text ? ` ${text}` : "");
++        this.activityLine.setText(this.latestActivity ? safeThemeFg("muted", this.latestActivity.text) : "");
++        if (this.ui) {
++            this.ui.requestRender();
++        }
++    }
++}
 diff --git a/node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/interactive-mode.d.ts b/node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/interactive-mode.d.ts
-index 1d36874..ba119f5 100644
+index 1d36874..53b6c44 100644
 --- a/node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/interactive-mode.d.ts
 +++ b/node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/interactive-mode.d.ts
 @@ -26,6 +26,8 @@ export interface InteractiveModeOptions {
@@ -11,11 +496,56 @@ index 1d36874..ba119f5 100644
  }
  export declare class InteractiveMode {
      private runtimeHost;
+@@ -296,6 +298,10 @@ export declare class InteractiveMode {
+     private cycleModel;
+     private toggleToolOutputExpansion;
+     private setToolsExpanded;
++    /** Enable or disable compact mode (per-turn transcript summaries). */
++    setCompactMode(compact: boolean): void;
++    /** Get the current compact mode state. */
++    isCompactMode(): boolean;
+     private toggleThinkingBlockVisibility;
+     private openExternalEditor;
+     clearEditor(): void;
 diff --git a/node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/interactive-mode.js b/node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/interactive-mode.js
-index 654e711..d947de2 100644
+index 654e711..bc673d3 100644
 --- a/node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/interactive-mode.js
 +++ b/node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/interactive-mode.js
-@@ -243,7 +243,7 @@ export class InteractiveMode {
+@@ -37,6 +37,7 @@ import { checkForNewPiVersion } from "../../utils/version-check.js";
+ import { ArminComponent } from "./components/armin.js";
+ import { AssistantMessageComponent } from "./components/assistant-message.js";
+ import { BashExecutionComponent } from "./components/bash-execution.js";
++import { CompactTurnSummary, aggregateCompactTurn, groupTurnsForCompact } from "./compact-summary.js";
+ import { BorderedLoader } from "./components/bordered-loader.js";
+ import { BranchSummaryMessageComponent } from "./components/branch-summary-message.js";
+ import { CompactionSummaryMessageComponent } from "./components/compaction-summary-message.js";
+@@ -69,6 +70,13 @@ import { InteractiveThemeController } from "./theme/theme-controller.js";
+ function isExpandable(obj) {
+     return typeof obj === "object" && obj !== null && "setExpanded" in obj && typeof obj.setExpanded === "function";
+ }
++/** In compact mode, thinking blocks are collapsed into the turn summary, so
++ * the rendered final response must not include them (no "Thinking..." label). */
++function withoutThinking(message) {
++    if (!message || !message.content || !message.content.some((c) => c.type === "thinking"))
++        return message;
++    return { ...message, content: message.content.filter((c) => c.type !== "thinking") };
++}
+ class ExpandableText extends Text {
+     getCollapsedText;
+     getExpandedText;
+@@ -172,6 +180,11 @@ export class InteractiveMode {
+     streamingMessage = undefined;
+     // Tool execution tracking: toolCallId -> component
+     pendingTools = new Map();
++    // Compact mode: per-turn summaries instead of the full transcript
++    compactMode = false;
++    compactSummary = undefined;
++    compactCandidateComponent = undefined;
++    compactLastStopReason = undefined;
+     // Tool output expansion state
+     toolOutputExpanded = false;
+     // Thinking block visibility state
+@@ -243,7 +256,7 @@ export class InteractiveMode {
              await this.rebindCurrentSession({ renderBeforeBind: true });
          });
          this.version = VERSION;
@@ -24,3 +554,239 @@ index 654e711..d947de2 100644
          this.ui.setClearOnShrink(this.settingsManager.getClearOnShrink());
          this.headerContainer = new Container();
          this.chatContainer = new Container();
+@@ -1637,6 +1650,8 @@ export class InteractiveMode {
+             },
+             getToolsExpanded: () => this.toolOutputExpanded,
+             setToolsExpanded: (expanded) => this.setToolsExpanded(expanded),
++            setCompactMode: (compact) => this.setCompactMode(Boolean(compact)),
++            isCompactMode: () => this.compactMode,
+         };
+     }
+     /**
+@@ -2252,23 +2267,47 @@ export class InteractiveMode {
+                 else if (event.message.role === "user") {
+                     this.addMessageToChat(event.message);
+                     this.updatePendingMessagesDisplay();
++                    if (this.compactMode) {
++                        this.beginCompactTurn();
++                    }
+                     this.ui.requestRender();
+                 }
+                 else if (event.message.role === "assistant") {
+-                    this.streamingComponent = new AssistantMessageComponent(undefined, this.hideThinkingBlock, this.getMarkdownThemeWithSettings(), this.hiddenThinkingLabel);
++                    this.streamingComponent = new AssistantMessageComponent(undefined, this.compactMode ? true : this.hideThinkingBlock, this.getMarkdownThemeWithSettings(), this.hiddenThinkingLabel);
+                     this.streamingMessage = event.message;
+-                    this.chatContainer.addChild(this.streamingComponent);
+-                    this.streamingComponent.updateContent(this.streamingMessage);
++                    if (this.compactMode) {
++                        // Hold the candidate until we know whether it is the
++                        // final response (text, no tool calls) or intermediate.
++                        this.compactCandidateComponent = this.streamingComponent;
++                        this.compactSummary?.setModel(event.message.model);
++                    }
++                    else {
++                        this.chatContainer.addChild(this.streamingComponent);
++                    }
++                    this.streamingComponent.updateContent(this.compactMode ? withoutThinking(this.streamingMessage) : this.streamingMessage);
+                     this.ui.requestRender();
+                 }
+                 break;
+             case "message_update":
+                 if (this.streamingComponent && event.message.role === "assistant") {
+                     this.streamingMessage = event.message;
+-                    this.streamingComponent.updateContent(this.streamingMessage);
++                    this.streamingComponent.updateContent(this.compactMode ? withoutThinking(this.streamingMessage) : this.streamingMessage);
++                    let dismissedCandidate = false;
+                     for (const content of this.streamingMessage.content) {
+                         if (content.type === "toolCall") {
+-                            if (!this.pendingTools.has(content.id)) {
++                            if (this.compactMode) {
++                                // A tool call means this message is intermediate:
++                                // collapse it into the turn summary.
++                                this.compactSummary?.noteToolCall(content.name, content.arguments);
++                                if (this.compactCandidateComponent) {
++                                    if (this.chatContainer.children.includes(this.compactCandidateComponent)) {
++                                        this.chatContainer.removeChild(this.compactCandidateComponent);
++                                    }
++                                    this.compactCandidateComponent = undefined;
++                                }
++                                dismissedCandidate = true;
++                            }
++                            else if (!this.pendingTools.has(content.id)) {
+                                 const component = new ToolExecutionComponent(content.name, content.id, content.arguments, {
+                                     showImages: this.settingsManager.getShowImages(),
+                                     imageWidthCells: this.settingsManager.getImageWidthCells(),
+@@ -2285,6 +2324,17 @@ export class InteractiveMode {
+                             }
+                         }
+                     }
++                    if (this.compactMode) {
++                        const ev = event.assistantMessageEvent;
++                        if (ev && ev.type === "thinking_delta" && typeof ev.delta === "string") {
++                            this.compactSummary?.addThinkingDelta(ev.delta);
++                        }
++                        if (!dismissedCandidate && this.compactCandidateComponent && !this.chatContainer.children.includes(this.compactCandidateComponent)) {
++                            // Text is streaming with no tool calls: this looks
++                            // like the final response - show it live.
++                            this.chatContainer.addChild(this.compactCandidateComponent);
++                        }
++                    }
+                     this.ui.requestRender();
+                 }
+                 break;
+@@ -2302,7 +2352,26 @@ export class InteractiveMode {
+                                 : "Operation aborted";
+                         this.streamingMessage.errorMessage = errorMessage;
+                     }
+-                    this.streamingComponent.updateContent(this.streamingMessage);
++                    this.streamingComponent.updateContent(this.compactMode ? withoutThinking(this.streamingMessage) : this.streamingMessage);
++                    if (this.compactMode) {
++                        const compactMessage = event.message;
++                        this.compactLastStopReason = compactMessage.stopReason;
++                        if (compactMessage.usage) {
++                            this.compactSummary?.addUsage(compactMessage.usage);
++                        }
++                        if (compactMessage.responseModel) {
++                            this.compactSummary?.setModel(compactMessage.responseModel);
++                        }
++                        this.compactCandidateComponent = undefined;
++                        if (compactMessage.stopReason !== "aborted" && compactMessage.stopReason !== "error" &&
++                            compactMessage.content.some((c) => c.type === "text") &&
++                            !compactMessage.content.some((c) => c.type === "toolCall") &&
++                            !this.chatContainer.children.includes(this.streamingComponent)) {
++                            // Final response that never got added to the chat
++                            // (no text_delta updates observed): add it now.
++                            this.chatContainer.addChild(this.streamingComponent);
++                        }
++                    }
+                     if (this.streamingMessage.stopReason === "aborted" || this.streamingMessage.stopReason === "error") {
+                         if (!errorMessage) {
+                             errorMessage = this.streamingMessage.errorMessage || "Error";
+@@ -2328,6 +2397,11 @@ export class InteractiveMode {
+                 this.ui.requestRender();
+                 break;
+             case "tool_execution_start": {
++                if (this.compactMode) {
++                    this.compactSummary?.noteToolCall(event.toolName, event.args);
++                    this.ui.requestRender();
++                    break;
++                }
+                 let component = this.pendingTools.get(event.toolCallId);
+                 if (!component) {
+                     component = new ToolExecutionComponent(event.toolName, event.toolCallId, event.args, {
+@@ -2343,6 +2417,11 @@ export class InteractiveMode {
+                 break;
+             }
+             case "tool_execution_update": {
++                if (this.compactMode) {
++                    this.compactSummary?.notePartialResult(event.partialResult);
++                    this.ui.requestRender();
++                    break;
++                }
+                 const component = this.pendingTools.get(event.toolCallId);
+                 if (component) {
+                     component.updateResult({ ...event.partialResult, isError: false }, true);
+@@ -2351,6 +2430,11 @@ export class InteractiveMode {
+                 break;
+             }
+             case "tool_execution_end": {
++                if (this.compactMode) {
++                    this.compactSummary?.toolEnded(event.toolName, event.isError);
++                    this.ui.requestRender();
++                    break;
++                }
+                 const component = this.pendingTools.get(event.toolCallId);
+                 if (component) {
+                     component.updateResult({ ...event.result, isError: event.isError });
+@@ -2374,6 +2458,10 @@ export class InteractiveMode {
+                     this.streamingMessage = undefined;
+                 }
+                 this.pendingTools.clear();
++                if (this.compactMode) {
++                    this.compactSummary?.setFinished(this.compactLastStopReason === "aborted");
++                    this.compactSummary = undefined;
++                }
+                 await this.checkShutdownRequested();
+                 this.ui.requestRender();
+                 break;
+@@ -2603,6 +2691,10 @@ export class InteractiveMode {
+             this.footer.invalidate();
+             this.updateEditorBorderColor();
+         }
++        if (this.compactMode) {
++            this.renderSessionContextCompact(sessionContext, options);
++            return;
++        }
+         for (const message of sessionContext.messages) {
+             // Assistant messages need special handling for tool calls
+             if (message.role === "assistant") {
+@@ -2972,6 +3064,69 @@ export class InteractiveMode {
+         }
+         this.ui.requestRender();
+     }
++    /**
++     * Enable or disable compact mode. When enabled, each turn renders as a
++     * summary row plus the final response. Toggling re-renders the transcript.
++     */
++    setCompactMode(compact) {
++        if (this.compactMode === compact)
++            return;
++        this.compactMode = compact;
++        // Before the initial render there is nothing to re-render; the initial
++        // render (renderInitialMessages) picks up the mode directly.
++        if (!this.isInitialized || this.chatContainer.children.length === 0)
++            return;
++        this.rebuildChatFromMessages();
++    }
++    /**
++     * Start a new compact turn summary. Called when a user message starts a
++     * turn while compact mode is active.
++     */
++    beginCompactTurn() {
++        if (this.compactSummary) {
++            // Safety: previous turn never got an agent_end (e.g. steering).
++            this.compactSummary.setFinished(false);
++            this.compactSummary = undefined;
++        }
++        const summary = new CompactTurnSummary(this.ui);
++        this.chatContainer.addChild(new Spacer(1));
++        this.chatContainer.addChild(summary);
++        this.compactSummary = summary;
++        summary.startTurn();
++    }
++    /**
++     * Compact rendering of the session context. Turn segments collapse into a
++     * summary row plus the final response; everything else renders as usual.
++     */
++    renderSessionContextCompact(sessionContext, options = {}) {
++        for (const segment of groupTurnsForCompact(sessionContext.messages)) {
++            if (segment.kind === "message") {
++                this.addMessageToChat(segment.message, options);
++                continue;
++            }
++            if (segment.userMessage) {
++                this.addMessageToChat(segment.userMessage, options);
++            }
++            if (segment.entries.length === 0 && !segment.finalResponse) {
++                continue;
++            }
++            const stats = aggregateCompactTurn(segment.entries);
++            const lastEntry = segment.entries[segment.entries.length - 1];
++            const summary = new CompactTurnSummary(this.ui, {
++                stats,
++                finished: true,
++                startTime: segment.userMessage?.timestamp,
++                endTime: segment.finalResponse?.timestamp ?? lastEntry?.timestamp,
++            });
++            this.chatContainer.addChild(new Spacer(1));
++            this.chatContainer.addChild(summary);
++            if (segment.finalResponse) {
++                this.chatContainer.addChild(new Spacer(1));
++                this.addMessageToChat(segment.finalResponse);
++            }
++        }
++        this.ui.requestRender();
++    }
+     toggleThinkingBlockVisibility() {
+         this.hideThinkingBlock = !this.hideThinkingBlock;
+         this.settingsManager.setHideThinkingBlock(this.hideThinkingBlock);

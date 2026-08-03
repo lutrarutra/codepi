@@ -1,6 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { SnapshotTree } from "./SnapshotTree";
-import type { ExtensionsMessage, ExtensionsReply, ExtensionsSnapshot } from "./types";
+import type {
+	ExtensionsMessage,
+	ExtensionsReply,
+	ExtensionsSnapshot,
+} from "./types";
 
 declare global {
 	interface Window {
@@ -10,16 +14,29 @@ declare global {
 
 const vscode = window.acquireVsCodeApi();
 
-function modeLabel(snapshot: ExtensionsSnapshot): { text: string; tone: string } {
+function modeLabel(snapshot: ExtensionsSnapshot): {
+	text: string;
+	tone: string;
+} {
 	const { mode } = snapshot;
-	if (!mode.active) return { text: "No active session — showing policy", tone: "dim" };
+	if (!mode.active)
+		return { text: "No active session — showing policy", tone: "dim" };
 	switch (mode.current) {
 		case "ask":
-			return { text: "Ask mode active — 🔒 tools are blocked", tone: "warning" };
+			return {
+				text: "Ask mode active — 🔒 tools are blocked",
+				tone: "warning",
+			};
 		case "plan":
-			return { text: "Plan mode active — no read-only restriction", tone: "ok" };
+			return {
+				text: "Plan mode active — no read-only restriction",
+				tone: "ok",
+			};
 		case "implement":
-			return { text: "Implement mode active — no read-only restriction", tone: "ok" };
+			return {
+				text: "Implement mode active — no read-only restriction",
+				tone: "ok",
+			};
 		default:
 			return { text: "Session active — mode unknown", tone: "dim" };
 	}
@@ -58,7 +75,9 @@ export function ExtensionsApp() {
 		<div className="ext-root">
 			{snapshot && (
 				<div className="ext-header">
-					<div className={`ext-mode ext-mode-${header.tone}`}>{header.text}</div>
+					<div className={`ext-mode ext-mode-${header.tone}`}>
+						{header.text}
+					</div>
 					<div className="ext-legend">
 						<span className="chip chip-safe">✓ read-only safe</span>
 						<span className="chip chip-whitelisted">★ whitelisted (user)</span>
@@ -90,8 +109,12 @@ export function ExtensionsApp() {
 					<button onClick={refresh}>Retry</button>
 				</div>
 			)}
-			{busy && !snapshot && <div className="ext-busy">Scanning extensions…</div>}
-			{snapshot && <SnapshotTree snapshot={snapshot} query={query.trim().toLowerCase()} />}
+			{busy && !snapshot && (
+				<div className="ext-busy">Scanning extensions…</div>
+			)}
+			{snapshot && (
+				<SnapshotTree snapshot={snapshot} query={query.trim().toLowerCase()} />
+			)}
 		</div>
 	);
 }

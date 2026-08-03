@@ -1,9 +1,10 @@
 import * as vscode from "vscode";
-import { getCanonicalAgentDir, getSettingsPath, readJsonFile } from "./pi-store";
 import {
-	buildSnapshot,
-	CORE_SLASH_COMMANDS,
-} from "./extension-snapshot";
+	getCanonicalAgentDir,
+	getSettingsPath,
+	readJsonFile,
+} from "./pi-store";
+import { buildSnapshot, CORE_SLASH_COMMANDS } from "./extension-snapshot";
 import { probeExtensions } from "./extension-probe";
 import type {
 	ExtensionsMessage,
@@ -13,7 +14,9 @@ import type {
 } from "./shared/extensions-protocol";
 import { getVscodeTools } from "./tools";
 
-let sdkPromise: Promise<typeof import("@earendil-works/pi-coding-agent")> | undefined;
+let sdkPromise:
+	| Promise<typeof import("@earendil-works/pi-coding-agent")>
+	| undefined;
 function getSdk(): Promise<typeof import("@earendil-works/pi-coding-agent")> {
 	if (!sdkPromise) sdkPromise = import("@earendil-works/pi-coding-agent");
 	return sdkPromise;
@@ -56,8 +59,9 @@ export class ExtensionsViewProvider implements vscode.WebviewViewProvider {
 				// defensively so newer SDKs get true file-edit freshness.
 				// Otherwise new/removed extensions and settings toggles still
 				// refresh; edited extension files apply on host restart.
-				(sdk as unknown as { clearExtensionCache?: () => void })
-					.clearExtensionCache?.();
+				(
+					sdk as unknown as { clearExtensionCache?: () => void }
+				).clearExtensionCache?.();
 				this.snapshot = undefined;
 			}
 			if (msg.type === "getSnapshot" || msg.type === "refresh") {

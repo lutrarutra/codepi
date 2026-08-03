@@ -1,4 +1,5 @@
-import React, { useCallback, useEffect, useState } from "react";
+import type React from "react";
+import { useCallback, useEffect, useState } from "react";
 import type {
 	AutoVerifyMode,
 	BundledResourceRow,
@@ -95,10 +96,7 @@ const FONT_SUGGESTIONS = [
 	"IBM Plex Mono",
 ];
 
-function TerminalPrefsCard({	prefs,
-}: {
-	prefs: TerminalPrefs;
-}): JSX.Element {
+function TerminalPrefsCard({ prefs }: { prefs: TerminalPrefs }): JSX.Element {
 	const [fontFamily, setFontFamily] = useState(prefs.fontFamily);
 	const [fontSize, setFontSize] = useState(String(prefs.fontSize));
 
@@ -208,6 +206,36 @@ const AUTO_VERIFY_LABELS: Record<
 	},
 };
 
+function TldrModeCard({ enabled }: { enabled: boolean }): JSX.Element {
+	return (
+		<section className="settings-card" aria-labelledby="tldr-title">
+			<h2 id="tldr-title">TL;DR Mode</h2>
+			<p className="settings-help">
+				Collapse everything but the agent&rsquo;s final response into a per-turn
+				summary (tokens, tool calls, cost, live activity). Applies to new
+				sessions; toggle per session with <code>/codepi-toggle-tldr</code>.
+			</p>
+			<div className="settings-field-row">
+				<label className="settings-field-label" htmlFor="tldr-mode-toggle">
+					Enabled
+				</label>
+				<input
+					id="tldr-mode-toggle"
+					className="settings-toggle"
+					type="checkbox"
+					checked={enabled}
+					onChange={(event) =>
+						post({
+							command: "settings:setTldrMode",
+							enabled: event.currentTarget.checked,
+						})
+					}
+				/>
+			</div>
+		</section>
+	);
+}
+
 function AutoVerifyCard({ mode }: { mode: AutoVerifyMode }): JSX.Element {
 	return (
 		<section className="settings-card" aria-labelledby="verify-title">
@@ -275,8 +303,8 @@ function AskAllowedToolsCard({ tools }: { tools: string[] }): JSX.Element {
 			<p className="settings-help">
 				Tools the agent may call in read-only (Ask) mode. Everything else —
 				shell commands, edit/write, and other extension tools — is blocked.
-				Comma-separated list; saved immediately (Ask-mode tool calls re-read
-				the list from settings each time).
+				Comma-separated list; saved immediately (Ask-mode tool calls re-read the
+				list from settings each time).
 			</p>
 			<div className="settings-field-row">
 				<label className="settings-field-label" htmlFor="ask-allowed-tools">
@@ -447,6 +475,8 @@ export function SettingsApp(): JSX.Element {
 			</section>
 
 			<TerminalPrefsCard prefs={data.terminalPrefs} />
+
+			<TldrModeCard enabled={data.tldrMode} />
 
 			<AutoVerifyCard mode={data.autoVerify} />
 

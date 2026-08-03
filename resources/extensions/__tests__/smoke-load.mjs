@@ -3,7 +3,7 @@
 import { createJiti } from "../../../node_modules/@earendil-works/pi-coding-agent/node_modules/jiti/lib/jiti.mjs";
 import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
-import { join, dirname } from "node:path";
+import { join } from "node:path";
 
 const root = fileURLToPath(new URL("../../..", import.meta.url));
 const require = createRequire(import.meta.url);
@@ -127,6 +127,11 @@ await loadExtension("../codepi-bash.ts", "codepi-bash", {
 await loadExtension("../codepi-context.ts", "codepi-context", {
 	events: ["session_start", "before_agent_start"],
 	tools: ["get_editor_context", "get_git_diff"],
+});
+
+await loadExtension("../codepi-tldr.ts", "codepi-tldr", {
+	commands: ["codepi-toggle-tldr"],
+	events: ["session_start"],
 });
 
 console.log("smoke test: PASS");

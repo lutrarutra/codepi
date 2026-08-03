@@ -170,6 +170,52 @@ export function updateAutoVerifyMode(
 	});
 }
 
+// ── TL;DR mode (codepi.tldrMode) ──────────────────────────────
+
+export const DEFAULT_TLDR_MODE = true;
+
+/**
+ * Read the TL;DR mode default (codepi.tldrMode) without trusting malformed
+ * settings. Default: enabled — new sessions collapse everything but the final
+ * response unless the user toggles it (per-session overrides are recorded by
+ * the codepi-tldr extension and take precedence).
+ */
+export function readTldrMode(settings: unknown): boolean {
+	const codepi =
+		isRecord(settings) && isRecord(settings.codepi)
+			? settings.codepi
+			: undefined;
+	return typeof codepi?.tldrMode === "boolean"
+		? codepi.tldrMode
+		: DEFAULT_TLDR_MODE;
+}
+
+/** Store the TL;DR mode default in settings.json (codepi.*). */
+export function updateTldrMode(settingsPath: string, enabled: boolean): void {
+	writeCodePiSettingsMerge(settingsPath, (settings) => {
+		const codepi = isRecord(settings.codepi) ? { ...settings.codepi } : {};
+		// Migrate away from the pre-rename key (codepi.compactMode).
+		delete codepi.compactMode;
+		codepi.tldrMode = enabled;
+		return { ...settings, codepi };
+	});
+}
+
+/**
+ * Seed settings.json with the TL;DR mode default when the key is missing
+ * (mirrors seedAskModeAllowedToolsIfMissing).
+ */
+export function seedTldrModeIfMissing(settingsPath: string): void {
+	const settings = readJsonFile<Record<string, unknown>>(settingsPath);
+	const codepi =
+		isRecord(settings) && isRecord(settings.codepi)
+			? settings.codepi
+			: undefined;
+	if (typeof codepi?.tldrMode !== "boolean") {
+		updateTldrMode(settingsPath, DEFAULT_TLDR_MODE);
+	}
+}
+
 // ── Ask-mode allowed tools (codepi.modes.ask.allowedTools) ───
 
 /**
