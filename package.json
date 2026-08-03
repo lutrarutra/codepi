@@ -2,8 +2,13 @@
   "name": "codepi",
   "displayName": "CodePi",
   "description": "Pi coding agent for VSCode",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/lutrarutra/codepi.git"
+  },
   "version": "0.1.0",
   "publisher": "lutrarutra",
+  "license": "MIT",
   "engines": {
     "vscode": "^1.93.0"
   },
