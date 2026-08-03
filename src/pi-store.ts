@@ -370,7 +370,10 @@ export function migrateLegacyCodePiStorage(
 		copiedFiles.push(file);
 	}
 
-	if (!existsSync(legacySessionDir) || !statSync(legacySessionDir).isDirectory()) {
+	if (
+		!existsSync(legacySessionDir) ||
+		!statSync(legacySessionDir).isDirectory()
+	) {
 		return {
 			copiedFiles,
 			copiedSessions: [],

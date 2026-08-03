@@ -1,0 +1,139 @@
+{
+  "runId": "66dd325d",
+  "agent": "reviewer",
+  "task": "Review Task 8 for spec compliance and code quality. Read brief /home/lutrarutra/dev/codepi/.superpowers/sdd/task-8-brief.md, report /home/lutrarutra/dev/codepi/.superpowers/sdd/task-8-report.md, and diff package /home/lutrarutra/dev/codepi/.superpowers/sdd/review-3f0f899..d27c851.diff. Review read-only. Binding constraints: status-only refresh via DefaultPackageManager.listConfiguredPackages() with canonical agentDir; no network install action; serializable credential-free rows {source, scope, installed} plus counts/missing; new sessions re-read current settings/toggles (no activation-time snapshots); existing sessions not falsely reported as rebound; plan-consistent messaging; no unrelated changes. Do not run broad suites or mutate files. Return required verdict, strengths, issues by severity with file:line, and Task quality verdict. Do not create subagents.\n\n---\n**Output:**\nWrite your findings to exactly this path: /home/lutrarutra/dev/codepi/.superpowers/sdd/task-8-review.md\nThis path is authoritative for this run.\nIgnore any other output filename or output path mentioned elsewhere, including output destinations in the base agent prompt, system prompt, or task instructions.",
+  "exitCode": 0,
+  "usage": {
+    "input": 48,
+    "output": 10206,
+    "cacheRead": 448548,
+    "cacheWrite": 57832,
+    "cost": 0.01784288,
+    "turns": 16
+  },
+  "model": "openrouter/openai/gpt-5.6-luna:high",
+  "attemptedModels": [
+    "openrouter/openai/gpt-5.6-luna:high"
+  ],
+  "modelAttempts": [
+    {
+      "model": "openrouter/openai/gpt-5.6-luna:high",
+      "success": true,
+      "exitCode": 0,
+      "usage": {
+        "input": 48,
+        "output": 10206,
+        "cacheRead": 448548,
+        "cacheWrite": 57832,
+        "cost": 0.01784288,
+        "turns": 16
+      }
+    }
+  ],
+  "durationMs": 133463,
+  "toolCount": 56,
+  "launchContractDigest": "358fab9243fd5992cf18aeb16a1ed36c8433390ece50836f609c5f65131152f7",
+  "acceptance": {
+    "status": "attested",
+    "evidenceStatus": "attested",
+    "explicit": true,
+    "effectiveAcceptance": {
+      "level": "attested",
+      "explicit": true,
+      "inferredReason": [
+        "read-only/reviewer-style agent"
+      ],
+      "criteria": [
+        {
+          "id": "criterion-1",
+          "must": "Return concrete findings with file paths and severity when applicable",
+          "evidence": [
+            "review-findings",
+            "residual-risks"
+          ],
+          "severity": "required"
+        }
+      ],
+      "evidence": [
+        "review-findings",
+        "residual-risks"
+      ],
+      "verify": [],
+      "stopRules": []
+    },
+    "inferredReason": [
+      "read-only/reviewer-style agent"
+    ],
+    "criteria": [
+      {
+        "id": "criterion-1",
+        "must": "Return concrete findings with file paths and severity when applicable",
+        "evidence": [
+          "review-findings",
+          "residual-risks"
+        ],
+        "severity": "required"
+      }
+    ],
+    "runtimeChecks": [],
+    "verifyRuns": [],
+    "childReport": {
+      "criteriaSatisfied": [
+        {
+          "id": "criterion-1",
+          "status": "satisfied",
+          "evidence": "Concrete review findings cite src/settings-view.ts:95-117, src/settings-dashboard.ts:15-30 and 70-75, src/extension.ts:1263-1333, and test locations; no blocker was found and two medium verification gaps are recorded."
+        }
+      ],
+      "changedFiles": [
+        "src/__tests__/settings-protocol.test.ts",
+        "src/extension.ts",
+        "src/settings-dashboard.ts",
+        "src/settings-view.ts"
+      ],
+      "testsAddedOrUpdated": [
+        "src/__tests__/settings-protocol.test.ts"
+      ],
+      "commandsRun": [
+        {
+          "command": "npx vitest run src/__tests__/pi-runtime-config.test.ts src/__tests__/settings-protocol.test.ts",
+          "result": "passed",
+          "summary": "2 files and 10 tests passed"
+        },
+        {
+          "command": "git diff --check 3f0f899..d27c851",
+          "result": "passed",
+          "summary": "No whitespace errors"
+        }
+      ],
+      "validationOutput": [
+        "Inspected the Pi SDK implementation of DefaultPackageManager.listConfiguredPackages(); it synchronously reads settings and checks local installed paths without installation/network operations.",
+        "Inspected the final runtime factory and dashboard/webview paths for current-settings reads, fresh dashboard response, new-session messaging, and absence of existing-session rebound claims.",
+        "No broad test suite was run, per the review constraint."
+      ],
+      "residualRisks": [
+        "The SettingsViewProvider-to-SDK status boundary is not covered by a fake-agent integration test.",
+        "The runtime factory's reread behavior is not covered by a behavior-level test.",
+        "Existing unrelated working-tree modifications were present and were not changed or reviewed as part of this commit review."
+      ],
+      "noStagedFiles": true,
+      "diffSummary": "Adds credential-free configured-package mapping/counts and refresh display, and moves bundled-resource settings reads into each runtime-factory invocation; four files changed.",
+      "reviewFindings": [
+        "blocker: none found",
+        "medium: src/__tests__/settings-protocol.test.ts:37-70 - package test covers only pure mapping, not fake agent/settings, canonical SDK construction, or no-network status collection",
+        "medium: src/__tests__/pi-runtime-config.test.ts - no behavior-level test proves settings/toggles are reread across newly created runtimes",
+        "low: src/settings-view.ts:152-157 - unrelated formatting-only hunk"
+      ],
+      "manualNotes": "Verdict is accept with medium test-coverage reservations: code inspection supports spec compliance, but the stated integration and runtime-factory test obligations remain incomplete."
+    }
+  },
+  "effects": {
+    "fileMutation": {
+      "status": "not-applicable",
+      "expected": false,
+      "attempted": true
+    }
+  },
+  "transcriptPath": "/home/lutrarutra/dev/codepi/.pi-subagents/artifacts/66dd325d_reviewer_0_transcript.jsonl",
+  "timestamp": 1785706125887
+}

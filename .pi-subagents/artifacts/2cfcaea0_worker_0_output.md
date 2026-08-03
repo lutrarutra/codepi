@@ -1,0 +1,1 @@
+I’ll make only the initial no-data branch distinguish `error` from loading, with a retry that posts `settings:get`; then I’ll run the requested builds/checks and append evidence without staging unrelated work.

@@ -55,10 +55,14 @@ describe("settings dashboard protocol", () => {
 				{ source: "npm:installed", scope: "user", installed: true },
 				{ source: "npm:missing", scope: "user", installed: false },
 			]);
-			expect(packages.filter((entry) => !entry.installed).map((entry) => entry.source)).toEqual([
-				"npm:missing",
-			]);
-			expect(existsSync(join(agentDir, "npm", "node_modules", "missing"))).toBe(false);
+			expect(
+				packages
+					.filter((entry) => !entry.installed)
+					.map((entry) => entry.source),
+			).toEqual(["npm:missing"]);
+			expect(existsSync(join(agentDir, "npm", "node_modules", "missing"))).toBe(
+				false,
+			);
 		} finally {
 			rmSync(agentDir, { recursive: true, force: true });
 		}

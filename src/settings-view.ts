@@ -98,11 +98,7 @@ export class SettingsViewProvider implements vscode.WebviewViewProvider {
 		const sdk = await getSdk();
 		const cwd =
 			vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? this.agentDir;
-		const packages = collectConfiguredPackageStatus(
-			sdk,
-			cwd,
-			this.agentDir,
-		);
+		const packages = collectConfiguredPackageStatus(sdk, cwd, this.agentDir);
 		const data = buildDashboardData(
 			this.agentDir,
 			this.sessionDir,
@@ -148,7 +144,9 @@ export class SettingsViewProvider implements vscode.WebviewViewProvider {
 function isBundledResourceId(
 	id: string,
 ): id is DashboardData["bundledResources"][number]["id"] {
-	return id === "custom-footer" || id === "filechanges" || id === "nebula-pulse";
+	return (
+		id === "custom-footer" || id === "filechanges" || id === "nebula-pulse"
+	);
 }
 
 function getSettingsPathForAgent(agentDir: string): string {

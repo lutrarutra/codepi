@@ -29,13 +29,29 @@ function formatSessionDate(date: Date): string {
 	const diffMs = now.getTime() - date.getTime();
 	const diffDays = Math.floor(diffMs / 86_400_000);
 
-	if (diffDays < 0) return date.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
-	if (diffDays === 0) return date.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+	if (diffDays < 0)
+		return date.toLocaleTimeString(undefined, {
+			hour: "2-digit",
+			minute: "2-digit",
+		});
+	if (diffDays === 0)
+		return date.toLocaleTimeString(undefined, {
+			hour: "2-digit",
+			minute: "2-digit",
+		});
 	if (diffDays === 1) return "Yesterday";
-	if (diffDays < 7) return date.toLocaleDateString(undefined, { weekday: "short" });
+	if (diffDays < 7)
+		return date.toLocaleDateString(undefined, { weekday: "short" });
 	if (date.getFullYear() === now.getFullYear())
-		return date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
-	return date.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "2-digit" });
+		return date.toLocaleDateString(undefined, {
+			month: "short",
+			day: "numeric",
+		});
+	return date.toLocaleDateString(undefined, {
+		month: "short",
+		day: "numeric",
+		year: "2-digit",
+	});
 }
 
 function truncate(text: string, max = 55): string {
@@ -46,18 +62,17 @@ function truncate(text: string, max = 55): string {
 // ── Tree Item ─────────────────────────────────────────────────
 
 export class SessionTreeItem extends vscode.TreeItem {
-	constructor(
-		public readonly session: SessionTreeSession,
-	) {
+	constructor(public readonly session: SessionTreeSession) {
 		const label = formatSessionDate(session.modified);
-		const description = session.name || truncate(session.firstMessage || "(empty)");
+		const description =
+			session.name || truncate(session.firstMessage || "(empty)");
 		super(label, vscode.TreeItemCollapsibleState.None);
 
 		this.description = description;
 		this.tooltip = new vscode.MarkdownString(
 			`**${session.name || session.firstMessage || "Untitled"}**\n\n` +
-			`${session.messageCount} message${session.messageCount !== 1 ? "s" : ""}\n` +
-			`${session.path}`,
+				`${session.messageCount} message${session.messageCount !== 1 ? "s" : ""}\n` +
+				`${session.path}`,
 		);
 		this.contextValue = "session";
 		this.iconPath = new vscode.ThemeIcon("comment-discussion");
@@ -75,8 +90,12 @@ export class SessionTreeItem extends vscode.TreeItem {
 
 // ── Tree Data Provider ───────────────────────────────────────
 
-export class SessionTreeProvider implements vscode.TreeDataProvider<SessionTreeItem> {
-	private _onDidChangeTreeData = new vscode.EventEmitter<SessionTreeItem | undefined>();
+export class SessionTreeProvider
+	implements vscode.TreeDataProvider<SessionTreeItem>
+{
+	private _onDidChangeTreeData = new vscode.EventEmitter<
+		SessionTreeItem | undefined
+	>();
 	readonly onDidChangeTreeData = this._onDidChangeTreeData.event;
 
 	private sessions: SessionTreeSession[] = [];
@@ -93,7 +112,7 @@ export class SessionTreeProvider implements vscode.TreeDataProvider<SessionTreeI
 
 	async getChildren(): Promise<SessionTreeItem[]> {
 		await this.loadSessions();
-		return this.sessions.map(s => new SessionTreeItem(s));
+		return this.sessions.map((s) => new SessionTreeItem(s));
 	}
 
 	getTreeItem(item: SessionTreeItem): vscode.TreeItem {
@@ -111,7 +130,9 @@ export class SessionTreeProvider implements vscode.TreeDataProvider<SessionTreeI
 			await vscode.workspace.fs.delete(vscode.Uri.file(sessionPath));
 			this.refresh();
 		} catch (err) {
-			vscode.window.showErrorMessage(`Failed to delete session: ${err instanceof Error ? err.message : String(err)}`);
+			vscode.window.showErrorMessage(
+				`Failed to delete session: ${err instanceof Error ? err.message : String(err)}`,
+			);
 		}
 	}
 
@@ -133,7 +154,9 @@ export class SessionTreeProvider implements vscode.TreeDataProvider<SessionTreeI
 			}
 			this.refresh();
 		} catch (err) {
-			vscode.window.showErrorMessage(`Failed to rename session: ${err instanceof Error ? err.message : String(err)}`);
+			vscode.window.showErrorMessage(
+				`Failed to rename session: ${err instanceof Error ? err.message : String(err)}`,
+			);
 		}
 	}
 
@@ -144,7 +167,10 @@ export class SessionTreeProvider implements vscode.TreeDataProvider<SessionTreeI
 		}
 		try {
 			const pi = await getPi();
-			const all: any[] = await pi.SessionManager.list(this.cwd, this.sessionDir);
+			const all: any[] = await pi.SessionManager.list(
+				this.cwd,
+				this.sessionDir,
+			);
 			this.sessions = all
 				.map((s: any) => ({
 					id: s.id,
@@ -152,9 +178,13 @@ export class SessionTreeProvider implements vscode.TreeDataProvider<SessionTreeI
 					name: s.name,
 					firstMessage: s.firstMessage || "",
 					messageCount: s.messageCount ?? 0,
-					modified: s.modified instanceof Date ? s.modified : new Date(s.modified),
+					modified:
+						s.modified instanceof Date ? s.modified : new Date(s.modified),
 				}))
-				.sort((a: SessionTreeSession, b: SessionTreeSession) => b.modified.getTime() - a.modified.getTime());
+				.sort(
+					(a: SessionTreeSession, b: SessionTreeSession) =>
+						b.modified.getTime() - a.modified.getTime(),
+				);
 		} catch (err) {
 			console.error("[CodePi] Error loading sessions:", err);
 			this.sessions = [];

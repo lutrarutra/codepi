@@ -1,0 +1,23 @@
+## Review
+
+- Correct:
+  - **Namespace merge and preservation are correct.** `src/pi-store.ts:250-260` shallow-copies the existing `codepi` object and replaces only `bundledExtensions` and `bundledThemes`; the top-level settings object is also copied. The required packages/default-model/unknown-key case is covered at `src/__tests__/pi-store.test.ts:80-101`, and unrelated nested `codepi` keys are covered at `src/__tests__/pi-store.test.ts:104-119`.
+  - **Malformed settings are preserved.** `src/pi-store.ts:210-212` parses the original content before producing a replacement, and parse failure occurs before the write at `src/pi-store.ts:216`. `src/__tests__/pi-store.test.ts:133-143` verifies both the thrown error and unchanged malformed bytes.
+  - **The prior concurrency blocker is fixed for the required stale-read check.** `src/pi-store.ts:210-216` now snapshots complete file content, re-reads complete content immediately before the atomic write, and retries once when the content differs. This avoids the prior metadata-only (`mtime`/size) false negatives and preserves a writer's keys on retry. The deterministic seam at `src/pi-store.ts:167-170,213` is exercised by `src/__tests__/pi-store.test.ts:145-168`; the injected writer is detected and `fromConcurrentWriter` survives the retry.
+  - **Atomic writing remains same-directory and focused.** `src/pi-store.ts:154-160` writes a same-directory temporary file and renames it; the merge helper does not overwrite after a detected content change and throws after two changed attempts at `src/pi-store.ts:209-221`.
+  - **Native file preparation meets the stated requirements.** `src/pi-store.ts:224-247` creates missing settings/models/auth files as `{}` and applies `0600` to auth. Tests at `src/__tests__/pi-store.test.ts:122-131` verify those behaviors.
+  - **The prior ineffective fd test is fixed.** The test now sets `HOME` before calling the production `homedir()` lookup (`src/__tests__/pi-store.test.ts:289-306`), writes the fake binary at the searched `~/.pi/agent/bin/fd` location, and asserts copied contents and executable mode at lines 300-302. This genuinely exercises `src/pi-store.ts:308-324`.
+  - Focused validation passed: `npx vitest run src/__tests__/pi-store.test.ts src/__tests__/pi-resource-policy.test.ts` — 2 files and 28 tests passed. `npx tsc -p ./tsconfig.json --noEmit` passed, and `git diff --check 8a01240..0a60c28` passed.
+
+- Fixed: none (review-only). The two prior review findings—metadata-only concurrency detection and an fd test that did not affect `homedir()`—are addressed in the reviewed fix pass.
+
+- Blocker: None for the Task 2 requirements.
+
+- Note (low residual concurrency risk, explicitly bounded by the brief): There is still an unavoidable TOCTOU window between the final content read and `renameSync` (`src/pi-store.ts:214-216`) because this fallback does not hold an OS-level Pi settings lock. A writer that changes the file in that tiny interval can still be replaced. The implementation now performs the exact required immediate content re-read and one retry/fail path; the report and code comment document the best-effort nature. Callers should continue serializing CodePi updates with Pi's settings manager where available.
+
+- Note (medium scope hygiene): The complete `8a01240..0a60c28` package also contains `ensureDefaultTheme` and `ensureRuntimeTools` plus their tests (`src/pi-store.ts:263-332`, `src/__tests__/pi-store.test.ts:230-307`), which are not part of the Task 2 brief's namespace-write/file-preparation APIs. The implementer report explains these were pre-existing dirty-tree hunks that became part of the required same-file commit; no unrelated files were added and no activation/dashboard wiring hunk is in the reviewed package. This is not a Task 2 correctness blocker, but the parent should preserve the boundary when integrating.
+
+## Verdict
+
+- **Required spec verdict: COMPLIANT.** The requested namespace-preserving merge, malformed-file non-overwrite, missing JSON preparation, owner-only auth mode, atomic write, one-retry content-change guard, and focused regression tests are present. The fix pass genuinely resolves both prior blockers.
+- **Task quality verdict: Pass with a minor scope-hygiene caveat.** The changed merge logic is readable, the concurrency test is deterministic and meaningful, and focused tests/typecheck pass. The only remaining concern is the documented lock-free fallback race and inclusion of unrelated same-file work from the dirty checkout.
