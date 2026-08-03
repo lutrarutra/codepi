@@ -550,6 +550,14 @@ export function deriveDisplayName(path: string): string {
   if (parts[0]?.startsWith("@")) return parts.slice(0, 2).join("/");
   return parts[0] ?? base;
  }
+ // Subdirectory extensions (dir/index.ts) display as the directory name.
+ if (base === "index") {
+  const slash = p.lastIndexOf("/");
+  if (slash > 0) {
+   const parent = p.slice(0, slash).split("/").pop();
+   if (parent) return parent;
+  }
+ }
  return base;
 }
 
