@@ -12,6 +12,7 @@ export default defineConfig({
 		rollupOptions: {
 			input: {
 				settings: "settings.html",
+				extensions: "extensions.html",
 			},
 			output: {
 				entryFileNames: "assets/[name].js",

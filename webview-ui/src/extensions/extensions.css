@@ -1,0 +1,239 @@
+:root {
+	color-scheme: light dark;
+}
+
+body {
+	font-family: var(--vscode-font-family, sans-serif);
+	font-size: var(--vscode-font-size, 13px);
+	color: var(--vscode-foreground);
+	padding: 0;
+	margin: 0;
+}
+
+.ext-root {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+	padding: 8px;
+	box-sizing: border-box;
+}
+
+.ext-header {
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+	border-bottom: 1px solid var(--vscode-panel-border);
+	padding-bottom: 8px;
+}
+
+.ext-mode {
+	font-weight: 600;
+}
+
+.ext-mode-dim {
+	color: var(--vscode-descriptionForeground);
+}
+
+.ext-mode-warning {
+	color: var(--vscode-editorWarning-foreground);
+}
+
+.ext-mode-ok {
+	color: var(--vscode-charts-green, #89d185);
+}
+
+.ext-legend {
+	display: flex;
+	gap: 8px;
+	flex-wrap: wrap;
+	font-size: 11px;
+	color: var(--vscode-descriptionForeground);
+}
+
+.ext-controls {
+	display: flex;
+	gap: 6px;
+}
+
+.ext-search {
+	flex: 1;
+	background: var(--vscode-input-background);
+	color: var(--vscode-input-foreground);
+	border: 1px solid var(--vscode-input-border, transparent);
+	padding: 3px 6px;
+}
+
+.ext-refresh {
+	background: var(--vscode-button-background);
+	color: var(--vscode-button-foreground);
+	border: none;
+	padding: 3px 10px;
+	cursor: pointer;
+}
+
+.ext-refresh:disabled {
+	opacity: 0.6;
+	cursor: default;
+}
+
+.ext-meta {
+	font-size: 11px;
+	color: var(--vscode-descriptionForeground);
+}
+
+.ext-error {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	padding: 6px 8px;
+	background: var(--vscode-inputValidation-errorBackground);
+	color: var(--vscode-inputValidation-errorForeground);
+	border: 1px solid var(--vscode-inputValidation-errorBorder);
+}
+
+.ext-error button {
+	background: var(--vscode-button-background);
+	color: var(--vscode-button-foreground);
+	border: none;
+	cursor: pointer;
+	padding: 2px 8px;
+}
+
+.ext-busy {
+	color: var(--vscode-descriptionForeground);
+	padding: 12px 0;
+	text-align: center;
+}
+
+.ext-tree {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+}
+
+.card {
+	border: 1px solid var(--vscode-panel-border);
+	border-radius: 4px;
+	padding: 6px 8px;
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+	background: var(--vscode-editorWidget-background);
+}
+
+.card-disabled {
+	opacity: 0.55;
+}
+
+.card-errors {
+	border-color: var(--vscode-inputValidation-errorBorder);
+}
+
+.card-title {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	font-weight: 600;
+}
+
+.card-name {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.badge {
+	font-size: 10px;
+	font-weight: 400;
+	padding: 1px 5px;
+	border-radius: 8px;
+	background: var(--vscode-badge-background);
+	color: var(--vscode-badge-foreground);
+	text-transform: uppercase;
+	letter-spacing: 0.4px;
+}
+
+.tag {
+	font-size: 10px;
+	padding: 0 4px;
+	border-radius: 3px;
+	background: var(--vscode-textCodeBlock-background);
+}
+
+.tag-skill {
+	color: var(--vscode-charts-purple, #b180d7);
+}
+
+.tag-prompt {
+	color: var(--vscode-charts-blue, #519aba);
+}
+
+.tag-disabled {
+	color: var(--vscode-descriptionForeground);
+}
+
+.group {
+	display: flex;
+	flex-direction: column;
+	gap: 1px;
+	padding-left: 6px;
+}
+
+.group-label {
+	font-size: 10px;
+	text-transform: uppercase;
+	letter-spacing: 0.6px;
+	color: var(--vscode-descriptionForeground);
+	margin-top: 2px;
+}
+
+.row {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	font-size: 12px;
+}
+
+.cmd-name {
+	color: var(--vscode-textLink-foreground);
+}
+
+.tool-name {
+	font-family: var(--vscode-editor-font-family, monospace);
+}
+
+.row-desc {
+	color: var(--vscode-descriptionForeground);
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	flex: 1;
+}
+
+.chip {
+	font-size: 10px;
+	padding: 1px 6px;
+	border-radius: 8px;
+	white-space: nowrap;
+}
+
+.chip-safe {
+	background: var(--vscode-inputValidation-infoBackground, transparent);
+	color: var(--vscode-charts-green, #89d185);
+	border: 1px solid var(--vscode-charts-green, #89d185);
+}
+
+.chip-whitelisted {
+	color: var(--vscode-charts-yellow, #e2c08d);
+	border: 1px solid var(--vscode-charts-yellow, #e2c08d);
+}
+
+.chip-blocked {
+	color: var(--vscode-errorForeground, #f48771);
+	border: 1px solid var(--vscode-errorForeground, #f48771);
+}
+
+.card-meta {
+	font-size: 10px;
+	color: var(--vscode-descriptionForeground);
+}
