@@ -12,6 +12,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
 	ASK_MODE_DEFAULT_ALLOWED_TOOLS,
+	ASK_MODE_DEFAULT_ALLOWED_TOOLS_PRE_CONTEXT,
 	detectLegacyConfig,
 	ensureRuntimeTools,
 	getAgentDir,
@@ -102,6 +103,7 @@ describe("CodePi settings merge and Pi JSON files", () => {
 				filechanges: true,
 				"codepi-modes": true,
 				"codepi-bash": true,
+			"codepi-context": true,
 			},
 			bundledThemes: { "nebula-pulse": true },
 		});
@@ -116,6 +118,7 @@ describe("CodePi settings merge and Pi JSON files", () => {
 					filechanges: true,
 					"codepi-modes": true,
 					"codepi-bash": true,
+				"codepi-context": true,
 				},
 				bundledThemes: { "nebula-pulse": true },
 			},
@@ -133,6 +136,7 @@ describe("CodePi settings merge and Pi JSON files", () => {
 				filechanges: false,
 				"codepi-modes": true,
 				"codepi-bash": true,
+			"codepi-context": true,
 			},
 			bundledThemes: { "nebula-pulse": false },
 		});
@@ -144,6 +148,7 @@ describe("CodePi settings merge and Pi JSON files", () => {
 					filechanges: false,
 					"codepi-modes": true,
 					"codepi-bash": true,
+				"codepi-context": true,
 				},
 				bundledThemes: { "nebula-pulse": false },
 			},
@@ -295,6 +300,41 @@ describe("CodePi settings merge and Pi JSON files", () => {
 		});
 	});
 
+	it("migrates the pre-context seeded allowlist to include the context tools", () => {
+		const settingsPath = join(dir, "settings.json");
+		// The old auto-seeded default (no context tools).
+		writeJsonFileAtomic(settingsPath, {
+			codepi: {
+				modes: {
+					ask: {
+						allowedTools: [...ASK_MODE_DEFAULT_ALLOWED_TOOLS_PRE_CONTEXT],
+					},
+				},
+			},
+		});
+		seedAskModeAllowedToolsIfMissing(settingsPath);
+		expect(
+			readAskModeAllowedTools(readJsonFile(settingsPath)),
+		).toEqual([...ASK_MODE_DEFAULT_ALLOWED_TOOLS]);
+		expect(ASK_MODE_DEFAULT_ALLOWED_TOOLS).toContain("get_editor_context");
+		expect(ASK_MODE_DEFAULT_ALLOWED_TOOLS).toContain("get_git_diff");
+	});
+
+	it("leaves a user-customized allowlist untouched", () => {
+		const settingsPath = join(dir, "settings.json");
+		writeJsonFileAtomic(settingsPath, {
+			codepi: {
+				modes: {
+					ask: { allowedTools: ["read", "web_search"] },
+				},
+			},
+		});
+		seedAskModeAllowedToolsIfMissing(settingsPath);
+		expect(
+			readAskModeAllowedTools(readJsonFile(settingsPath)),
+		).toEqual(["read", "web_search"]);
+	});
+
 	it("creates missing settings and models files as objects", () => {
 		expect(readJsonFile(ensurePiJsonFileInDir(dir, "settings"))).toEqual({});
 		expect(readJsonFile(ensurePiJsonFileInDir(dir, "models"))).toEqual({});
@@ -316,6 +356,7 @@ describe("CodePi settings merge and Pi JSON files", () => {
 					filechanges: true,
 					"codepi-modes": true,
 					"codepi-bash": true,
+				"codepi-context": true,
 				},
 				bundledThemes: { "nebula-pulse": true },
 			}),

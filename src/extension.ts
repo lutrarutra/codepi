@@ -40,6 +40,7 @@ import {
 	seedAskModeAllowedToolsIfMissing,
 	setAgentDir,
 	isBashExtensionEnabled,
+	isContextExtensionEnabled,
 	DEFAULT_AUTO_VERIFY_MODE,
 } from "./pi-store";
 import {
@@ -49,6 +50,16 @@ import {
 	buildPiRuntimeResourcePaths,
 	installImplicitBundledThemeReload,
 } from "./pi-runtime-config";
+import {
+	renderSystemPromptSnapshot,
+	collectEditorContext,
+	collectGitDiffs,
+	formatContextSnapshot,
+	formatLiveContext,
+	trackContextEvents,
+	getRecentFiles,
+} from "./context-snapshot";
+import { createHostContextTools } from "./context-tools";
 // ── Types ────────────────────────────────────────────────────
 
 interface SessionState {
@@ -197,12 +208,37 @@ async function offerLegacyMigration(
 export async function activate(context: vscode.ExtensionContext) {
 	extensionContext = context;
 
-	// codepi-bash (bundled pi extension) runs in this same process, but jiti's
-	// ESM loader cannot resolve the "vscode" module — only the extension host's
-	// own require/import paths are intercepted. Hand the API over via the
-	// documented bridge (globalThis is shared with the in-process pi SDK and
-	// its jiti-loaded extensions). getVscode() in codepi-bash reads this first.
-	(globalThis as Record<string, unknown>).__codepiBashHost = { vscode };
+	// codepi-bash and codepi-context (bundled pi extensions) run in this same
+	// process, but jiti's ESM loader cannot resolve the "vscode" module — only
+	// the extension host's own require/import paths are intercepted. Hand the
+	// API over via the documented bridge (globalThis is shared with the
+	// in-process pi SDK and its jiti-loaded extensions). getVscode() in both
+	// bundled extensions reads this first.
+	(globalThis as Record<string, unknown>).__codepiVscode = { vscode };
+
+	// codepi-context also gets the context-collection core through the shared
+	// global (same process) — keeping the extension free of relative imports,
+	// mirroring codepi-bash's proven-safe structure. One shared recent-file
+	// cache and git-stats cache for both the host snapshot and the tools.
+	(globalThis as Record<string, unknown>).__codepiContextCore = {
+		collectEditorContext,
+		collectGitDiffs,
+		formatContextSnapshot,
+		formatLiveContext,
+		trackContextEvents,
+		getRecentFiles,
+	};
+
+	// Seed the recent-active-editor tracker used by codepi-context's snapshot
+	// (the host's copy of src/context-snapshot.ts keeps its own module cache).
+	try {
+		const settings = readJsonFile(getSettingsPath()) ?? {};
+		if (isContextExtensionEnabled(settings)) {
+			trackContextEvents(vscode);
+		}
+	} catch {
+		/* settings unreadable — recent list stays empty */
+	}
 
 	// pi's InteractiveMode ends every quit path (/quit, Ctrl+C/Ctrl+D, signals)
 	// with process.exit(). VS Code's extension host already neutralizes
@@ -1307,6 +1343,24 @@ async function startTuiBackend(state: SessionState): Promise<void> {
 			);
 		}
 		const bundledThemeEnabled = bundledThemes.length > 0;
+		const settings = readJsonFile(getSettingsPath()) ?? {};
+		// Session-start editor-context snapshot for pi's system prompt
+		// (codepi-context). Rendered BEFORE the loader so the synchronous
+		// appendSystemPromptOverride closure can capture it for the loader's
+		// SINGLE reload — a second reload would re-run extension factories
+		// (the loader clears its factory cache between reloads), producing
+		// duplicate tool-registration logs. The snapshot references
+		// get_editor_context, which is guaranteed to exist either via the
+		// bundled extension or the host fallback below.
+		let contextSnapshot: string | undefined;
+		if (isContextExtensionEnabled(settings)) {
+			contextSnapshot = await renderSystemPromptSnapshot(vscode, opts.cwd);
+			if (contextSnapshot === undefined) {
+				console.warn(
+					"[CodePi] editor-context snapshot unavailable — skipping system-prompt injection.",
+				);
+			}
+		}
 		const loaderOptions = buildPiResourceLoaderOptions(opts.cwd, agentDir, {
 			...resourcePaths,
 			bundledExtensionPaths: bundledExtensions,
@@ -1315,6 +1369,8 @@ async function startTuiBackend(state: SessionState): Promise<void> {
 		const loader = new pi.DefaultResourceLoader({
 			...loaderOptions,
 			settingsManager,
+			appendSystemPromptOverride: (base: string[]) =>
+				contextSnapshot ? [...base, contextSnapshot] : base,
 			extensionsOverride: (base: any) => {
 				const bundled = new Set(bundledExtensions);
 				return {
@@ -1332,13 +1388,36 @@ async function startTuiBackend(state: SessionState): Promise<void> {
 			},
 		});
 		await loader.reload();
+		// Host-side fallback tools for codepi-context (registered via
+		// customTools, the same channel as CodePi's workspace tools). Populated
+		// only when the bundled extension did not load in this environment.
+		let hostContextTools: ReturnType<typeof createHostContextTools> | undefined;
+		if (isContextExtensionEnabled(settings)) {
+			const extensionResult = loader.getExtensions();
+			const contextLoaded = extensionResult.extensions.some((extension: any) =>
+				(extension.resolvedPath ?? extension.path)?.endsWith("codepi-context.ts"),
+			);
+			if (!contextLoaded) {
+				console.warn(
+					"[CodePi] codepi-context extension did not load in this environment — registering get_editor_context/get_git_diff via the host fallback instead. Loaded extensions:",
+					extensionResult.extensions.map((e: any) =>
+						(e.resolvedPath ?? e.path).split(/[\\/]/).slice(-2).join("/"),
+					),
+					"Loader errors:",
+					extensionResult.errors,
+				);
+				hostContextTools = createHostContextTools();
+			}
+		}
 		applyImplicitBundledTheme(settingsManager, bundledThemeEnabled);
 		// CodePi's workspace tools, plus pi's STOCK bash tool when the codepi-bash
 		// bundled extension is disabled in Settings (spawn-based, no approval
 		// layer — the user explicitly opted out). When codepi-bash is enabled the
 		// extension itself registers `bash` (VS Code terminal + approval modes).
 		const customTools = createVscodeTools(state.review);
-		const settings = readJsonFile(getSettingsPath()) ?? {};
+		if (hostContextTools) {
+			(customTools as Array<unknown>).push(...hostContextTools);
+		}
 		if (!isBashExtensionEnabled(settings)) {
 			(customTools as Array<unknown>).push(pi.createBashToolDefinition(opts.cwd));
 		}

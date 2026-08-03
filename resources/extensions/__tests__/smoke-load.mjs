@@ -104,5 +104,10 @@ await loadExtension("../codepi-bash.ts", "codepi-bash", {
 	tools: ["bash"],
 });
 
+await loadExtension("../codepi-context.ts", "codepi-context", {
+	events: ["session_start", "before_agent_start"],
+	tools: ["get_editor_context", "get_git_diff"],
+});
+
 console.log("smoke test: PASS");
 process.exit(0);

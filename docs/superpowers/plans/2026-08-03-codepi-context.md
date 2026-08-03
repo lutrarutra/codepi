@@ -163,6 +163,62 @@ reads), so `get_editor_context` is always fresh without staleness tracking.
   returns real unified diffs; disabling the toggle removes both tools and the
   snapshot; footer/settings toggle live-update.
 
+## Implementation status (2026-08-03)
+
+**Implemented and verified:**
+- `src/context-snapshot.ts` — pure collector (`collectEditorContext`), formatter
+  (`formatContextSnapshot`), diffs (`collectGitDiffs`), recent-file tracker,
+  `renderSystemPromptSnapshot` host helper, git-stats TTL cache, test-only reset.
+- `resources/extensions/codepi-context.ts` — bridge `getVscode` (reads
+  `globalThis.__codepiVscode`), both tools registered, promptSnippet +
+  promptGuidelines, session_start tracker seed.
+- Bridge renamed `__codepiBashHost` → `__codepiVscode` everywhere
+  (extension.ts activate, codepi-bash.ts, codepi-bash tests).
+- `src/extension.ts` createRuntime — renders the snapshot per session and
+  injects via `appendSystemPromptOverride` (sync hook, pre-rendered string);
+  `trackContextEvents` seeded in activate() when enabled.
+- Bundling/settings: pi-store entry + `isContextExtensionEnabled`, runtime
+  path list, settings-protocol + webview type unions, settings-view id set,
+  dashboard (maps BUNDLED_RESOURCES automatically). README section added.
+- Tests: 25 core + 10 extension; updated pi-store/pi-resource-policy tests;
+  smoke-load extended. **279 tests pass, lint clean, build:extension clean,
+  build:webview clean, smoke-load PASS.**
+- E2E via jiti + bridged mock: snapshot renders, both tools execute through
+  the real loader (relative import `../../src/context-snapshot` verified),
+  and `DefaultResourceLoader` `appendSystemPromptOverride` lands the
+  `<editor_context>` block in `getAppendSystemPrompt()`.
+
+Remaining: manual dev-host check (F5) — snapshot visible on a new session,
+`get_editor_context` reflects live switches, `get_git_diff` returns real
+unified diffs, Settings toggle removes both.
+
+### Follow-up hardening (2026-08-03, after dev-host reports)
+
+The dev host reported "Tool get_editor_context not found" in real sessions
+while the snapshot note WAS injected, and the new load diagnostic showed the
+extension missing from `loader.getExtensions()` with **zero loader errors**
+(so it was dropped before loading, not a load failure — every faithful CLI
+repro of the createRuntime flow loads it fine, so it is specific to the
+extension-host process). Fixes, in order:
+1. Extension made fully self-contained (removed the `../../src/context-snapshot`
+   relative import — the only bundled extension with one). The host now
+   exposes the core via `globalThis.__codepiContextCore` (same-process bridge,
+   like `__codepiVscode`); registration is try/catch'd with console logs.
+2. **Host-side fallback** (`src/context-tools.ts`): when the extension did not
+   load, createRuntime registers identical `get_editor_context`/`get_git_diff`
+   definitions via `customTools` — the same proven-active channel as CodePi's
+   workspace tools (ffgrep/fffind/get_diagnostics). Verified with a
+   createAgentSession repro: pi activates them. Snapshot injection is
+   independent of which path registered the tools.
+3. Diagnostics: createRuntime logs the bundled extension paths and the loaded
+   extension list on the failure path, so the next reload pinpoints where the
+   path disappears.
+4. Ask-mode migration: settings.json files auto-seeded with the pre-context
+   allowlist are upgraded to include the (read-only) context tools; custom
+   lists untouched.
+
+---
+
 ## Open questions / risks
 
 - **Snapshot staleness** — by design (per-session static); mitigated by the

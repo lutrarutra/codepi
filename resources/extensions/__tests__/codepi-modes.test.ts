@@ -603,6 +603,8 @@ describe("codepi-modes: ask allowlist settings", () => {
 			"ask_user_question",
 			"web_search",
 			"fetch_content",
+			"get_editor_context",
+			"get_git_diff",
 		]);
 		expect(DEFAULT_ASK_ALLOWED_TOOLS).toEqual(READ_ONLY_TOOL_BASELINE);
 	});

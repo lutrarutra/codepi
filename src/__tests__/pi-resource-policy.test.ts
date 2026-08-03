@@ -49,6 +49,12 @@ describe("bundled resource policy", () => {
 				enabledByDefault: true,
 			},
 			{
+				id: "codepi-context",
+				label: "Editor context (snapshot + tools)",
+				kind: "extension",
+				enabledByDefault: true,
+			},
+			{
 				id: "nebula-pulse",
 				label: "Nebula Pulse theme",
 				kind: "theme",
@@ -58,19 +64,20 @@ describe("bundled resource policy", () => {
 	});
 
 	it("enables every bundled resource when codepi settings are absent", () => {
-		expect(readBundledResourceConfig({})).toEqual({
+			expect(readBundledResourceConfig({})).toEqual({
 			bundledExtensions: {
 				"custom-footer": true,
 				filechanges: true,
 				"codepi-modes": true,
 				"codepi-bash": true,
+				"codepi-context": true,
 			},
 			bundledThemes: { "nebula-pulse": true },
 		});
 	});
 
 	it("honors explicit false values and ignores malformed values safely", () => {
-		expect(
+			expect(
 			readBundledResourceConfig({
 				codepi: {
 					bundledExtensions: { "custom-footer": false },
@@ -83,6 +90,7 @@ describe("bundled resource policy", () => {
 				filechanges: true,
 				"codepi-modes": true,
 				"codepi-bash": true,
+				"codepi-context": true,
 			},
 			bundledThemes: { "nebula-pulse": true },
 		});

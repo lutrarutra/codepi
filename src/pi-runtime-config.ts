@@ -35,10 +35,16 @@ export function buildPiRuntimeResourcePaths(
 		["filechanges", "filechanges.ts"],
 		["codepi-modes", "codepi-modes.ts"],
 		["codepi-bash", "codepi-bash.ts"],
+		["codepi-context", "codepi-context.ts"],
 	]
 		.filter(([id]) =>
 			enabledIds.has(
-				id as "custom-footer" | "filechanges" | "codepi-modes" | "codepi-bash",
+				id as
+					| "custom-footer"
+					| "filechanges"
+					| "codepi-modes"
+					| "codepi-bash"
+					| "codepi-context",
 			),
 		)
 		.map(([, filename]) => join(extensionResourcesDir, filename));

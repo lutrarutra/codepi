@@ -702,7 +702,7 @@ describe("codepi-bash: createVscodeBashOperations", () => {
 				}),
 			},
 		};
-		(globalThis as any).__codepiBashHost = { vscode };
+		(globalThis as any).__codepiVscode = { vscode };
 
 		const ops = createVscodeBashOperations();
 		const chunks: string[] = [];
@@ -716,7 +716,7 @@ describe("codepi-bash: createVscodeBashOperations", () => {
 		expect(terminals[0].options.isTransient).toBe(true);
 		expect(terminals[0].options.cwd).toBe("/tmp");
 		expect(disposed.length).toBe(1);
-		delete (globalThis as any).__codepiBashHost;
+		delete (globalThis as any).__codepiVscode;
 	});
 
 	it("falls back to sendText + sentinel when shell integration never activates", async () => {
@@ -742,7 +742,7 @@ describe("codepi-bash: createVscodeBashOperations", () => {
 			}),
 		},
 		};
-		(globalThis as any).__codepiBashHost = { vscode };
+		(globalThis as any).__codepiVscode = { vscode };
 
 		const ops = createVscodeBashOperations({ shellIntegrationTimeoutMs: 20 });
 		const chunks: string[] = [];
@@ -766,7 +766,7 @@ describe("codepi-bash: createVscodeBashOperations", () => {
 		expect(chunks.join("")).toContain("M file.txt");
 		expect(chunks.join("")).not.toContain(marker);
 		expect(term.dispose).toHaveBeenCalled();
-		delete (globalThis as any).__codepiBashHost;
+		delete (globalThis as any).__codepiVscode;
 	});
 
 	it("reports a non-zero exit code from the sentinel marker", async () => {
@@ -786,7 +786,7 @@ describe("codepi-bash: createVscodeBashOperations", () => {
 				}),
 			},
 		};
-		(globalThis as any).__codepiBashHost = { vscode };
+		(globalThis as any).__codepiVscode = { vscode };
 		const ops = createVscodeBashOperations({ shellIntegrationTimeoutMs: 20 });
 		const resultP = ops.exec("false", "/tmp", { onData: () => {} });
 		await new Promise((r) => setTimeout(r, 40));
@@ -796,7 +796,7 @@ describe("codepi-bash: createVscodeBashOperations", () => {
 		dataListener!({ terminal: term, data: `${marker}:1\n` });
 		const result = await resultP;
 		expect(result.exitCode).toBe(1);
-		delete (globalThis as any).__codepiBashHost;
+		delete (globalThis as any).__codepiVscode;
 	});
 
 	it("skips the shell-integration wait once it is known broken", async () => {
@@ -820,7 +820,7 @@ describe("codepi-bash: createVscodeBashOperations", () => {
 				}),
 			},
 		};
-		(globalThis as any).__codepiBashHost = { vscode };
+		(globalThis as any).__codepiVscode = { vscode };
 		const ops = createVscodeBashOperations({ shellIntegrationTimeoutMs: 20 });
 		const run = async () => {
 			const p = ops.exec("ls", "/tmp", { onData: () => {} });
@@ -835,7 +835,7 @@ describe("codepi-bash: createVscodeBashOperations", () => {
 		expect(registrations).toBe(1);
 		await run();
 		expect(registrations).toBe(1); // cached — no wait on the second call
-		delete (globalThis as any).__codepiBashHost;
+		delete (globalThis as any).__codepiVscode;
 	});
 
 	it("errors clearly when neither shell integration nor data events exist", async () => {
@@ -846,11 +846,11 @@ describe("codepi-bash: createVscodeBashOperations", () => {
 				// no onDidWriteTerminalData
 			},
 		};
-		(globalThis as any).__codepiBashHost = { vscode };
+		(globalThis as any).__codepiVscode = { vscode };
 		const ops = createVscodeBashOperations({ shellIntegrationTimeoutMs: 20 });
 		await expect(ops.exec("ls", "/tmp", { onData: () => {} })).rejects.toThrow(
 			"Cannot capture command output",
 		);
-		delete (globalThis as any).__codepiBashHost;
+		delete (globalThis as any).__codepiVscode;
 	});
 });

@@ -54,7 +54,7 @@ export const DEFAULT_TIMEOUT_SECONDS = 120;
 const MAX_COMMANDS = 32;
 const MAX_TITLE_CHARS = 100;
 const SHELL_INTEGRATION_TIMEOUT_MS = 8000;
-const VSCODE_BRIDGE_KEY = "__codepiBashHost";
+const VSCODE_BRIDGE_KEY = "__codepiVscode";
 const DEFAULT_MAX_LINES = 2000;
 const DEFAULT_MAX_BYTES = 50 * 1024;
 const BASH_PREVIEW_LINES = 5;
@@ -403,8 +403,9 @@ export class BashOutputAccumulator {
  * Lazy vscode access for the bash tool. The bundled extension runs inside the
  * extension host process, but jiti's own ESM loader CANNOT resolve the
  * "vscode" module (the host only intercepts its own require/import paths), so
- * the host hands the API over via the `globalThis.__codepiBashHost` bridge
- * (set in extension.ts activate). createRequire is a second-chance fallback:
+ * the host hands the API over via the `globalThis.__codepiVscode` bridge
+ * (set in extension.ts activate, shared with codepi-context). createRequire is
+ * a second-chance fallback:
  * node's CJS Module._load IS intercepted for "vscode" in the host.
  */
 export async function getVscode(): Promise<any | undefined> {

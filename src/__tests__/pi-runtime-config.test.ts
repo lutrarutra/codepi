@@ -19,6 +19,7 @@ describe("Pi runtime resource paths", () => {
 			join(extensionResources, "filechanges.ts"),
 			join(extensionResources, "codepi-modes.ts"),
 			join(extensionResources, "codepi-bash.ts"),
+			join(extensionResources, "codepi-context.ts"),
 		]);
 		expect(paths.bundledThemePaths).toEqual([
 			join(extensionResources, "..", "themes", "nebula-pulse.json"),
@@ -71,6 +72,7 @@ describe("Pi runtime resource paths", () => {
 			join(extensionResources, "filechanges.ts"),
 			join(extensionResources, "codepi-modes.ts"),
 			join(extensionResources, "codepi-bash.ts"),
+			join(extensionResources, "codepi-context.ts"),
 		]);
 		expect(paths.bundledThemePaths).toEqual([]);
 	});

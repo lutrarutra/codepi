@@ -209,6 +209,7 @@ function isBundledResourceId(
 		id === "filechanges" ||
 		id === "codepi-modes" ||
 		id === "codepi-bash" ||
+		id === "codepi-context" ||
 		id === "nebula-pulse"
 	);
 }

@@ -1,7 +1,7 @@
 /** Settings dashboard protocol shared by the extension and settings webview. */
 
 export interface BundledResourceRow {
-	id: "custom-footer" | "filechanges" | "codepi-modes" | "codepi-bash" | "nebula-pulse";
+	id: "custom-footer" | "filechanges" | "codepi-modes" | "codepi-bash" | "codepi-context" | "nebula-pulse";
 	label: string;
 	kind: "extension" | "theme";
 	enabled: boolean;

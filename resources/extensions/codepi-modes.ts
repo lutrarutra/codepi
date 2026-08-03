@@ -49,6 +49,11 @@ export const READ_ONLY_TOOL_BASELINE: readonly string[] = [
 	"ask_user_question",
 	"web_search",
 	"fetch_content",
+	// codepi-context tools are pure reads of editor/git state — safe in
+	// read-only mode (the session snapshot explicitly tells the agent to
+	// call get_editor_context for live state).
+	"get_editor_context",
+	"get_git_diff",
 ];
 
 /**

@@ -30,7 +30,7 @@ export function getCodePiSessionDir(globalStoragePath: string): string {
 }
 
 export interface BundledResourceMetadata {
-	id: "custom-footer" | "filechanges" | "codepi-modes" | "codepi-bash" | "nebula-pulse";
+	id: "custom-footer" | "filechanges" | "codepi-modes" | "codepi-bash" | "codepi-context" | "nebula-pulse";
 	label: string;
 	kind: "extension" | "theme";
 	enabledByDefault: boolean;
@@ -58,6 +58,12 @@ export const BUNDLED_RESOURCES: readonly BundledResourceMetadata[] = [
 	{
 		id: "codepi-bash",
 		label: "Bash tool (VS Code terminal + approval)",
+		kind: "extension",
+		enabledByDefault: true,
+	},
+	{
+		id: "codepi-context",
+		label: "Editor context (snapshot + tools)",
 		kind: "extension",
 		enabledByDefault: true,
 	},
@@ -175,6 +181,29 @@ export const ASK_MODE_DEFAULT_ALLOWED_TOOLS: readonly string[] = [
 	"ask_user_question",
 	"web_search",
 	"fetch_content",
+	// codepi-context tools are pure reads of editor/git state — safe in
+	// read-only mode (the session snapshot tells the agent to call
+	// get_editor_context for live state).
+	"get_editor_context",
+	"get_git_diff",
+];
+
+/**
+ * The Ask-mode allowlist as seeded before codepi-context existed. Used to
+ * migrate settings.json files that were auto-seeded with the old default, so
+ * the (read-only) context tools become available in Ask mode too.
+ */
+export const ASK_MODE_DEFAULT_ALLOWED_TOOLS_PRE_CONTEXT: readonly string[] = [
+	"read",
+	"grep",
+	"find",
+	"ls",
+	"list_dir",
+	"find_files",
+	"get_diagnostics",
+	"ask_user_question",
+	"web_search",
+	"fetch_content",
 ];
 
 /** Settings path to the Ask-mode allowlist: codepi.modes.ask.allowedTools. */
@@ -236,8 +265,22 @@ export function updateAskModeAllowedTools(
  */
 export function seedAskModeAllowedToolsIfMissing(settingsPath: string): void {
 	const settings = readJsonFile<Record<string, unknown>>(settingsPath);
-	if (readAskModeAllowedTools(settings) !== undefined) return;
-	updateAskModeAllowedTools(settingsPath, ASK_MODE_DEFAULT_ALLOWED_TOOLS);
+	const current = readAskModeAllowedTools(settings);
+	if (current === undefined) {
+		updateAskModeAllowedTools(settingsPath, ASK_MODE_DEFAULT_ALLOWED_TOOLS);
+		return;
+	}
+	// Migrate a settings.json that was auto-seeded with the pre-context
+	// default: the context tools are pure reads, so they belong in the
+	// read-only allowlist. Only exact matches of the old default are touched;
+	// user-customized lists are left alone.
+	const oldDefault = new Set(ASK_MODE_DEFAULT_ALLOWED_TOOLS_PRE_CONTEXT);
+	if (
+		current.length === oldDefault.size &&
+		current.every((tool) => oldDefault.has(tool))
+	) {
+		updateAskModeAllowedTools(settingsPath, ASK_MODE_DEFAULT_ALLOWED_TOOLS);
+	}
 }
 
 export interface BundledResourceConfig {
@@ -246,6 +289,7 @@ export interface BundledResourceConfig {
 		filechanges: boolean;
 		"codepi-modes": boolean;
 		"codepi-bash": boolean;
+		"codepi-context": boolean;
 	};
 	bundledThemes: {
 		"nebula-pulse": boolean;
@@ -266,6 +310,7 @@ export function readBundledResourceConfig(
 			filechanges: true,
 			"codepi-modes": true,
 			"codepi-bash": true,
+			"codepi-context": true,
 		},
 		bundledThemes: { "nebula-pulse": true },
 	};
@@ -296,6 +341,10 @@ export function readBundledResourceConfig(
 				typeof extensions?.["codepi-bash"] === "boolean"
 					? extensions["codepi-bash"]
 					: defaults.bundledExtensions["codepi-bash"],
+			"codepi-context":
+				typeof extensions?.["codepi-context"] === "boolean"
+					? extensions["codepi-context"]
+					: defaults.bundledExtensions["codepi-context"],
 		},
 		bundledThemes: {
 			"nebula-pulse":
@@ -315,6 +364,11 @@ export function isBashExtensionEnabled(settings: unknown): boolean {
 	return readBundledResourceConfig(settings).bundledExtensions["codepi-bash"];
 }
 
+/** Whether the codepi-context bundled extension is enabled in settings */
+export function isContextExtensionEnabled(settings: unknown): boolean {
+	return readBundledResourceConfig(settings).bundledExtensions["codepi-context"];
+}
+
 /** Return the bundled resources enabled by the current CodePi settings. */
 export function getEnabledBundledResources(
 	settings: unknown,
@@ -323,7 +377,12 @@ export function getEnabledBundledResources(
 	return BUNDLED_RESOURCES.filter((resource) =>
 		resource.kind === "extension"
 			? config.bundledExtensions[
-					resource.id as "custom-footer" | "filechanges" | "codepi-modes"
+					resource.id as
+						| "custom-footer"
+						| "filechanges"
+						| "codepi-modes"
+						| "codepi-bash"
+						| "codepi-context"
 				]
 			: config.bundledThemes["nebula-pulse"],
 	).map((resource) => ({ ...resource }));

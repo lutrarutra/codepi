@@ -64,7 +64,8 @@ resources do not cross machines.
 
 The CodePi Settings view is a compact dashboard. It reports configured Pi
 package status, lets you enable or disable CodePi's bundled `custom-footer`,
-`filechanges`, `codepi-modes`, `codepi-bash`, and `nebula-pulse` defaults, and
+`filechanges`, `codepi-modes`, `codepi-bash`, `codepi-context`, and
+`nebula-pulse` defaults, and
 opens the real `settings.json`,
 `models.json`, and `auth.json` files in VS Code. The bundled resources are
 CodePi-only and are not copied into `~/.pi/agent` or exposed to the Pi CLI.
@@ -113,6 +114,22 @@ auto). Toggle manually with `/codepi-bash-ask` and `/codepi-bash-auto`; the
 mode is persisted per session. Disabling `codepi-bash` in Settings (default
 enabled) falls back to Pi's stock bash tool (spawn-based, no approval) so the
 agent still has a working bash. Requires VS Code ≥ 1.93 (shell integration).
+
+CodePi ships a bundled `codepi-context` extension that gives the agent a
+feel for what you're up to in the editor. A compact `<editor_context>`
+snapshot is injected into the system prompt when a session starts (active
+file + cursor, selection text when short, open editors, recent file
+switches, git branch and changed files with `+N/−M` line counts, the SCM
+commit box, open terminals, and the active debug session). Because that
+snapshot is a point-in-time view, the extension also registers two live
+tools: `get_editor_context` (refresh the same snapshot on demand, with
+`includeSelection`/`includeDiff`/`maxFiles` options) and `get_git_diff`
+(full unified diffs vs HEAD for changed files, or one `path`). Everything
+is read through the VS Code API — the built-in git extension for branch and
+diff info, the tab model for open editors, the Problems panel is not
+included (activity context, not code-quality context). Disabling
+`codepi-context` in Settings (default enabled) removes both the snapshot
+and the tools.
 
 CodePi ships a bundled `codepi-modes` extension with three agent modes you
 switch with `/codepi-ask`, `/codepi-plan`, and `/codepi-implement` (implement
