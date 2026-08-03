@@ -118,18 +118,29 @@ agent still has a working bash. Requires VS Code ≥ 1.93 (shell integration).
 CodePi ships a bundled `codepi-context` extension that gives the agent a
 feel for what you're up to in the editor. A compact `<editor_context>`
 snapshot is injected into the system prompt when a session starts (active
-file + cursor, selection text when short, open editors, recent file
-switches, git branch and changed files with `+N/−M` line counts, the SCM
-commit box, open terminals, and the active debug session). Because that
-snapshot is a point-in-time view, the extension also registers two live
-tools: `get_editor_context` (refresh the same snapshot on demand, with
-`includeSelection`/`includeDiff`/`maxFiles` options) and `get_git_diff`
-(full unified diffs vs HEAD for changed files, or one `path`). Everything
-is read through the VS Code API — the built-in git extension for branch and
-diff info, the tab model for open editors, the Problems panel is not
-included (activity context, not code-quality context). Disabling
-`codepi-context` in Settings (default enabled) removes both the snapshot
-and the tools.
+file + cursor, every selection with its file and range, open editors,
+recent file switches, git branch and changed files with `+N/−M` line
+counts, the SCM commit box, open terminals, and the active debug session).
+Because that snapshot is a point-in-time view, the extension also registers
+two live tools: `get_editor_context` (refresh the same snapshot on demand,
+with `includeSelection`/`includeDiff`/`maxFiles` options) and
+`get_git_diff` (full unified diffs vs HEAD for changed files, or one
+`path`).
+
+Selections are collected from the active editor **and** every visible
+editor, so highlighted snippets keep showing up even while the CodePi panel
+has focus (`activeTextEditor` is undefined then, but the visible editors
+still expose their selections). Multiple files with selections all appear,
+each tagged with its own file and line range; stray single-caret cursors
+are ignored, and empty sections (`terminals`, `debug`, `scm_input`) are
+omitted from the snapshot. On top of that, a compact `<live_editor_context>`
+block is injected into each new turn whenever your active file or
+selections changed since the last turn, so a fresh highlight is visible to
+the agent without it having to call the tool. Everything is read through
+the VS Code API — the built-in git extension for branch and diff info, the
+tab model for open editors; the Problems panel is not included (activity
+context, not code-quality context). Disabling `codepi-context` in Settings
+(default enabled) removes the snapshot, the live injection, and the tools.
 
 CodePi ships a bundled `codepi-modes` extension with three agent modes you
 switch with `/codepi-ask`, `/codepi-plan`, and `/codepi-implement` (implement
