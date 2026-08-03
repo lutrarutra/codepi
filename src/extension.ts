@@ -3,6 +3,8 @@ import * as path from "node:path";
 import * as os from "node:os";
 import * as fs from "node:fs";
 import { createVscodeTools } from "./tools/index";
+import { disposeDiagnosticsCache } from "./tools/diagnostics";
+import { installAutoVerify } from "./auto-verify";
 import { SessionTreeProvider, SessionTreeItem } from "./views/session-tree";
 import { ReviewManager, pendingLineCounts } from "./review/review-manager";
 import {
@@ -32,8 +34,13 @@ import {
 	getCodePiSessionDir,
 	getSettingsPath,
 	migrateLegacyCodePiStorage,
+	readAutoVerifyMode,
 	readJsonFile,
+	readTerminalPrefs,
+	seedAskModeAllowedToolsIfMissing,
 	setAgentDir,
+	isBashExtensionEnabled,
+	DEFAULT_AUTO_VERIFY_MODE,
 } from "./pi-store";
 import {
 	applyImplicitBundledTheme,
@@ -190,6 +197,13 @@ async function offerLegacyMigration(
 export async function activate(context: vscode.ExtensionContext) {
 	extensionContext = context;
 
+	// codepi-bash (bundled pi extension) runs in this same process, but jiti's
+	// ESM loader cannot resolve the "vscode" module — only the extension host's
+	// own require/import paths are intercepted. Hand the API over via the
+	// documented bridge (globalThis is shared with the in-process pi SDK and
+	// its jiti-loaded extensions). getVscode() in codepi-bash reads this first.
+	(globalThis as Record<string, unknown>).__codepiBashHost = { vscode };
+
 	// pi's InteractiveMode ends every quit path (/quit, Ctrl+C/Ctrl+D, signals)
 	// with process.exit(). VS Code's extension host already neutralizes
 	// process.exit (patchProcess in extensionHostProcess.ts — it just logs
@@ -240,6 +254,15 @@ export async function activate(context: vscode.ExtensionContext) {
 
 	// Copilot-style pending-edit dot on tabs/Explorer for files awaiting review.
 	registerPendingReviewDots(extensionContext);
+
+	// Seed codepi.modes.ask.allowedTools with the default read-only allowlist
+	// when the block is missing, so the user can find and edit it (the
+	// codepi-modes extension falls back to the same defaults at runtime).
+	try {
+		seedAskModeAllowedToolsIfMissing(getSettingsPath());
+	} catch {
+		/* malformed settings — leave unseeded, extension fallback applies */
+	}
 
 	// Keep CodePi conversations in VS Code storage, separate from Pi's
 	// canonical ~/.pi/agent resources and sessions.
@@ -1181,14 +1204,11 @@ async function setupSessionPanel(
 	state.disposables.push({ dispose: () => clearInterval(fcPollTimer) });
 
 	// Start the backend once the webview has initialized xterm (real size known);
-	// the pty buffers any output that arrives before that. Show a visible
-	// status line so startup doesn't look frozen; the TUI's first full render
-	// clears it.
+	// the pty buffers any output that arrives before that. The webview's
+	// loading overlay (PI logo + dots) covers the gap; startTuiBackend
+	// dismisses it once the TUI pipeline is live.
 	void (async () => {
 		await pty.waitForReady();
-		pty.write(
-			"\x1b[2J\x1b[H\x1b[2mCodePi — starting… (loading runtime)\x1b[0m\r\n",
-		);
 		await startTuiBackend(state);
 	})().catch((err) => {
 		const msg = err instanceof Error ? err.message : String(err);
@@ -1313,13 +1333,23 @@ async function startTuiBackend(state: SessionState): Promise<void> {
 		});
 		await loader.reload();
 		applyImplicitBundledTheme(settingsManager, bundledThemeEnabled);
+		// CodePi's workspace tools, plus pi's STOCK bash tool when the codepi-bash
+		// bundled extension is disabled in Settings (spawn-based, no approval
+		// layer — the user explicitly opted out). When codepi-bash is enabled the
+		// extension itself registers `bash` (VS Code terminal + approval modes).
+		const customTools = createVscodeTools(state.review);
+		const settings = readJsonFile(getSettingsPath()) ?? {};
+		if (!isBashExtensionEnabled(settings)) {
+			(customTools as Array<unknown>).push(pi.createBashToolDefinition(opts.cwd));
+		}
+
 		const result = await pi.createAgentSession({
 			resourceLoader: loader,
 			settingsManager,
 			cwd: opts.cwd,
 			agentDir,
 			noTools: "builtin",
-			customTools: createVscodeTools(state.review),
+			customTools,
 			sessionManager: opts.sessionManager,
 			sessionStartEvent: { type: "session_start", reason: "startup" },
 		});
@@ -1340,6 +1370,19 @@ async function startTuiBackend(state: SessionState): Promise<void> {
 	});
 	state.runtime = runtime;
 
+	// Auto-verify: after a turn that edited files, lint exactly those files
+	// and feed the findings back to the model (mode from codepi.autoVerify).
+	const autoVerify = installAutoVerify(runtime.session, {
+		getMode: () => {
+			try {
+				return readAutoVerifyMode(readJsonFile(getSettingsPath()) ?? {});
+			} catch {
+				return DEFAULT_AUTO_VERIFY_MODE;
+			}
+		},
+	});
+	state.disposables.push({ dispose: autoVerify.dispose });
+
 	state.tui = new pi.InteractiveMode(runtime, {
 		terminal: state.pty,
 		verbose: true,
@@ -1348,6 +1391,14 @@ async function startTuiBackend(state: SessionState): Promise<void> {
 	state.isBackendReady = true;
 	state.isBusy = true;
 	treeProvider?.refresh();
+
+	// Dismiss the webview's loading overlay (PI logo + dots). The TUI's first
+	// render lands right after run() below, so the fade covers the gap.
+	try {
+		void state.panel.webview.postMessage({ command: "tuiLoadingDone" });
+	} catch {
+		/* webview disposed */
+	}
 
 	// run() resolves when the TUI exits (e.g. /quit) → close the panel tab.
 	void state.tui
@@ -1468,25 +1519,53 @@ function buildTerminalHtml(
 	// separators), shipped as woff2. The files live in media/ AND are copied
 	// into webview-ui/dist/ by the build (scripts/copy-fonts.mjs) — dist is
 	// permanently in the panel's localResourceRoots, so even panels created
-	// before media/ was added can fetch the font.
+	// before media/ was added can fetch the font. The @font-face is only
+	// emitted when the configured family actually uses it, so choosing a
+	// different font skips the 2 MB download.
 	const fontUri = webview.asWebviewUri(
 		vscode.Uri.joinPath(distUri, "fira-code-nerd-regular.woff2"),
 	);
 	const fontBoldUri = webview.asWebviewUri(
 		vscode.Uri.joinPath(distUri, "fira-code-nerd-bold.woff2"),
 	);
+	// Loading-screen logo (media/): gray glyph on dark themes, dark glyph on
+	// light themes — the webview <html> carries vscode-dark/vscode-light.
+	const logoDarkUri = webview.asWebviewUri(
+		vscode.Uri.joinPath(extensionUri, "media", "pi-icon.svg"),
+	);
+	const logoLightUri = webview.asWebviewUri(
+		vscode.Uri.joinPath(extensionUri, "media", "pi-icon-light.svg"),
+	);
+
+	// Terminal font preferences from the user's settings.json (codepi.*).
+	// Read fresh on every panel creation so new sessions pick up changes.
+	let fontFamily = "FiraCode Nerd Font";
+	let fontSize = 14;
+	try {
+		const prefs = readTerminalPrefs(readJsonFile(getSettingsPath()) ?? {});
+		fontFamily = prefs.fontFamily;
+		fontSize = prefs.fontSize;
+	} catch {
+		/* malformed settings — fall back to defaults */
+	}
+	const useBundledFont =
+		fontFamily.toLowerCase().replace(/\s+/g, "").includes("firacode");
+	const safeFamily = fontFamily.replace(/"/g, "&quot;");
 	const nonce = getNonce();
 	const safeSessionId = sessionId.replace(/"/g, "&quot;");
 	return /* html */ `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline'; font-src ${webview.cspSource}; script-src ${webview.cspSource} 'nonce-${nonce}';" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline'; font-src ${webview.cspSource}; img-src ${webview.cspSource}; script-src ${webview.cspSource} 'nonce-${nonce}';" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta name="codepi-session-id" content="${safeSessionId}" />
+  <meta name="codepi-font-family" content="${safeFamily}" />
+  <meta name="codepi-font-size" content="${fontSize}" />
   <title>PI</title>
   <style>
-    /* Bundled terminal font — Fira Code Nerd Font (OFL 1.1). Preloaded
+${useBundledFont
+		? `    /* Bundled terminal font — Fira Code Nerd Font (OFL 1.1). Preloaded
        by terminal.ts so the xterm canvas builds its glyph atlas with the
        real font from the first frame. */
     @font-face {
@@ -1501,6 +1580,8 @@ function buildTerminalHtml(
       font-weight: 700;
       src: url("${fontBoldUri}") format("woff2");
     }
+`
+		: ""}
     html, body { width: 100%; height: 100%; margin: 0; padding: 0; overflow: hidden; background: var(--vscode-terminal-background, var(--vscode-editor-background, #1e1e1e)); }
     /* Absolute-fill: robust against webview percentage-height quirks. */
     #terminal { position: absolute; top: 0; left: 0; right: 0; bottom: 0; }
@@ -1511,10 +1592,56 @@ function buildTerminalHtml(
        layers behind it (html/body/#terminal/.xterm) show through; the
        background is re-applied from the theme in terminal.ts. */
     .xterm .xterm-viewport { background-color: transparent; }
+
+    /* ── Startup loading overlay ──
+       Shown from first paint until the TUI backend is live (extension posts
+       tuiLoadingDone; terminal.ts adds .loading-done to fade it out). A
+       centered PI logo with a gentle breathing pulse and three staggered
+       dots — minimal, theme-aware (vscode-dark/vscode-light classes). */
+    #loading {
+      position: absolute; inset: 0; z-index: 10;
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      gap: 18px;
+      background: var(--vscode-terminal-background, var(--vscode-editor-background, #1e1e1e));
+      opacity: 1; visibility: visible;
+      transition: opacity 0.35s ease, visibility 0s linear 0s;
+    }
+    #loading.loading-done {
+      opacity: 0; visibility: hidden;
+      pointer-events: none;
+      transition: opacity 0.35s ease, visibility 0s linear 0.35s;
+    }
+    .loading-logo {
+      width: 56px; height: 56px;
+      animation: codepi-breathe 1.8s ease-in-out infinite;
+    }
+    html.vscode-light .loading-logo[data-theme="dark"] { display: none; }
+    html:not(.vscode-light) .loading-logo[data-theme="light"] { display: none; }
+    .loading-dots { display: flex; gap: 7px; }
+    .loading-dots span {
+      width: 6px; height: 6px; border-radius: 50%;
+      background: var(--vscode-terminal-foreground, #cccccc);
+      animation: codepi-dot 1.2s ease-in-out infinite;
+    }
+    .loading-dots span:nth-child(2) { animation-delay: 0.15s; }
+    .loading-dots span:nth-child(3) { animation-delay: 0.3s; }
+    @keyframes codepi-breathe {
+      0%, 100% { opacity: 0.55; transform: scale(0.96); }
+      50% { opacity: 1; transform: scale(1); }
+    }
+    @keyframes codepi-dot {
+      0%, 100% { opacity: 0.2; transform: translateY(0); }
+      50% { opacity: 1; transform: translateY(-4px); }
+    }
   </style>
 </head>
 <body>
   <div id="terminal"></div>
+  <div id="loading" role="status" aria-label="Starting CodePi">
+    <img class="loading-logo" data-theme="dark" src="${logoDarkUri}" alt="PI" />
+    <img class="loading-logo" data-theme="light" src="${logoLightUri}" alt="PI" />
+    <div class="loading-dots" aria-hidden="true"><span></span><span></span><span></span></div>
+  </div>
   <script nonce="${nonce}" src="${scriptUri}"></script>
 </body>
 </html>`;
@@ -1533,6 +1660,7 @@ function getNonce(): string {
 // ── Deactivation ─────────────────────────────────────────────
 
 export function deactivate() {
+	disposeDiagnosticsCache();
 	for (const [, state] of sessions) {
 		try {
 			state.tui?.stop();

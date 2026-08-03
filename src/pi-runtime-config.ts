@@ -33,8 +33,14 @@ export function buildPiRuntimeResourcePaths(
 	const bundledExtensionPaths = [
 		["custom-footer", "custom-footer.ts"],
 		["filechanges", "filechanges.ts"],
+		["codepi-modes", "codepi-modes.ts"],
+		["codepi-bash", "codepi-bash.ts"],
 	]
-		.filter(([id]) => enabledIds.has(id as "custom-footer" | "filechanges"))
+		.filter(([id]) =>
+			enabledIds.has(
+				id as "custom-footer" | "filechanges" | "codepi-modes" | "codepi-bash",
+			),
+		)
 		.map(([, filename]) => join(extensionResourcesDir, filename));
 	const bundledThemePaths = enabledIds.has("nebula-pulse")
 		? [join(extensionResourcesDir, "..", "themes", "nebula-pulse.json")]

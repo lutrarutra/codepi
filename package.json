@@ -5,13 +5,14 @@
   "version": "0.1.0",
   "publisher": "lutrarutra",
   "engines": {
-    "vscode": "^1.85.0"
+    "vscode": "^1.93.0"
   },
   "categories": [
     "Chat",
     "Programming Languages"
   ],
   "main": "./dist/extension.js",
+  "enabledApiProposals": ["terminalDataWriteEvent"],
   "activationEvents": [
     "onStartupFinished",
     "onWebviewPanel:codepi-tui"

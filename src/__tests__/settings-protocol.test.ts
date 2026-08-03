@@ -2,7 +2,11 @@ import { describe, expect, it } from "vitest";
 import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { getCodePiSessionDir, getCanonicalAgentDir } from "../pi-store";
+import {
+	ASK_MODE_DEFAULT_ALLOWED_TOOLS,
+	getCodePiSessionDir,
+	getCanonicalAgentDir,
+} from "../pi-store";
 import {
 	buildDashboardData,
 	collectConfiguredPackageStatus,
@@ -20,13 +24,17 @@ describe("settings dashboard protocol", () => {
 		const data: DashboardData = buildDashboardData(
 			getCanonicalAgentDir(),
 			getCodePiSessionDir("/vscode/codepi"),
-			{},
+			{ codepi: { fontFamily: "Menlo", fontSize: 16 } },
 			[{ source: "npm:example", scope: "user", installed: true }],
 			{ settings: true, models: false, auth: true },
 		);
 
 		expect(JSON.stringify(data)).not.toContain("sk-");
 		expect(JSON.stringify(data)).not.toContain("token");
+		expect(data.terminalPrefs).toEqual({ fontFamily: "Menlo", fontSize: 16 });
+		expect(data.autoVerify).toBe("nextTurn");
+		// Missing settings block → effective defaults are reported for display.
+		expect(data.askAllowedTools).toEqual([...ASK_MODE_DEFAULT_ALLOWED_TOOLS]);
 		expect(data.bundledResources).toEqual(
 			expect.arrayContaining([
 				expect.objectContaining({ id: "custom-footer", enabled: true }),
@@ -102,6 +110,15 @@ describe("settings dashboard protocol", () => {
 			missing: 1,
 		});
 		expect(dashboard.packages.entries).toEqual(packages);
+		expect(dashboard.autoVerify).toBe("nextTurn");
+		expect(
+			buildDashboardData(
+				"/x",
+				"/y",
+				{ codepi: { autoVerify: "followUp" } },
+				[],
+			).autoVerify,
+		).toBe("followUp");
 	});
 
 	it("uses auth metadata without reading or parsing auth.json", () => {
@@ -130,15 +147,17 @@ describe("settings dashboard protocol", () => {
 				id: "filechanges",
 				enabled: false,
 			},
+			{ command: "settings:setTerminalPrefs", fontFamily: "Menlo", fontSize: 15 },
+			{ command: "settings:setAutoVerify", mode: "nextTurn" },
 			{ command: "settings:openFile", file: "auth" },
 			{ command: "settings:refresh" },
 			{ command: "settings:openSessions" },
 		];
-		expect(messages).toHaveLength(5);
+		expect(messages).toHaveLength(7);
 		const reply: SettingsReply = {
 			command: "settings:saved",
 			ok: true,
-			resource: "filechanges",
+			resource: "autoVerify",
 		};
 		expect(reply.command).toBe("settings:saved");
 	});

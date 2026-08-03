@@ -5,6 +5,7 @@ import {
 	BUNDLED_RESOURCES,
 	getCanonicalAgentDir,
 	getCodePiSessionDir,
+	isBashExtensionEnabled,
 	readBundledResourceConfig,
 } from "../pi-store";
 
@@ -22,7 +23,7 @@ describe("canonical Pi and CodePi paths", () => {
 
 describe("bundled resource policy", () => {
 	it("declares stable metadata for every CodePi bundled resource", () => {
-		expect(BUNDLED_RESOURCES).toEqual([
+			expect(BUNDLED_RESOURCES).toEqual([
 			{
 				id: "custom-footer",
 				label: "Custom footer",
@@ -32,6 +33,18 @@ describe("bundled resource policy", () => {
 			{
 				id: "filechanges",
 				label: "File changes",
+				kind: "extension",
+				enabledByDefault: true,
+			},
+			{
+				id: "codepi-modes",
+				label: "Agent modes (Ask / Plan / Implement)",
+				kind: "extension",
+				enabledByDefault: true,
+			},
+			{
+				id: "codepi-bash",
+				label: "Bash tool (VS Code terminal + approval)",
 				kind: "extension",
 				enabledByDefault: true,
 			},
@@ -46,7 +59,12 @@ describe("bundled resource policy", () => {
 
 	it("enables every bundled resource when codepi settings are absent", () => {
 		expect(readBundledResourceConfig({})).toEqual({
-			bundledExtensions: { "custom-footer": true, filechanges: true },
+			bundledExtensions: {
+				"custom-footer": true,
+				filechanges: true,
+				"codepi-modes": true,
+				"codepi-bash": true,
+			},
 			bundledThemes: { "nebula-pulse": true },
 		});
 	});
@@ -60,8 +78,22 @@ describe("bundled resource policy", () => {
 				},
 			}),
 		).toEqual({
-			bundledExtensions: { "custom-footer": false, filechanges: true },
+			bundledExtensions: {
+				"custom-footer": false,
+				filechanges: true,
+				"codepi-modes": true,
+				"codepi-bash": true,
+			},
 			bundledThemes: { "nebula-pulse": true },
 		});
+	});
+
+	it("reports whether the codepi-bash extension is enabled (default true)", () => {
+		expect(isBashExtensionEnabled({})).toBe(true);
+		expect(
+			isBashExtensionEnabled({
+				codepi: { bundledExtensions: { "codepi-bash": false } },
+			}),
+		).toBe(false);
 	});
 });

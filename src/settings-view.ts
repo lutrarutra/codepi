@@ -1,12 +1,16 @@
 import * as vscode from "vscode";
 import { join } from "node:path";
 import {
+	AUTO_VERIFY_MODES,
 	ensurePiJsonFileInDir,
 	getCanonicalAgentDir,
 	getCodePiSessionDir,
 	readBundledResourceConfig,
 	readJsonFile,
+	updateAutoVerifyMode,
+	updateAskModeAllowedTools,
 	updateBundledResourceConfig,
+	updateTerminalPrefs,
 	type BundledResourceConfig,
 } from "./pi-store";
 import {
@@ -15,6 +19,7 @@ import {
 	collectConfiguredPackageStatus,
 } from "./settings-dashboard";
 import type {
+	AutoVerifyMode,
 	DashboardData,
 	SettingsMessage,
 	SettingsReply,
@@ -70,6 +75,15 @@ export class SettingsViewProvider implements vscode.WebviewViewProvider {
 					if (msg.command === "settings:refresh") this.onConfigSaved();
 					await this.sendData();
 					break;
+				case "settings:setTerminalPrefs":
+					await this.setTerminalPrefs(msg.fontFamily, msg.fontSize);
+					break;
+				case "settings:setAutoVerify":
+					await this.setAutoVerify(msg.mode);
+					break;
+				case "settings:setAskAllowedTools":
+					await this.setAskAllowedTools(msg.tools);
+					break;
 				case "settings:setBundledResource":
 					await this.setBundledResource(msg.id, msg.enabled);
 					break;
@@ -109,6 +123,52 @@ export class SettingsViewProvider implements vscode.WebviewViewProvider {
 		this.post({ command: "settings:data", data });
 	}
 
+	private async setTerminalPrefs(
+		fontFamily: string,
+		fontSize: number,
+	): Promise<void> {
+		const settingsPath = getSettingsPathForAgent(this.agentDir);
+		const family = String(fontFamily ?? "").trim().slice(0, 200);
+		if (family === "") {
+			throw new Error("Font family must not be empty");
+		}
+		if (!Number.isFinite(fontSize)) {
+			throw new Error("Font size must be a number");
+		}
+		const size = Math.min(40, Math.max(8, Math.round(fontSize)));
+		updateTerminalPrefs(settingsPath, { fontFamily: family, fontSize: size });
+		this.onConfigSaved();
+		this.post({ command: "settings:saved", ok: true, resource: "terminal" });
+		await this.sendData();
+	}
+
+	private async setAutoVerify(mode: AutoVerifyMode): Promise<void> {
+		if (!(AUTO_VERIFY_MODES as readonly string[]).includes(mode)) {
+			throw new Error(
+				`Unknown auto-verify mode: ${String(mode)}. Use one of: ${AUTO_VERIFY_MODES.join(", ")}.`,
+			);
+		}
+		const settingsPath = getSettingsPathForAgent(this.agentDir);
+		updateAutoVerifyMode(settingsPath, mode);
+		this.onConfigSaved();
+		this.post({ command: "settings:saved", ok: true, resource: "autoVerify" });
+		await this.sendData();
+	}
+
+	private async setAskAllowedTools(tools: string[]): Promise<void> {
+		const settingsPath = getSettingsPathForAgent(this.agentDir);
+		const cleaned = (Array.isArray(tools) ? tools : [])
+			.map((t) => String(t ?? "").trim())
+			.filter((t) => t !== "");
+		if (cleaned.length > 200) {
+			throw new Error("Too many allowed tools (max 200).");
+		}
+		updateAskModeAllowedTools(settingsPath, cleaned);
+		this.onConfigSaved();
+		this.post({ command: "settings:saved", ok: true, resource: "askAllowedTools" });
+		await this.sendData();
+	}
+
 	private async setBundledResource(
 		id: DashboardData["bundledResources"][number]["id"],
 		enabled: boolean,
@@ -145,7 +205,11 @@ function isBundledResourceId(
 	id: string,
 ): id is DashboardData["bundledResources"][number]["id"] {
 	return (
-		id === "custom-footer" || id === "filechanges" || id === "nebula-pulse"
+		id === "custom-footer" ||
+		id === "filechanges" ||
+		id === "codepi-modes" ||
+		id === "codepi-bash" ||
+		id === "nebula-pulse"
 	);
 }
 

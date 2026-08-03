@@ -89,6 +89,7 @@ function fail(message: string): void {
 		el.textContent = `CodePi terminal error: ${message}`;
 		el.style.color = "#f14c4c";
 	}
+	hideLoading();
 }
 
 // ── Read theme colors from VS Code CSS variables ─────────────
@@ -146,7 +147,33 @@ function readTheme() {
 // preferred coding font plus the powerline/nerd symbol glyphs (branch U+E0A0
 // in the TUI footer, separators, etc.) in one family, shipped as woff2 in
 // media/. monospace is the fallback if the font ever fails to load.
-const FONT_STACK = '"FiraCode Nerd Font", monospace';
+//
+// Font family/size are configurable in the CodePi settings sidebar; the
+// extension embeds the current values as meta tags in the HTML shell
+// (buildTerminalHtml) so this module applies them before the first frame.
+
+function readMeta(name: string): string | undefined {
+	return (
+		document
+			.querySelector(`meta[name="${name}"]`)
+			?.getAttribute("content") ?? undefined
+	);
+}
+
+const FONT_FAMILY =
+	readMeta("codepi-font-family")?.trim() || '"FiraCode Nerd Font", monospace';
+const FONT_SIZE = Math.min(
+	40,
+	Math.max(8, Number.parseInt(readMeta("codepi-font-size") ?? "", 10) || 14),
+);
+
+/** Fade out the startup loading overlay (PI logo + dots). */
+function hideLoading(): void {
+	const el = document.getElementById("loading");
+	if (el && !el.classList.contains("loading-done")) {
+		el.classList.add("loading-done");
+	}
+}
 
 (async () => {
 	try {
@@ -178,39 +205,41 @@ const FONT_STACK = '"FiraCode Nerd Font", monospace';
 			}
 		};
 
-		// Preload the bundled font BEFORE the first frame. The canvas glyph atlas
-		// is built from whatever font is available at draw time and caches the
-		// result — a web font arriving after the first paint leaves tofu cached
-		// in the atlas (refresh() only redraws rows, it doesn't rebuild glyphs).
-		// It's a local file, so this resolves in a few ms.
+		// Preload the configured terminal font BEFORE the first frame. The canvas
+		// glyph atlas is built from whatever font is available at draw time and
+		// caches the result — a web font arriving after the first paint leaves
+		// tofu cached in the atlas (refresh() only redraws rows, it doesn't
+		// rebuild glyphs). It's a local file, so this resolves in a few ms.
 		if (document.fonts?.load) {
 			try {
-				await document.fonts.load(`16px ${FONT_STACK}`);
+				await document.fonts.load(`${FONT_SIZE}px ${FONT_FAMILY}`);
 			} catch {
 				/* reported below */
 			}
 		}
 		// Report whether the font is actually usable, so a silent resource/CSP
 		// failure shows up in the extension logs instead of an unexplained tofu.
-		const fontOk = document.fonts?.check?.(`16px ${FONT_STACK}`) ?? false;
+		const fontOk =
+			document.fonts?.check?.(`${FONT_SIZE}px ${FONT_FAMILY}`) ?? false;
 		if (!fontOk) {
 			console.error(
 				"[CodePi-tui] terminal font not available:",
-				FONT_STACK,
+				FONT_FAMILY,
 				"— branch icon will render as tofu",
 			);
 		}
 		post({ command: "tuiFontStatus", ok: fontOk });
 
-		// Fira Code Nerd Font primary; monospace fallback. Normal text renders in
-		// Fira Code (weight 400 face below), powerline/nerd glyphs come from the
-		// same family.
+		// Fira Code Nerd Font primary; monospace fallback (or the user's
+		// configured family). Normal text renders in the regular face below,
+		// powerline/nerd glyphs come from the same family.
 		const term = new Terminal({
 			cursorBlink: true,
 			convertEol: false,
 			scrollback: 10000,
 			allowProposedApi: true,
-			fontFamily: FONT_STACK,
+			fontFamily: FONT_FAMILY,
+			fontSize: FONT_SIZE,
 			theme: readTheme(),
 		});
 
@@ -407,6 +436,10 @@ const FONT_STACK = '"FiraCode Nerd Font", monospace';
 				case "tuiClipboardData":
 					clipboardReadResolver?.(typeof msg.text === "string" ? msg.text : "");
 					break;
+				case "tuiLoadingDone":
+					// Backend is live — fade out the startup overlay (PI logo + dots).
+					hideLoading();
+					break;
 			}
 		});
 
@@ -490,7 +523,8 @@ const FONT_STACK = '"FiraCode Nerd Font", monospace';
 			document.fonts.ready
 				.then(() => {
 					try {
-						term.options.fontFamily = FONT_STACK;
+						term.options.fontFamily = FONT_FAMILY;
+						term.options.fontSize = FONT_SIZE;
 						term.refresh(0, term.rows - 1);
 						scheduleFit();
 					} catch {

@@ -1,5 +1,11 @@
 import * as vscode from "vscode";
 import { spawn } from "node:child_process";
+import {
+	DIAGNOSTIC_SEVERITIES,
+	collectDiagnostics,
+	resolveUri,
+	type DiagnosticSeverityName,
+} from "./diagnostics";
 import { askUserQuestionTool } from "./ask-user-question";
 export { askUserQuestionTool } from "./ask-user-question";
 export type {
@@ -755,6 +761,107 @@ async function searchWithRipgrep(
 		});
 	});
 }
+
+// ── Tool: get_diagnostics — Problems lens (errors/warnings) ───────
+
+/**
+ * Read the Problems panel through VS Code's diagnostics API.
+ *
+ * Mirrors how VS Code's own chat surfaces markers (markersChatContext):
+ * group by file, prioritize the file the user is looking at, default to
+ * severity ≥ info ("All Problems"), and show line:column positions. Without
+ * a `path`, diagnostics exist only for documents the language servers have
+ * already analyzed; pass `path` to lint a specific file (it is opened in the
+ * background to trigger analysis). The core logic lives in
+ * ./diagnostics.ts, shared with CodePi's automatic post-edit verification.
+ */
+export const getDiagnosticsTool: VscodeTool = {
+	name: "get_diagnostics",
+	label: "Get Diagnostics",
+	description:
+		"Read the Problems panel: errors, warnings, info, and hints exactly as VS Code computes them " +
+		"(TypeScript, Python, ESLint, language servers, task problem matchers). Results are grouped by file " +
+		"with line:column positions, files sorted with the active editor first. " +
+		"Use after writing/editing code to verify nothing is broken. Pass `path` to lint one file — it is " +
+		"opened in the background to trigger language-server analysis and the tool waits for the analysis to " +
+		"settle (a few seconds max) before reporting, so results right after an edit are trustworthy. " +
+		"Re-checks of an unchanged file are instant. If the server is still working or never reported anything, " +
+		"or the open editor buffer differs from the saved file, the result says so instead of silently " +
+		"claiming the code is clean.",
+	parameters: {
+		type: "object",
+		properties: {
+			path: {
+				type: "string",
+				description:
+					"File to lint (absolute or workspace-relative). Default: all open/analyzed documents.",
+			},
+			severity: {
+				type: "string",
+				enum: [...DIAGNOSTIC_SEVERITIES],
+				description:
+					"Minimum severity to include: error = errors only, warning = errors + warnings, " +
+					"info = errors + warnings + info (default, matching the Problems panel's default), " +
+					"hint = everything including hints.",
+			},
+			limit: {
+				type: "number",
+				description: "Maximum problems to return (default 100, max 500)",
+			},
+		},
+		required: [],
+	},
+	async execute(_toolCallId, params) {
+		const { path: filePath, severity, limit } = params as {
+			path?: string;
+			severity?: DiagnosticSeverityName;
+			limit?: number;
+		};
+		if (
+			severity !== undefined &&
+			!(DIAGNOSTIC_SEVERITIES as readonly string[]).includes(severity)
+		) {
+			return {
+				content: [
+					{
+						type: "text" as const,
+						text: `Invalid severity: ${String(severity)}. Use one of: ${DIAGNOSTIC_SEVERITIES.join(", ")}.`,
+					},
+				],
+				isError: true,
+				details: {},
+			};
+		}
+		try {
+			const report = await collectDiagnostics({
+				paths: filePath ? [filePath] : undefined,
+				severity,
+				limit,
+				timeoutMs: 2500,
+				scopeLabel: filePath ? ` in ${filePath}` : "",
+			});
+			return {
+				content: [{ type: "text" as const, text: report.text }],
+				details: report.details,
+			};
+		} catch (err) {
+			const msg = err instanceof Error ? err.message : String(err);
+			return {
+				content: [
+					{
+						type: "text" as const,
+						text: msg.startsWith("File not found")
+							? msg
+							: `Failed to read diagnostics: ${msg}`,
+					},
+				],
+				isError: true,
+				details: {},
+			};
+		}
+	},
+};
+
 /** Build the full tool list for an agent session backed by `review`. */
 export function createVscodeTools(review: ReviewManager): VscodeTool[] {
 	return [
@@ -764,6 +871,7 @@ export function createVscodeTools(review: ReviewManager): VscodeTool[] {
 		listDirTool,
 		findFilesTool,
 		grepTool,
+		getDiagnosticsTool,
 		askUserQuestionTool,
 	];
 }
@@ -823,17 +931,6 @@ export function setWriteMode(mode: "ask" | "plan" | "agent"): void {
 }
 
 // ── helpers ────────────────────────────────────────────────────────
-
-function resolveUri(filePath: string): vscode.Uri {
-	if (filePath.startsWith("/")) {
-		return vscode.Uri.file(filePath);
-	}
-	const ws = vscode.workspace.workspaceFolders?.[0];
-	if (ws) {
-		return vscode.Uri.joinPath(ws.uri, filePath);
-	}
-	return vscode.Uri.file(filePath);
-}
 
 function selectLines(
 	text: string,

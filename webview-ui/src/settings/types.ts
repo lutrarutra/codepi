@@ -1,7 +1,7 @@
 /** Local mirror of src/shared/settings-protocol.ts. */
 
 export interface BundledResourceRow {
-	id: "custom-footer" | "filechanges" | "nebula-pulse";
+	id: "custom-footer" | "filechanges" | "codepi-modes" | "codepi-bash" | "nebula-pulse";
 	label: string;
 	kind: "extension" | "theme";
 	enabled: boolean;
@@ -14,9 +14,21 @@ export interface PackageStatusEntry {
 	installed: boolean;
 }
 
+export interface TerminalPrefs {
+	fontFamily: string;
+	fontSize: number;
+}
+
+/** Mirrors shared AutoVerifyMode: nextTurn (quiet) | followUp (auto-fix) | off. */
+export type AutoVerifyMode = "nextTurn" | "followUp" | "off";
+
 export interface DashboardData {
 	agentDir: string;
 	sessionDir: string;
+	terminalPrefs: TerminalPrefs;
+	autoVerify: AutoVerifyMode;
+	/** Ask-mode read-only allowlist (effective value, defaults when unset). */
+	askAllowedTools: string[];
 	bundledResources: BundledResourceRow[];
 	packages: {
 		configured: number;
@@ -38,13 +50,24 @@ export type SettingsMessage =
 			id: BundledResourceRow["id"];
 			enabled: boolean;
 	  }
+	| {
+			command: "settings:setTerminalPrefs";
+			fontFamily: string;
+			fontSize: number;
+	  }
+	| { command: "settings:setAutoVerify"; mode: AutoVerifyMode }
+	| { command: "settings:setAskAllowedTools"; tools: string[] }
 	| { command: "settings:openFile"; file: "settings" | "models" | "auth" }
 	| { command: "settings:refresh" }
 	| { command: "settings:openSessions" };
 
 export type SettingsReply =
 	| { command: "settings:data"; data: DashboardData }
-	| { command: "settings:saved"; ok: true; resource: BundledResourceRow["id"] }
+	| {
+			command: "settings:saved";
+			ok: true;
+			resource: BundledResourceRow["id"] | "terminal" | "autoVerify" | "askAllowedTools";
+	  }
 	| {
 			command: "settings:opened";
 			file: "settings" | "models" | "auth";

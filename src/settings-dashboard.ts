@@ -1,6 +1,13 @@
 import { existsSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { BUNDLED_RESOURCES, getEnabledBundledResources } from "./pi-store";
+import {
+	ASK_MODE_DEFAULT_ALLOWED_TOOLS,
+	BUNDLED_RESOURCES,
+	getEnabledBundledResources,
+	readAskModeAllowedTools,
+	readAutoVerifyMode,
+	readTerminalPrefs,
+} from "./pi-store";
 import type {
 	DashboardData,
 	PackageStatusEntry,
@@ -85,6 +92,13 @@ export function buildDashboardData(
 	return {
 		agentDir,
 		sessionDir,
+		terminalPrefs: readTerminalPrefs(settings),
+		autoVerify: readAutoVerifyMode(settings),
+		// Effective allowlist: the settings value when present, else the
+		// seeded defaults (mirrors the extension's runtime fallback).
+		askAllowedTools: [
+			...(readAskModeAllowedTools(settings) ?? ASK_MODE_DEFAULT_ALLOWED_TOOLS),
+		],
 		bundledResources: BUNDLED_RESOURCES.map((resource) => ({
 			...resource,
 			enabled: enabledIds.has(resource.id),

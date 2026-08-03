@@ -5,6 +5,7 @@
  * time), so everything pi reads/writes lands in the extension's storage.
  */
 import { homedir } from "node:os";
+import type { AutoVerifyMode } from "./shared/settings-protocol";
 import {
 	chmodSync,
 	cpSync,
@@ -29,7 +30,7 @@ export function getCodePiSessionDir(globalStoragePath: string): string {
 }
 
 export interface BundledResourceMetadata {
-	id: "custom-footer" | "filechanges" | "nebula-pulse";
+	id: "custom-footer" | "filechanges" | "codepi-modes" | "codepi-bash" | "nebula-pulse";
 	label: string;
 	kind: "extension" | "theme";
 	enabledByDefault: boolean;
@@ -49,6 +50,18 @@ export const BUNDLED_RESOURCES: readonly BundledResourceMetadata[] = [
 		enabledByDefault: true,
 	},
 	{
+		id: "codepi-modes",
+		label: "Agent modes (Ask / Plan / Implement)",
+		kind: "extension",
+		enabledByDefault: true,
+	},
+	{
+		id: "codepi-bash",
+		label: "Bash tool (VS Code terminal + approval)",
+		kind: "extension",
+		enabledByDefault: true,
+	},
+	{
 		id: "nebula-pulse",
 		label: "Nebula Pulse theme",
 		kind: "theme",
@@ -56,10 +69,183 @@ export const BUNDLED_RESOURCES: readonly BundledResourceMetadata[] = [
 	},
 ];
 
+// ── Terminal preferences (CodePi-owned settings.codepi.*) ─────
+
+export const DEFAULT_TERMINAL_FONT_FAMILY = "FiraCode Nerd Font";
+export const DEFAULT_TERMINAL_FONT_SIZE = 14;
+
+export interface TerminalPrefs {
+	fontFamily: string;
+	fontSize: number;
+}
+
+function clampFontSize(value: number): number {
+	if (!Number.isFinite(value)) return DEFAULT_TERMINAL_FONT_SIZE;
+	return Math.min(40, Math.max(8, Math.round(value)));
+}
+
+/**
+ * Read CodePi's terminal preferences (codepi.fontFamily / codepi.fontSize)
+ * without trusting malformed settings. These are CodePi-only: pi itself has
+ * no font settings, so they never collide with the SDK's SettingsManager.
+ */
+export function readTerminalPrefs(settings: unknown): TerminalPrefs {
+	const defaults: TerminalPrefs = {
+		fontFamily: DEFAULT_TERMINAL_FONT_FAMILY,
+		fontSize: DEFAULT_TERMINAL_FONT_SIZE,
+	};
+	if (!isRecord(settings) || !isRecord(settings.codepi)) return defaults;
+	const codepi = settings.codepi;
+	const fontFamily =
+		typeof codepi.fontFamily === "string" && codepi.fontFamily.trim() !== ""
+			? codepi.fontFamily.trim()
+			: defaults.fontFamily;
+	const fontSize =
+		typeof codepi.fontSize === "number"
+			? clampFontSize(codepi.fontSize)
+			: defaults.fontSize;
+	return { fontFamily, fontSize };
+}
+
+/** Store CodePi's terminal preferences in settings.json (codepi.*). */
+export function updateTerminalPrefs(
+	settingsPath: string,
+	prefs: TerminalPrefs,
+): void {
+	writeCodePiSettingsMerge(settingsPath, (settings) => {
+		const codepi = isRecord(settings.codepi) ? { ...settings.codepi } : {};
+		codepi.fontFamily = prefs.fontFamily;
+		codepi.fontSize = clampFontSize(prefs.fontSize);
+		return { ...settings, codepi };
+	});
+}
+
+// ── Post-edit verification (codepi.autoVerify) ────────────────
+
+export const AUTO_VERIFY_MODES: readonly AutoVerifyMode[] = [
+	"nextTurn",
+	"followUp",
+	"off",
+];
+export const DEFAULT_AUTO_VERIFY_MODE: AutoVerifyMode = "nextTurn";
+
+/**
+ * Read the post-edit verification mode (codepi.autoVerify) without trusting
+ * malformed settings. Default: "nextTurn" — problems from edited files are
+ * attached as context on the user's next prompt.
+ */
+export function readAutoVerifyMode(settings: unknown): AutoVerifyMode {
+	const codepi =
+		isRecord(settings) && isRecord(settings.codepi) ? settings.codepi : undefined;
+	const raw = codepi?.autoVerify;
+	return typeof raw === "string" &&
+		(AUTO_VERIFY_MODES as readonly string[]).includes(raw)
+		? (raw as AutoVerifyMode)
+		: DEFAULT_AUTO_VERIFY_MODE;
+}
+
+/** Store the post-edit verification mode in settings.json (codepi.*). */
+export function updateAutoVerifyMode(
+	settingsPath: string,
+	mode: AutoVerifyMode,
+): void {
+	writeCodePiSettingsMerge(settingsPath, (settings) => {
+		const codepi = isRecord(settings.codepi) ? { ...settings.codepi } : {};
+		codepi.autoVerify = mode;
+		return { ...settings, codepi };
+	});
+}
+
+// ── Ask-mode allowed tools (codepi.modes.ask.allowedTools) ───
+
+/**
+ * Default Ask-mode allowlist used to seed settings.json and as the dashboard
+ * display fallback. MUST stay in sync with `DEFAULT_ASK_ALLOWED_TOOLS` in
+ * resources/extensions/codepi-modes.ts (the extension's runtime fallback,
+ * used when the settings block is missing).
+ */
+export const ASK_MODE_DEFAULT_ALLOWED_TOOLS: readonly string[] = [
+	"read",
+	"grep",
+	"find",
+	"ls",
+	"list_dir",
+	"find_files",
+	"get_diagnostics",
+	"ask_user_question",
+	"web_search",
+	"fetch_content",
+];
+
+/** Settings path to the Ask-mode allowlist: codepi.modes.ask.allowedTools. */
+export const ASK_MODE_ALLOWED_TOOLS_KEY = [
+	"codepi",
+	"modes",
+	"ask",
+	"allowedTools",
+] as const;
+
+/**
+ * Read the Ask-mode allowlist. Returns undefined when the settings block is
+ * missing entirely (callers fall back to ASK_MODE_DEFAULT_ALLOWED_TOOLS); an
+ * explicitly empty list is respected as the user's choice. Malformed values
+ * are dropped, entries are trimmed and deduplicated.
+ */
+export function readAskModeAllowedTools(
+	settings: unknown,
+): string[] | undefined {
+	let value: unknown = settings;
+	for (const key of ASK_MODE_ALLOWED_TOOLS_KEY) {
+		if (!isRecord(value)) return undefined;
+		value = value[key];
+	}
+	if (value === undefined) return undefined;
+	if (!Array.isArray(value)) return undefined;
+	const seen = new Set<string>();
+	const out: string[] = [];
+	for (const item of value) {
+		if (typeof item !== "string") continue;
+		const tool = item.trim();
+		if (tool === "" || seen.has(tool)) continue;
+		seen.add(tool);
+		out.push(tool);
+	}
+	return out;
+}
+
+/** Store the Ask-mode allowlist in settings.json (codepi.modes.ask.*). */
+export function updateAskModeAllowedTools(
+	settingsPath: string,
+	tools: readonly string[],
+): void {
+	const cleaned = [...new Set(tools.map((t) => t.trim()).filter((t) => t !== ""))];
+	writeCodePiSettingsMerge(settingsPath, (settings) => {
+		const codepi = isRecord(settings.codepi) ? { ...settings.codepi } : {};
+		const modes = isRecord(codepi.modes) ? { ...codepi.modes } : {};
+		const ask = isRecord(modes.ask) ? { ...modes.ask } : {};
+		ask.allowedTools = cleaned;
+		modes.ask = ask;
+		codepi.modes = modes;
+		return { ...settings, codepi };
+	});
+}
+
+/**
+ * Write the default Ask-mode allowlist into settings.json when the block is
+ * missing, so users can find and edit it. No-op when already present.
+ */
+export function seedAskModeAllowedToolsIfMissing(settingsPath: string): void {
+	const settings = readJsonFile<Record<string, unknown>>(settingsPath);
+	if (readAskModeAllowedTools(settings) !== undefined) return;
+	updateAskModeAllowedTools(settingsPath, ASK_MODE_DEFAULT_ALLOWED_TOOLS);
+}
+
 export interface BundledResourceConfig {
 	bundledExtensions: {
 		"custom-footer": boolean;
 		filechanges: boolean;
+		"codepi-modes": boolean;
+		"codepi-bash": boolean;
 	};
 	bundledThemes: {
 		"nebula-pulse": boolean;
@@ -75,7 +261,12 @@ export function readBundledResourceConfig(
 	settings: unknown,
 ): BundledResourceConfig {
 	const defaults: BundledResourceConfig = {
-		bundledExtensions: { "custom-footer": true, filechanges: true },
+		bundledExtensions: {
+			"custom-footer": true,
+			filechanges: true,
+			"codepi-modes": true,
+			"codepi-bash": true,
+		},
 		bundledThemes: { "nebula-pulse": true },
 	};
 	if (!isRecord(settings) || !isRecord(settings.codepi)) return defaults;
@@ -97,6 +288,14 @@ export function readBundledResourceConfig(
 				typeof extensions?.filechanges === "boolean"
 					? extensions.filechanges
 					: defaults.bundledExtensions.filechanges,
+			"codepi-modes":
+				typeof extensions?.["codepi-modes"] === "boolean"
+					? extensions["codepi-modes"]
+					: defaults.bundledExtensions["codepi-modes"],
+			"codepi-bash":
+				typeof extensions?.["codepi-bash"] === "boolean"
+					? extensions["codepi-bash"]
+					: defaults.bundledExtensions["codepi-bash"],
 		},
 		bundledThemes: {
 			"nebula-pulse":
@@ -107,6 +306,15 @@ export function readBundledResourceConfig(
 	};
 }
 
+/**
+ * Whether the codepi-bash bundled extension is enabled in settings
+ * (default true). When disabled, extension.ts registers pi's builtin bash
+ * tool instead so the agent still has a working (stock) bash.
+ */
+export function isBashExtensionEnabled(settings: unknown): boolean {
+	return readBundledResourceConfig(settings).bundledExtensions["codepi-bash"];
+}
+
 /** Return the bundled resources enabled by the current CodePi settings. */
 export function getEnabledBundledResources(
 	settings: unknown,
@@ -114,7 +322,9 @@ export function getEnabledBundledResources(
 	const config = readBundledResourceConfig(settings);
 	return BUNDLED_RESOURCES.filter((resource) =>
 		resource.kind === "extension"
-			? config.bundledExtensions[resource.id as "custom-footer" | "filechanges"]
+			? config.bundledExtensions[
+					resource.id as "custom-footer" | "filechanges" | "codepi-modes"
+				]
 			: config.bundledThemes["nebula-pulse"],
 	).map((resource) => ({ ...resource }));
 }

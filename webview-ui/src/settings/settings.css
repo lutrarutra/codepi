@@ -167,6 +167,50 @@
 	border-top: 0;
 }
 
+.settings-field-row {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+}
+
+.settings-field-label {
+	flex: 0 0 auto;
+	width: 88px;
+	font-size: 12px;
+}
+
+.settings-text-input,
+.settings-number-input,
+.settings-select {
+	flex: 1 1 auto;
+	min-width: 0;
+	min-height: 26px;
+	padding: 3px 7px;
+	border: 1px solid
+		var(--vscode-input-border, var(--vscode-panel-border));
+	border-radius: 3px;
+	color: var(--vscode-input-foreground, var(--vscode-foreground));
+	background: var(--vscode-input-background, var(--vscode-editorWidget-background));
+	font: inherit;
+}
+
+.settings-number-input {
+	flex: 0 0 88px;
+}
+
+.settings-text-input:focus,
+.settings-number-input:focus,
+.settings-select:focus {
+	outline: 1px solid var(--vscode-focusBorder);
+	outline-offset: -1px;
+}
+
+.settings-field-suffix {
+	flex: 0 0 auto;
+	color: var(--vscode-descriptionForeground, var(--vscode-foreground));
+	font-size: 11px;
+}
+
 .settings-package-missing {
 	display: flex;
 	justify-content: space-between;

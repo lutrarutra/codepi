@@ -1,9 +1,11 @@
 import React, { useCallback, useEffect, useState } from "react";
 import type {
+	AutoVerifyMode,
 	BundledResourceRow,
 	DashboardData,
 	SettingsMessage,
 	SettingsReply,
+	TerminalPrefs,
 } from "./types";
 
 const vscode = acquireVsCodeApi();
@@ -79,6 +81,227 @@ function FileButton({
 	);
 }
 
+// Monospace fonts offered as suggestions in the terminal font-family field.
+// Any value is allowed — these are just quick picks from a datalist.
+const FONT_SUGGESTIONS = [
+	"FiraCode Nerd Font",
+	"monospace",
+	"Menlo",
+	"Monaco",
+	"Consolas",
+	"Cascadia Code",
+	"JetBrains Mono",
+	"Source Code Pro",
+	"IBM Plex Mono",
+];
+
+function TerminalPrefsCard({	prefs,
+}: {
+	prefs: TerminalPrefs;
+}): JSX.Element {
+	const [fontFamily, setFontFamily] = useState(prefs.fontFamily);
+	const [fontSize, setFontSize] = useState(String(prefs.fontSize));
+
+	// Follow refresh cycles (the extension echoes saved values back).
+	useEffect(() => {
+		setFontFamily(prefs.fontFamily);
+		setFontSize(String(prefs.fontSize));
+	}, [prefs]);
+
+	const save = (): void => {
+		const family = fontFamily.trim() || "FiraCode Nerd Font";
+		const size = Math.min(40, Math.max(8, Number.parseInt(fontSize, 10) || 14));
+		setFontFamily(family);
+		setFontSize(String(size));
+		post({
+			command: "settings:setTerminalPrefs",
+			fontFamily: family,
+			fontSize: size,
+		});
+	};
+	const saveOnEnter = (event: React.KeyboardEvent<HTMLInputElement>): void => {
+		if (event.key === "Enter") {
+			event.preventDefault();
+			event.currentTarget.blur();
+		}
+	};
+
+	return (
+		<section className="settings-card" aria-labelledby="terminal-title">
+			<h2 id="terminal-title">Terminal</h2>
+			<p className="settings-help">
+				Font used in CodePi chat panels. Changes apply to new sessions.
+			</p>
+			<div className="settings-field-row">
+				<label className="settings-field-label" htmlFor="terminal-font-family">
+					Font family
+				</label>
+				<input
+					id="terminal-font-family"
+					className="settings-text-input"
+					type="text"
+					list="codepi-font-suggestions"
+					value={fontFamily}
+					spellCheck={false}
+					onChange={(event) => setFontFamily(event.currentTarget.value)}
+					onBlur={save}
+					onKeyDown={saveOnEnter}
+					aria-describedby="terminal-font-help"
+				/>
+				<datalist id="codepi-font-suggestions">
+					{FONT_SUGGESTIONS.map((font) => (
+						<option key={font} value={font} />
+					))}
+				</datalist>
+			</div>
+			<div className="settings-field-row">
+				<label className="settings-field-label" htmlFor="terminal-font-size">
+					Font size
+				</label>
+				<input
+					id="terminal-font-size"
+					className="settings-number-input"
+					type="number"
+					min={8}
+					max={40}
+					step={1}
+					value={fontSize}
+					onChange={(event) => setFontSize(event.currentTarget.value)}
+					onBlur={save}
+					onKeyDown={saveOnEnter}
+					aria-describedby="terminal-font-help"
+				/>
+				<span className="settings-field-suffix" aria-hidden="true">
+					px
+				</span>
+			</div>
+			<p className="settings-help" id="terminal-font-help">
+				A CSS font stack or any installed monospace font; 8–40 px.
+			</p>
+		</section>
+	);
+}
+
+// Nicer labels for saved-preferences status messages.
+const RESOURCE_LABELS: Record<string, string> = {
+	terminal: "Terminal",
+	autoVerify: "Verification",
+	askAllowedTools: "Ask-mode tools",
+};
+
+// Post-edit verification modes shown in the Settings view.
+const AUTO_VERIFY_LABELS: Record<
+	AutoVerifyMode,
+	{ label: string; help: string }
+> = {
+	nextTurn: {
+		label: "Remind on next prompt",
+		help: "After a turn that edited files, CodePi lints the edited files and attaches problems as context on your next message — a quiet reminder.",
+	},
+	followUp: {
+		label: "Auto-fix immediately",
+		help: "Problems are sent to the agent right after the turn; it keeps working to fix them before you see the result.",
+	},
+	off: {
+		label: "Off",
+		help: "Only lint when the agent calls get_diagnostics itself.",
+	},
+};
+
+function AutoVerifyCard({ mode }: { mode: AutoVerifyMode }): JSX.Element {
+	return (
+		<section className="settings-card" aria-labelledby="verify-title">
+			<h2 id="verify-title">Verification</h2>
+			<p className="settings-help">
+				After each turn that edits files, CodePi lints exactly the files the
+				agent touched (VS Code Problems panel) and feeds findings back to it.
+			</p>
+			<div className="settings-field-row">
+				<label className="settings-field-label" htmlFor="auto-verify-mode">
+					Mode
+				</label>
+				<select
+					id="auto-verify-mode"
+					className="settings-select"
+					value={mode}
+					onChange={(event) =>
+						post({
+							command: "settings:setAutoVerify",
+							mode: event.currentTarget.value as AutoVerifyMode,
+						})
+					}
+				>
+					{(Object.keys(AUTO_VERIFY_LABELS) as AutoVerifyMode[]).map((m) => (
+						<option key={m} value={m}>
+							{AUTO_VERIFY_LABELS[m].label}
+						</option>
+					))}
+				</select>
+			</div>
+			<p className="settings-help">{AUTO_VERIFY_LABELS[mode].help}</p>
+		</section>
+	);
+}
+
+function AskAllowedToolsCard({ tools }: { tools: string[] }): JSX.Element {
+	const [value, setValue] = useState(tools.join(", "));
+
+	// Follow refresh cycles (the extension echoes saved values back).
+	useEffect(() => {
+		setValue(tools.join(", "));
+	}, [tools]);
+
+	const save = (): void => {
+		const cleaned = value
+			.split(",")
+			.map((t) => t.trim())
+			.filter((t) => t !== "");
+		setValue(cleaned.join(", "));
+		post({
+			command: "settings:setAskAllowedTools",
+			tools: cleaned,
+		});
+	};
+	const saveOnEnter = (event: React.KeyboardEvent<HTMLInputElement>): void => {
+		if (event.key === "Enter") {
+			event.preventDefault();
+			event.currentTarget.blur();
+		}
+	};
+
+	return (
+		<section className="settings-card" aria-labelledby="ask-tools-title">
+			<h2 id="ask-tools-title">Ask mode tools</h2>
+			<p className="settings-help">
+				Tools the agent may call in read-only (Ask) mode. Everything else —
+				shell commands, edit/write, and other extension tools — is blocked.
+				Comma-separated list; saved immediately (Ask-mode tool calls re-read
+				the list from settings each time).
+			</p>
+			<div className="settings-field-row">
+				<label className="settings-field-label" htmlFor="ask-allowed-tools">
+					Allowed tools
+				</label>
+				<input
+					id="ask-allowed-tools"
+					className="settings-text-input"
+					type="text"
+					value={value}
+					spellCheck={false}
+					onChange={(event) => setValue(event.currentTarget.value)}
+					onBlur={save}
+					onKeyDown={saveOnEnter}
+					aria-describedby="ask-tools-help"
+				/>
+			</div>
+			<p className="settings-help" id="ask-tools-help">
+				e.g. read, grep, find, ls, list_dir, find_files, get_diagnostics,
+				ask_user_question, web_search, fetch_content
+			</p>
+		</section>
+	);
+}
+
 export function SettingsApp(): JSX.Element {
 	const [data, setData] = useState<DashboardData | null>(null);
 	const [status, setStatus] = useState("");
@@ -99,7 +322,7 @@ export function SettingsApp(): JSX.Element {
 					break;
 				case "settings:saved":
 					setStatus(
-						`${message.resource} preference saved; applies to new sessions.`,
+						`${RESOURCE_LABELS[message.resource] ?? message.resource} preference saved; applies to new sessions.`,
 					);
 					break;
 				case "settings:opened":
@@ -222,6 +445,12 @@ export function SettingsApp(): JSX.Element {
 					))}
 				</div>
 			</section>
+
+			<TerminalPrefsCard prefs={data.terminalPrefs} />
+
+			<AutoVerifyCard mode={data.autoVerify} />
+
+			<AskAllowedToolsCard tools={data.askAllowedTools} />
 
 			<section className="settings-card" aria-labelledby="files-title">
 				<h2 id="files-title">Pi files</h2>
