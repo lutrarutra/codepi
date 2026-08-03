@@ -4,7 +4,14 @@ webview-ui/src
 webview-ui/node_modules
 node_modules
 !node_modules/@vscode/ripgrep-universal/**
+!node_modules/@earendil-works/pi-coding-agent/**
+node_modules/@earendil-works/pi-coding-agent/docs
+node_modules/@earendil-works/pi-coding-agent/examples
+node_modules/@earendil-works/pi-coding-agent/CHANGELOG.md
+node_modules/@earendil-works/pi-coding-agent/README.md
 .git
 .gitignore
 tsconfig.json
 esbuild.mjs
+submodules
+.pi-subagents
