@@ -19,6 +19,40 @@ import type {
 /** Settings path for the Ask-mode whitelist: codepi.modes.ask.allowedTools. */
 export const ASK_ALLOWED_TOOLS_KEY = ["codepi", "modes", "ask", "allowedTools"];
 
+/**
+ * Mirror of the SDK's BUILTIN_SLASH_COMMANDS (dist/core/slash-commands.js),
+ * which is not re-exported from the package root. The SDK version is pinned
+ * via patch-package (patches/@earendil-works+pi-coding-agent+0.80.1.patch);
+ * refresh this list if the pinned SDK changes it.
+ */
+export const CORE_SLASH_COMMANDS: ReadonlyArray<{
+	name: string;
+	description: string;
+}> = [
+	{ name: "settings", description: "Open settings menu" },
+	{ name: "model", description: "Select model (opens selector UI)" },
+	{ name: "scoped-models", description: "Enable/disable models for Ctrl+P cycling" },
+	{ name: "export", description: "Export session (HTML default, or specify path: .html/.jsonl)" },
+	{ name: "import", description: "Import and resume a session from a JSONL file" },
+	{ name: "share", description: "Share session as a secret GitHub gist" },
+	{ name: "copy", description: "Copy last agent message to clipboard" },
+	{ name: "name", description: "Set session display name" },
+	{ name: "session", description: "Show session info and stats" },
+	{ name: "changelog", description: "Show changelog entries" },
+	{ name: "hotkeys", description: "Show all keyboard shortcuts" },
+	{ name: "fork", description: "Create a new fork from a previous user message" },
+	{ name: "clone", description: "Duplicate the current session at the current position" },
+	{ name: "tree", description: "Navigate session tree (switch branches)" },
+	{ name: "trust", description: "Save project trust decision for future sessions" },
+	{ name: "login", description: "Configure provider authentication" },
+	{ name: "logout", description: "Remove provider authentication" },
+	{ name: "new", description: "Start a new session" },
+	{ name: "compact", description: "Manually compact the session context" },
+	{ name: "resume", description: "Resume a different session" },
+	{ name: "reload", description: "Reload keybindings, extensions, skills, prompts, and themes" },
+	{ name: "quit", description: "Quit pi" },
+];
+
 /** Rich view of a loaded SDK extension as the probe sees it. */
 export interface LoadedExtensionRich {
 	resolvedPath?: string;

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
 	buildSnapshot,
+	CORE_SLASH_COMMANDS,
 	classifySource,
 	computeAskMode,
 	deriveDisplayName,
@@ -62,6 +63,17 @@ describe("readAskAllowedToolsFromSettings", () => {
 		expect(readAskAllowedToolsFromSettings({ codepi: {} })).toEqual([]);
 		expect(readAskAllowedToolsFromSettings({ codepi: { modes: { ask: { allowedTools: "nope" } } } })).toEqual([]);
 		expect(readAskAllowedToolsFromSettings(null)).toEqual([]);
+	});
+});
+
+describe("CORE_SLASH_COMMANDS", () => {
+	it("mirrors the SDK builtin list with non-empty names", () => {
+		expect(CORE_SLASH_COMMANDS.length).toBeGreaterThan(10);
+		for (const c of CORE_SLASH_COMMANDS) {
+			expect(c.name.length).toBeGreaterThan(0);
+			expect(c.description.length).toBeGreaterThan(0);
+		}
+		expect(CORE_SLASH_COMMANDS.some((c) => c.name === "compact")).toBe(true);
 	});
 });
 
