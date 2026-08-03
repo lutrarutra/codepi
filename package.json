@@ -56,6 +56,12 @@
           "name": "Settings",
           "type": "webview",
           "when": "codepi.sidebarTab == settings"
+        },
+        {
+          "id": "codepi.extensions",
+          "name": "Extensions",
+          "type": "webview",
+          "when": "codepi.sidebarTab == extensions"
         }
       ]
     },
@@ -148,6 +154,10 @@
       {
         "command": "codepi.openSessionsTab",
         "title": "Open CodePi Sessions"
+      },
+      {
+        "command": "codepi.openExtensionsTab",
+        "title": "Open CodePi Extensions"
       }
     ],
     "menus": {

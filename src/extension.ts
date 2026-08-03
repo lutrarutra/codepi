@@ -27,6 +27,9 @@ import {
 	type CodePiOpenLinkPayload,
 } from "./tui/links";
 import { SettingsViewProvider } from "./settings-view";
+import { ExtensionsViewProvider } from "./extensions-view";
+import { modeFromSessionBranch } from "./extension-snapshot";
+import type { ModeInfo } from "./shared/extensions-protocol";
 import {
 	ensureRuntimeTools,
 	detectLegacyConfig,
@@ -38,6 +41,7 @@ import {
 	readJsonFile,
 	readTerminalPrefs,
 	seedAskModeAllowedToolsIfMissing,
+	seedTldrModeIfMissing,
 	setAgentDir,
 	isBashExtensionEnabled,
 	isContextExtensionEnabled,
@@ -89,6 +93,27 @@ const sessions = new Map<string, SessionState>();
 let extensionContext: vscode.ExtensionContext | undefined;
 let codePiSessionDir: string | undefined;
 let treeProvider: SessionTreeProvider | undefined;
+
+/** Live mode chip data: the visible panel's session, else any session. */
+function getModeInfoFromSessions(): ModeInfo {
+	const pick = (state: SessionState): ModeInfo => {
+		try {
+			const branch: readonly unknown[] = state.sessionManager?.getBranch?.() ?? [];
+			return {
+				active: true,
+				current: modeFromSessionBranch(branch),
+				sessionName: state.sessionManager?.getSessionName?.(),
+			};
+		} catch {
+			return { active: true };
+		}
+	};
+	for (const state of sessions.values()) {
+		if (state.panel.visible) return pick(state);
+	}
+	const first = sessions.values().next().value;
+	return first ? pick(first) : { active: false };
+}
 
 // Shared editor decorations + CodeLens for ALL sessions' pending edits.
 let reviewDecorations: ReviewDecorations | undefined;
@@ -301,6 +326,14 @@ export async function activate(context: vscode.ExtensionContext) {
 		/* malformed settings — leave unseeded, extension fallback applies */
 	}
 
+	// Seed codepi.tldrMode with the default (enabled) when missing, so the
+	// settings dashboard shows the effective value and new sessions respect it.
+	try {
+		seedTldrModeIfMissing(getSettingsPath());
+	} catch {
+		/* malformed settings — leave unseeded, extension fallback applies */
+	}
+
 	// Keep CodePi conversations in VS Code storage, separate from Pi's
 	// canonical ~/.pi/agent resources and sessions.
 	codePiSessionDir = getCodePiSessionDir(context.globalStorageUri.fsPath);
@@ -390,6 +423,25 @@ export async function activate(context: vscode.ExtensionContext) {
 				"setContext",
 				"codepi.sidebarTab",
 				"sessions",
+			),
+		),
+	);
+	// Extensions sidebar tab (toggled with Sessions/Settings via codepi.sidebarTab)
+	context.subscriptions.push(
+		vscode.window.registerWebviewViewProvider(
+			ExtensionsViewProvider.viewType,
+			new ExtensionsViewProvider(
+				context.extensionUri,
+				getModeInfoFromSessions,
+				getWorkspaceRoot,
+			),
+			{ webviewOptions: { retainContextWhenHidden: true } },
+		),
+		vscode.commands.registerCommand("codepi.openExtensionsTab", () =>
+			vscode.commands.executeCommand(
+				"setContext",
+				"codepi.sidebarTab",
+				"extensions",
 			),
 		),
 	);
