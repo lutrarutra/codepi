@@ -98,7 +98,8 @@ let treeProvider: SessionTreeProvider | undefined;
 function getModeInfoFromSessions(): ModeInfo {
 	const pick = (state: SessionState): ModeInfo => {
 		try {
-			const branch: readonly unknown[] = state.sessionManager?.getBranch?.() ?? [];
+			const branch: readonly unknown[] =
+				state.sessionManager?.getBranch?.() ?? [];
 			return {
 				active: true,
 				current: modeFromSessionBranch(branch),
