@@ -3,6 +3,10 @@
 # Convenience wrapper around the npm scripts plus packaging (vsce),
 # install/uninstall into VS Code, verification, and cleanup.
 #
+# The package version follows the latest git tag (e.g. v0.2.0 -> 0.2.0):
+# `make vsix` / `make install` sync package.json to the tag before packaging,
+# falling back to the package.json version when no tag is reachable.
+#
 # Usage: `make help` lists all rules.
 
 SHELL := /bin/bash
@@ -10,14 +14,16 @@ SHELL := /bin/bash
 # Package version taken from package.json (drives the .vsix filename).
 VERSION := $(shell node -p "require('./package.json').version")
 
+# Latest git tag with the leading "v" stripped (e.g. v0.2.0 -> 0.2.0); empty
+# when no tag is reachable from HEAD. Packaging syncs package.json to this.
+GIT_VERSION := $(shell git describe --tags --abbrev=0 2>/dev/null | sed 's/^v//')
+
 # Packaging tool. `vsce` (classic) or `@vscode/vsce` (maintained) both work;
 # falls back to an on-demand npx install when neither is on PATH.
 VSCE ?= $(or $(shell command -v vsce 2>/dev/null),npx --yes @vscode/vsce)
 
-VSIX := codepi-$(VERSION).vsix
-
 .PHONY: help all build build-webview build-extension check-types lint test unit \
-	watch dev smoke verify package vsix install uninstall clean version
+	watch dev smoke verify package vsix install uninstall clean version _sync-version
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) \
@@ -59,16 +65,31 @@ verify: check-types unit smoke ## Full pre-release check (types + tests + smoke)
 ## ── Package ─────────────────────────────────────────────────
 
 package: vsix ## Alias for `vsix`
-vsix: ## Build the .vsix (vsce runs the prepublish build first)
-	$(VSCE) package -o $(VSIX)
-	@echo "Packaged: $(VSIX)"
+vsix: ## Build the .vsix at the latest git tag version (vsce runs the prepublish build first)
+	@$(MAKE) _sync-version
+	@v=$$(node -p "require('./package.json').version"); \
+	echo "Packaging codepi-$$v.vsix …"; \
+	$(VSCE) package -o "codepi-$$v.vsix"; \
+	echo "Packaged: codepi-$$v.vsix"
+
+_sync-version: ## Sync package.json version to the latest git tag (internal)
+	@if [ -z "$(GIT_VERSION)" ]; then \
+		echo "No git tag reachable from HEAD — keeping package.json version $(VERSION)"; \
+	elif [ "$(GIT_VERSION)" = "$(VERSION)" ]; then \
+		echo "Version $(VERSION) already matches latest tag v$(GIT_VERSION)"; \
+	elif ! echo "$(GIT_VERSION)" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+([.-].+)?$$'; then \
+		echo "Tag v$(GIT_VERSION) is not valid semver — keeping package.json version $(VERSION)"; \
+	else \
+		echo "Syncing package.json version $(VERSION) -> $(GIT_VERSION) (git tag v$(GIT_VERSION))"; \
+		npm version "$(GIT_VERSION)" --no-git-tag-version --allow-same-version; \
+	fi
 
 release: verify package ## Verify everything, then produce the .vsix
 
 ## ── Install ─────────────────────────────────────────────────
 
 install: vsix ## Install the built .vsix into VS Code (force-replaces)
-	code --install-extension $(VSIX) --force
+	@code --install-extension "codepi-$$(node -p "require('./package.json').version").vsix" --force
 
 uninstall: ## Uninstall CodePi from VS Code
 	code --uninstall-extension lutrarutra.codepi
@@ -80,5 +101,5 @@ clean: ## Remove build outputs and packaged .vsix files
 
 ## ── Misc ────────────────────────────────────────────────────
 
-version: ## Print the package version
-	@echo $(VERSION)
+version: ## Print the effective version (latest git tag when present, else package.json)
+	@echo "$(if $(GIT_VERSION),$(GIT_VERSION)  (from git tag v$(GIT_VERSION)),$(VERSION)  (from package.json))"
