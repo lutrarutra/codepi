@@ -26,21 +26,35 @@ function cssVar(name: string, fallback: string): string {
  * land in the widget's own <input> while open, so nothing leaks to pi.
  */
 export function createFindWidget(
-	term: Terminal,
-	container: HTMLElement,
+term: Terminal,
+container: HTMLElement,
 ): FindWidget {
-	const addon = new SearchAddon();
-	term.loadAddon(addon);
+const addon = new SearchAddon();
+term.loadAddon(addon);
 
-	// Search state (remembered for the panel's lifetime).
-	let query = "";
-	let caseSensitive = false;
-	let wholeWord = false;
-	let open = false;
+// pi's TUI repaints the visible screen in place (\x1b[2J + redraw) while
+// responses stream, so the text under the current match can change (or
+// rows shift) between key presses. The addon's auto-research (200ms after
+// output pauses, `_updateMatches` via onWriteParsed/onResize) re-selects
+// from the raw selection position — which goes stale under repaints and
+// makes the current match jump arbitrarily. The widget's marker-anchored
+// navigation below is the source of truth, so disable the auto-research.
+// Private API — pinned to @xterm/addon-search@^0.16.0.
+(addon as unknown as { _updateMatches: () => void })._updateMatches = () => {};
 
-	// Result state, fed by addon.onDidChangeResults.
-	let resultCount = 0;
-	let resultIndex = -1;
+// Search state (remembered for the panel's lifetime).
+let query = "";
+let caseSensitive = false;
+let wholeWord = false;
+let open = false;
+
+// Result state, fed by addon.onDidChangeResults.
+let resultCount = 0;
+let resultIndex = -1;
+
+// The current match's line, tracked via an xterm marker so it survives
+// buffer scrolls, row shifts (insert/delete lines) and repaints.
+let anchorMarker: { line: number; dispose: () => void } | null = null;
 
 	// Widget DOM (built lazily on first open).
 	let bar: HTMLDivElement | null = null;
@@ -120,29 +134,88 @@ export function createFindWidget(
 			updateCounter();
 			return;
 		}
-		safe(() => addon.findNext(query, searchOptions(true)));
+		seedAnchor();
+		doSearch(() => addon.findNext(query, searchOptions(true)));
 	};
 
 	const next = (): void => {
 		if (!query) return;
-		safe(() => addon.findNext(query, searchOptions(false)));
+		seedAnchor();
+		doSearch(() => addon.findNext(query, searchOptions(false)));
 	};
 	const prev = (): void => {
 		if (!query) return;
-		safe(() => addon.findPrevious(query, searchOptions(false)));
+		seedAnchor();
+		doSearch(() => addon.findPrevious(query, searchOptions(false)));
+	};
+
+	// ── Navigation anchoring ────────────────────────────────────────────
+	//
+	// The addon anchors findNext/findPrevious on the raw selection position.
+	// pi's TUI repaints the visible screen in place (\x1b[2J + redraw) while
+	// responses stream, so the text at that position can change (or rows
+	// shift via insert/delete) between key presses — the stale position then
+	// lands on an arbitrary nearby match ("wrong or random" direction).
+	// Fix: keep an xterm marker on the current match's line (markers track
+	// their line through scrolls and row shifts) and re-seed the selection at
+	// the marker before every navigation, so each press continues from the
+	// match the user last saw.
+
+	/** Capture the current match's line in a marker after a search. */
+	const registerAnchor = (): void => {
+		anchorMarker?.dispose();
+		anchorMarker = null;
+		const s = term.getSelectionPosition();
+		if (!s) return;
+		const b = term.buffer.active;
+		// registerMarker(offset) anchors at ybase + cursorY + offset.
+		const marker = term.registerMarker(s.start.y - (b.baseY + b.cursorY));
+		if (marker) anchorMarker = marker;
+	};
+
+	/** Re-seed the selection at the anchored match before navigating. */
+	const seedAnchor = (): void => {
+		const s = term.getSelectionPosition();
+		const row =
+			anchorMarker && anchorMarker.line >= 0
+				? anchorMarker.line
+				: s
+					? s.start.y
+					: null;
+		if (row === null) return;
+		term.select(s ? s.start.x : 0, row, 1);
+	};
+
+	/** Run a search; refresh the anchor on success, clear a seeded selection on failure. */
+	const doSearch = (fn: () => boolean): void => {
+		let ok = false;
+		safe(() => {
+			ok = fn();
+		});
+		if (ok) {
+			registerAnchor();
+		} else {
+			safe(() => term.clearSelection());
+		}
 	};
 
 	const toggleCase = (): void => {
 		caseSensitive = !caseSensitive;
 		caseBtn?.classList.toggle("active", caseSensitive);
 		caseBtn?.setAttribute("aria-pressed", String(caseSensitive));
-		if (query) safe(() => addon.findNext(query, searchOptions(false)));
+		if (query) {
+			seedAnchor();
+			doSearch(() => addon.findNext(query, searchOptions(false)));
+		}
 	};
 	const toggleWord = (): void => {
 		wholeWord = !wholeWord;
 		wordBtn?.classList.toggle("active", wholeWord);
 		wordBtn?.setAttribute("aria-pressed", String(wholeWord));
-		if (query) safe(() => addon.findNext(query, searchOptions(false)));
+		if (query) {
+			seedAnchor();
+			doSearch(() => addon.findNext(query, searchOptions(false)));
+		}
 	};
 
 	const close = (): void => {
@@ -187,17 +260,9 @@ export function createFindWidget(
 			"Previous match",
 		);
 		upBtn.textContent = "↑";
-		const downBtn = makeButton(
-			"codepi-find-btn",
-			"Next Match",
-			"Next match",
-		);
+		const downBtn = makeButton("codepi-find-btn", "Next Match", "Next match");
 		downBtn.textContent = "↓";
-		const closeBtn = makeButton(
-			"codepi-find-btn",
-			"Close (Esc)",
-			"Close find",
-		);
+		const closeBtn = makeButton("codepi-find-btn", "Close (Esc)", "Close find");
 		closeBtn.textContent = "×";
 		caseBtn.addEventListener("click", toggleCase);
 		wordBtn.addEventListener("click", toggleWord);
@@ -259,8 +324,13 @@ export function createFindWidget(
 		updateCounter();
 		input!.focus();
 		input!.select();
-		// Re-apply highlights immediately (VS Code restores them on reopen).
-		if (query) safe(() => addon.findNext(query, searchOptions(false)));
+		// Re-apply highlights immediately (VS Code restores them on reopen);
+		// resume from the previous anchor when one survives from an earlier
+		// session of the widget.
+		if (query) {
+			seedAnchor();
+			doSearch(() => addon.findNext(query, searchOptions(false)));
+		}
 	};
 
 	addon.onDidChangeResults((e) => {
