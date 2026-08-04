@@ -80,7 +80,7 @@ All changes are in the webview layer (`webview-ui/`). No extension-host, protoco
 - Toggle active state: `--vscode-inputOption-activeBorder` + active background, matching VS Code's widget.
 - Match colors (VS Code semantics, matching the built-in terminal): other matches `var(--vscode-terminal-findMatchHighlightBackground, …)` (yellow), current match `var(--vscode-terminal-findMatchBackground, …)` (stronger accent); sensible dark/light fallbacks.
 - Zero matches: counter in `--vscode-errorForeground` red.
-- Codicons: VS Code injects the codicon font into webviews, so use `.codicon` classes (`codicon-case-sensitive`, `codicon-word-wrap`, `codicon-chevron-up/down`, `codicon-close`); if the font fails to render, the buttons still work (aria-labels + title tooltips).
+- Button glyphs: plain text (verified empirically that the codicon font does NOT render in this webview — buttons were invisible on the dark theme): `Aa` (case), `ab|` (whole word), `↑`/`↓` (prev/next), `×` (close) — render in any font; aria-labels + title tooltips retained.
 
 ## Edge Cases & Robustness
 
