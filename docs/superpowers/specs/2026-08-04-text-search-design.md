@@ -90,7 +90,8 @@ All changes are in the webview layer (`webview-ui/`). No extension-host, protoco
 - **Empty query:** no search, no highlights, counter cleared.
 - **Regex-special characters:** plain-text search (addon default) — no escaping, no regex.
 - **Theme switch:** widget colors resolve from CSS vars live; no code needed.
-- **Buffer growth while open:** search is a snapshot per keystroke; new output does not re-run the search (same as VS Code's terminal). Any keystroke re-searches.
+- **Buffer growth while open:** the addon re-runs the search automatically ~200ms after new output is written (`onWriteParsed` → `_updateMatches`, `noScroll`), so highlights track pi's output as it streams — better than the VS Code terminal, which only re-searches on the next keystroke. The active-match position is preserved.
+- **Match-count cap:** the addon caps highlighted matches at 1000 (`highlightLimit`); when the cap is exceeded the result counter cannot report a current index (event `resultIndex: -1`) and shows `1000+ matches` instead of `x of y`.
 - **Composer (Ctrl+E) open:** Ctrl+F still opens find (user decision); the composer's `tui.editor.cursorRight` Ctrl+F binding is shadowed while the panel is focused, exactly as the VS Code terminal shadows readline Ctrl+F. Right-arrow remains available for cursor movement.
 - **Copy/paste/links:** existing Ctrl+C/Ctrl+V/link handlers untouched; the find branch is added alongside them in the same handler.
 - **Key handler double-fire:** `attachCustomKeyEventHandler` runs for both keydown and the synthesized keypress; `open()` is idempotent (refocus + select all), so the two calls per Ctrl+F press are harmless.
