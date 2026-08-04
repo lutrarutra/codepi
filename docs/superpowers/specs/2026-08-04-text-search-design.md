@@ -90,7 +90,7 @@ All changes are in the webview layer (`webview-ui/`). No extension-host, protoco
 - **Empty query:** no search, no highlights, counter cleared.
 - **Regex-special characters:** plain-text search (addon default) — no escaping, no regex.
 - **Theme switch:** widget colors resolve from CSS vars live; no code needed.
-- **Buffer growth while open:** the addon re-runs the search automatically ~200ms after new output is written (`onWriteParsed` → `_updateMatches`, `noScroll`), so highlights track pi's output as it streams — better than the VS Code terminal, which only re-searches on the next keystroke. The active-match position is preserved.
+- **Buffer growth while open:** the addon's auto-research (~200ms after output pauses) is **disabled** (widget-level `_updateMatches` no-op, private API pinned to `@xterm/addon-search@^0.16.0`): pi repaints the visible screen in place (`\x1b[2J` + redraw) while responses stream, so the text under the current match changes between key presses, and re-searching from the stale selection made the current match jump to arbitrary nearby matches. Instead, navigation is **marker-anchored**: after every search the current match's line is tracked with an xterm marker (survives scrolls/trims/row shifts) and the selection is re-seeded at the marker before each next/previous press — deterministic continuation from the match the user last saw.
 - **Match-count cap:** the addon caps highlighted matches at 1000 (`highlightLimit`); when the cap is exceeded the result counter cannot report a current index (event `resultIndex: -1`) and shows `1000+ matches` instead of `x of y`.
 - **Composer (Ctrl+E) open:** Ctrl+F still opens find (user decision); the composer's `tui.editor.cursorRight` Ctrl+F binding is shadowed while the panel is focused, exactly as the VS Code terminal shadows readline Ctrl+F. Right-arrow remains available for cursor movement.
 - **Copy/paste/links:** existing Ctrl+C/Ctrl+V/link handlers untouched; the find branch is added alongside them in the same handler.
@@ -99,7 +99,7 @@ All changes are in the webview layer (`webview-ui/`). No extension-host, protoco
 
 ## Testing
 
-The webview layer has no unit-test harness (standing decision; find is DOM glue over the addon — adding jsdom infra is out of scope). Verification:
+The webview layer has no unit-test harness for the React tabs; the find widget, however, runs the **real xterm 6 + real addon in jsdom** (canvas/matchMedia/ResizeObserver stubs) — `resources/extensions/__tests__/find-widget.test.ts` (4 tests: order, wrapped lines, repaint stability, row shifts), mirroring the scrollback-filter tests' direct-path import pattern. jsdom is a root devDependency. Verification:
 
 1. **Type check:** `npm --prefix webview-ui run build` — `tsc --noEmit` catches addon API misuse and wiring errors in `terminal.ts`.
 2. **Bundle check:** root `npm run build` — `webview-ui/dist/terminal.js` contains the addon + widget CSS (inlined).

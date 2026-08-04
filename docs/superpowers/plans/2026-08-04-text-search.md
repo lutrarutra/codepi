@@ -14,10 +14,10 @@
 - Only new dependency: `@xterm/addon-search@^0.16.0` (peer-compatible with `@xterm/xterm@^6`).
 - Match colors follow VS Code semantics (verified against the built-in terminal): **other** matches use `--vscode-terminal-findMatchHighlightBackground` (yellow), **current** match uses `--vscode-terminal-findMatchBackground` (stronger accent). The addon's d.ts demands `#RRGGBB` for background colors but xterm's color parser accepts 8-digit hex/rgba — pass raw CSS var values through.
 - The addon caps highlighted matches at 1000 (`highlightLimit` default); when exceeded, `onDidChangeResults` reports `resultIndex: -1` — the counter must show `1000+ matches` (not `x of y`).
-- The addon re-runs the search automatically ~200ms after new output (`onWriteParsed` → `_updateMatches` with `noScroll`) — do not add our own re-search.
+- The addon's auto-research (`_updateMatches` via `onWriteParsed`/`onResize`) is **disabled at the widget level** (private API, pinned to `@xterm/addon-search@^0.16.0`) and replaced with **marker-anchored navigation**: pi repaints the visible screen in place while responses stream, so the stale selection makes both the auto-research and plain next/previous land arbitrarily. After each search, track the current match's line via `term.registerMarker(sel.start.y - (baseY + cursorY))`; before each navigation, re-seed the selection at the marker (`term.select(x, row, 1)`) so the addon continues from the match the user last saw.
 - `onDidChangeResults` only fires when `decorations` are passed to `findNext`/`findPrevious` — always pass them.
 - Follow `terminal.ts` conventions: `cssVar(name, fallback)` helper, `isKey`/`ctrlLike` key matching, defensive try/catch around addon calls (terminal may be disposed).
-- The webview has no unit-test harness (standing decision) — each task's test cycle is `tsc --noEmit` + vite build + the F5 checks listed in the task.
+- The webview has no unit-test harness for the React tabs; the find widget gets real jsdom regression tests (`resources/extensions/__tests__/find-widget.test.ts`, running the real xterm + addon with canvas/matchMedia/ResizeObserver stubs, direct-path imports like the scrollback-filter tests; jsdom is a root devDependency). Each task's test cycle is `tsc --noEmit` + vite build + vitest + the F5 checks listed in the task.
 - The repo has uncommitted user WIP (Compact Mode etc.) — commit only this plan's files, never `git add -A`.
 - The widget must render above the loading overlay (`#loading` is `z-index: 10`; widget `z-index: 30`).
 
@@ -706,7 +706,7 @@ Run the Extension Development Host (F5), restore/open a CodePi session with some
 - Esc closes; all highlights gone; focus + TUI cursor restored.
 - Close and reopen (Ctrl+F): the query and toggle states are restored, highlights re-applied.
 - Click the terminal grid while the widget is open: current-match accent disappears (blur), the widget stays open; clicking back into the input restores it on the next search.
-- While pi is generating output, matches for a live query re-highlight within ~200ms of new output without touching the current match.
+- While pi is generating output (screen repaints), the current match stays put: no auto-research jumps (the widget suppresses `_updateMatches`), and arrows continue from the marker-anchored match.
 - Search a term with >1000 occurrences (e.g. " " or "e" in a long session): the counter shows either "1000+ matches" or a capped "x of 1000" (never a wrong-looking "x of y" beyond the cap).
 
 - [ ] **Step 5: Commit**
