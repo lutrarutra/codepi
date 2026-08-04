@@ -130,7 +130,7 @@ export function createFindWidget(
  container: HTMLElement,
 ): FindWidget {
  // Search state (remembered for the panel's lifetime).
- let query = "";
+ const query = "";
  let open = false;
 
  // Widget DOM (built lazily on first open).
@@ -211,7 +211,7 @@ export function createFindWidget(
   container.appendChild(bar);
  };
 
- const open = (): void => {
+ const show = (): void => {
   if (open) {
    // Already open: refocus + select all (VS Code behavior).
    input?.focus();
@@ -226,7 +226,7 @@ export function createFindWidget(
   input!.select();
  };
 
- return { open, close, isOpen: () => open };
+ return { open: show, close, isOpen: () => open };
 }
 
 function makeButton(
@@ -633,7 +633,7 @@ export function createFindWidget(
   container.appendChild(bar);
  };
 
- const open = (): void => {
+ const show = (): void => {
   if (open) {
    // Already open: refocus + select all (VS Code behavior).
    input?.focus();
@@ -657,7 +657,7 @@ export function createFindWidget(
   updateCounter();
  });
 
- return { open, close, isOpen: () => open };
+ return { open: show, close, isOpen: () => open };
 }
 
 function makeButton(
