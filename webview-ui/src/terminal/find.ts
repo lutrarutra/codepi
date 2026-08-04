@@ -170,30 +170,35 @@ export function createFindWidget(
 		counter.setAttribute("aria-live", "polite");
 
 		caseBtn = makeButton(
-			"codepi-find-toggle codicon codicon-case-sensitive",
+			"codepi-find-toggle",
 			"Match Case",
 			"Toggle case-sensitive search",
 		);
+		caseBtn.textContent = "Aa";
 		wordBtn = makeButton(
-			"codepi-find-toggle codicon codicon-word-wrap",
+			"codepi-find-toggle",
 			"Match Whole Word",
 			"Toggle whole-word search",
 		);
+		wordBtn.textContent = "ab|";
 		const upBtn = makeButton(
-			"codepi-find-btn codicon codicon-chevron-up",
+			"codepi-find-btn",
 			"Previous Match",
 			"Previous match",
 		);
+		upBtn.textContent = "↑";
 		const downBtn = makeButton(
-			"codepi-find-btn codicon codicon-chevron-down",
+			"codepi-find-btn",
 			"Next Match",
 			"Next match",
 		);
+		downBtn.textContent = "↓";
 		const closeBtn = makeButton(
-			"codepi-find-btn codicon codicon-close",
+			"codepi-find-btn",
 			"Close (Esc)",
 			"Close find",
 		);
+		closeBtn.textContent = "×";
 		caseBtn.addEventListener("click", toggleCase);
 		wordBtn.addEventListener("click", toggleWord);
 		upBtn.addEventListener("click", prev);
