@@ -10,6 +10,8 @@ import {
 	createOsc8LinkHandler,
 	createTerminalLinkProvider,
 } from "./links";
+import { createScrollbackClearFilter } from "./scrollback";
+import { createFindWidget } from "./find";
 
 // VSCode injects acquireVsCodeApi() globally — get it once at module level
 const vscodeApi =
@@ -154,9 +156,8 @@ function readTheme() {
 
 function readMeta(name: string): string | undefined {
 	return (
-		document
-			.querySelector(`meta[name="${name}"]`)
-			?.getAttribute("content") ?? undefined
+		document.querySelector(`meta[name="${name}"]`)?.getAttribute("content") ??
+		undefined
 	);
 }
 
@@ -247,6 +248,8 @@ function hideLoading(): void {
 		term.loadAddon(fit);
 		term.open(container);
 		applyBackground();
+
+		const find = createFindWidget(term, container);
 
 		// Ctrl+click links (VS Code built-in terminal behavior): every word in
 		// the TUI output is a link candidate; the hover underline + tooltip only
@@ -379,6 +382,21 @@ function hideLoading(): void {
 				e.preventDefault();
 				return false;
 			}
+			if (ctrlLike && isKey("f")) {
+				// Ctrl+F: open the find widget (focus moves to its input, so
+				// the handler's keydown+keypress double-fire never reaches here
+				// twice; open() is idempotent anyway).
+				e.preventDefault();
+				find.open();
+				return false;
+			}
+			if (e.key === "Escape" && find.isOpen()) {
+				// Widget open but focus back on the terminal (clicked the grid):
+				// Esc closes it instead of reaching pi.
+				e.preventDefault();
+				find.close();
+				return false;
+			}
 			if (
 				(e.key === "Enter" || e.key === "\r" || e.key === "\n") &&
 				(e.shiftKey || e.ctrlKey)
@@ -421,7 +439,10 @@ function hideLoading(): void {
 			true,
 		);
 
-		// Output: extension → webview.
+		// Output: extension → webview. pi-tui's full re-renders emit
+		// \x1b[3J (clear scrollback), which would jump the viewport to the
+		// top and destroy the user's history — strip it from the stream.
+		const scrollbackFilter = createScrollbackClearFilter();
 		window.addEventListener("message", (e: MessageEvent) => {
 			const msg = e.data as {
 				command?: string;
@@ -431,7 +452,8 @@ function hideLoading(): void {
 			if (!msg || typeof msg !== "object") return;
 			switch (msg.command) {
 				case "tuiData":
-					if (typeof msg.data === "string") term.write(msg.data);
+					if (typeof msg.data === "string")
+						term.write(scrollbackFilter(msg.data));
 					break;
 				case "tuiClipboardData":
 					clipboardReadResolver?.(typeof msg.text === "string" ? msg.text : "");
@@ -507,8 +529,40 @@ function hideLoading(): void {
 		});
 
 		// Focus the terminal when clicking anywhere on the container.
-		container.addEventListener("mousedown", () => term.focus());
-		window.addEventListener("focus", () => term.focus());
+		container.addEventListener("mousedown", () => {
+			// Clicks inside the find widget never reach here (its own mousedown
+			// stops propagation); grid clicks refocus the terminal. When the
+			// widget is open, xterm itself refocuses its textarea on grid
+			// clicks — matching VS Code, where clicking the terminal while the
+			// find box is open moves focus there and leaves the box open.
+			if (!find.isOpen()) term.focus();
+		});
+		window.addEventListener("focus", () => {
+			// Alt-tab back while the widget is open must not yank focus out of
+			// the find input.
+			if (!find.isOpen()) term.focus();
+		});
+
+		// Ctrl+F fallback: the custom key handler above only sees keystrokes
+		// while xterm's textarea is focused; this catches the same chord when
+		// focus sits on the webview body (e.g. right after panel creation).
+		// open() is idempotent, so the double delivery (textarea case) is
+		// harmless. Esc-close for the body-focus case is handled here too.
+		document.addEventListener("keydown", (e: KeyboardEvent) => {
+			if (find.isOpen()) {
+				if (e.key === "Escape") {
+					e.preventDefault();
+					find.close();
+				}
+				return;
+			}
+			const ctrlLike = e.ctrlKey || e.metaKey;
+			const isF = e.code === "KeyF" || e.key.toLowerCase() === "f";
+			if (ctrlLike && isF) {
+				e.preventDefault();
+				find.open();
+			}
+		});
 
 		// Announce readiness; the extension starts the TUI only after both ready
 		// AND a size arrive, so the first frame renders at the real editor size.

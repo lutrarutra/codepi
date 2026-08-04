@@ -1,0 +1,63 @@
+/* Ctrl+F find widget — mirrors the VS Code built-in terminal find box.
+   Positioned top-right above the xterm grid and the loading overlay
+   (z-index 10). Colors resolve live from VS Code theme variables. */
+.codepi-find {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 30;
+  display: none;
+  align-items: center;
+  gap: 2px;
+  padding: 4px;
+  background: var(--vscode-editorWidget-background, #252526);
+  border: 1px solid var(--vscode-editorWidget-border, #454545);
+  border-radius: 2px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  font-family: var(--vscode-font-family, sans-serif);
+  font-size: 12px;
+}
+.codepi-find.open {
+  display: flex;
+}
+.codepi-find-input {
+  width: 180px;
+  padding: 3px 6px;
+  border: 1px solid transparent;
+  background: var(--vscode-input-background, #3c3c3c);
+  color: var(--vscode-input-foreground, #cccccc);
+  outline: none;
+}
+.codepi-find-input:focus {
+  border-color: var(--vscode-focusBorder, #007fd4);
+}
+.codepi-find-toggle,
+.codepi-find-btn {
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--vscode-foreground, #cccccc);
+  cursor: pointer;
+  border-radius: 2px;
+}
+.codepi-find-toggle:hover,
+.codepi-find-btn:hover {
+  background: var(--vscode-toolbar-hoverBackground, rgba(90, 93, 94, 0.31));
+}
+.codepi-find-toggle.active {
+  border-color: var(--vscode-inputOption-activeBorder, #007fd4);
+  background: var(--vscode-inputOption-activeBackground, rgba(0, 127, 212, 0.4));
+}
+.codepi-find-counter {
+  min-width: 48px;
+  text-align: center;
+  color: var(--vscode-descriptionForeground, #a0a0a0);
+  user-select: none;
+}
+.codepi-find-counter.no-results {
+  color: var(--vscode-errorForeground, #f14c4c);
+}
