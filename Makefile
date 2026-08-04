@@ -4,8 +4,9 @@
 # install/uninstall into VS Code, verification, and cleanup.
 #
 # The package version follows the latest git tag (e.g. v0.2.0 -> 0.2.0):
-# `make vsix` / `make install` sync package.json to the tag before packaging,
-# falling back to the package.json version when no tag is reachable.
+# `make vsix` / `make install` sync package.json to the tag before packaging
+# (output lands in dist/), falling back to the package.json version when no
+# tag is reachable.
 #
 # Usage: `make help` lists all rules.
 
@@ -65,12 +66,14 @@ verify: check-types unit smoke ## Full pre-release check (types + tests + smoke)
 ## ── Package ─────────────────────────────────────────────────
 
 package: vsix ## Alias for `vsix`
-vsix: ## Build the .vsix at the latest git tag version (vsce runs the prepublish build first)
+vsix: ## Build the .vsix into dist/ at the latest git tag version (vsce runs the prepublish build first)
 	@$(MAKE) _sync-version
-	@v=$$(node -p "require('./package.json').version"); \
-	echo "Packaging codepi-$$v.vsix …"; \
-	$(VSCE) package -o "codepi-$$v.vsix"; \
-	echo "Packaged: codepi-$$v.vsix"
+	@mkdir -p dist; \
+	v=$$(node -p "require('./package.json').version"); \
+	vsix="dist/codepi-$$v.vsix"; \
+	echo "Packaging $$vsix …"; \
+	$(VSCE) package -o "$$vsix"; \
+	echo "Packaged: $$vsix"
 
 _sync-version: ## Sync package.json version to the latest git tag (internal)
 	@if [ -z "$(GIT_VERSION)" ]; then \
@@ -88,8 +91,8 @@ release: verify package ## Verify everything, then produce the .vsix
 
 ## ── Install ─────────────────────────────────────────────────
 
-install: vsix ## Install the built .vsix into VS Code (force-replaces)
-	@code --install-extension "codepi-$$(node -p "require('./package.json').version").vsix" --force
+# install: vsix ## Install the built .vsix from dist/ into VS Code (force-replaces)
+# 	@code --install-extension "dist/codepi-$$(node -p "require('./package.json').version").vsix" --force
 
 uninstall: ## Uninstall CodePi from VS Code
 	code --uninstall-extension lutrarutra.codepi
@@ -97,7 +100,7 @@ uninstall: ## Uninstall CodePi from VS Code
 ## ── Cleanup ─────────────────────────────────────────────────
 
 clean: ## Remove build outputs and packaged .vsix files
-	rm -rf dist webview-ui/dist *.vsix
+	rm -rf dist webview-ui/dist dist/*.vsix
 
 ## ── Misc ────────────────────────────────────────────────────
 
