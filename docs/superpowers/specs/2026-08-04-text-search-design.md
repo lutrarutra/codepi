@@ -78,7 +78,7 @@ All changes are in the webview layer (`webview-ui/`). No extension-host, protoco
 - Bar pinned top-right of the panel: `position: absolute; top: ~8px; right: ~8px; z-index` above the xterm grid and the loading overlay; VS Code find-widget border/background (`--vscode-editorWidget-background`, `--vscode-editorWidget-border`, `--vscode-input-background`, `--vscode-input-foreground`, focused `--vscode-focusBorder`).
 - Element order (left → right): input, Aa, ab|, ↑, ↓, "x of y", ×.
 - Toggle active state: `--vscode-inputOption-activeBorder` + active background, matching VS Code's widget.
-- Match colors: matches `var(--vscode-terminal-findMatchBackground, …)` (yellow), current match `var(--vscode-terminal-findMatchHighlightBackground, …)` (stronger accent); sensible dark/light fallbacks.
+- Match colors (VS Code semantics, matching the built-in terminal): other matches `var(--vscode-terminal-findMatchHighlightBackground, …)` (yellow), current match `var(--vscode-terminal-findMatchBackground, …)` (stronger accent); sensible dark/light fallbacks.
 - Zero matches: counter in `--vscode-errorForeground` red.
 - Codicons: VS Code injects the codicon font into webviews, so use `.codicon` classes (`codicon-case-sensitive`, `codicon-word-wrap`, `codicon-chevron-up/down`, `codicon-close`); if the font fails to render, the buttons still work (aria-labels + title tooltips).
 
@@ -93,6 +93,8 @@ All changes are in the webview layer (`webview-ui/`). No extension-host, protoco
 - **Buffer growth while open:** search is a snapshot per keystroke; new output does not re-run the search (same as VS Code's terminal). Any keystroke re-searches.
 - **Composer (Ctrl+E) open:** Ctrl+F still opens find (user decision); the composer's `tui.editor.cursorRight` Ctrl+F binding is shadowed while the panel is focused, exactly as the VS Code terminal shadows readline Ctrl+F. Right-arrow remains available for cursor movement.
 - **Copy/paste/links:** existing Ctrl+C/Ctrl+V/link handlers untouched; the find branch is added alongside them in the same handler.
+- **Key handler double-fire:** `attachCustomKeyEventHandler` runs for both keydown and the synthesized keypress; `open()` is idempotent (refocus + select all), so the two calls per Ctrl+F press are harmless.
+- **Focus interplay while open:** clicking inside the widget keeps input focus; clicking the terminal body moves focus to the terminal while the widget stays open (same as VS Code's terminal) — keystrokes then reach pi until the input is clicked again. Esc pressed while focus is on the terminal also closes the widget (one extra branch in the key handler).
 
 ## Testing
 
