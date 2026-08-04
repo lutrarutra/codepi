@@ -26,35 +26,37 @@ function cssVar(name: string, fallback: string): string {
  * land in the widget's own <input> while open, so nothing leaks to pi.
  */
 export function createFindWidget(
-term: Terminal,
-container: HTMLElement,
+	term: Terminal,
+	container: HTMLElement,
+	onNewSession?: () => void,
 ): FindWidget {
-const addon = new SearchAddon();
-term.loadAddon(addon);
+	const addon = new SearchAddon();
+	term.loadAddon(addon);
 
-// pi's TUI repaints the visible screen in place (\x1b[2J + redraw) while
-// responses stream, so the text under the current match can change (or
-// rows shift) between key presses. The addon's auto-research (200ms after
-// output pauses, `_updateMatches` via onWriteParsed/onResize) re-selects
-// from the raw selection position — which goes stale under repaints and
-// makes the current match jump arbitrarily. The widget's marker-anchored
-// navigation below is the source of truth, so disable the auto-research.
-// Private API — pinned to @xterm/addon-search@^0.16.0.
-(addon as unknown as { _updateMatches: () => void })._updateMatches = () => {};
+	// pi's TUI repaints the visible screen in place (\x1b[2J + redraw) while
+	// responses stream, so the text under the current match can change (or
+	// rows shift) between key presses. The addon's auto-research (200ms after
+	// output pauses, `_updateMatches` via onWriteParsed/onResize) re-selects
+	// from the raw selection position — which goes stale under repaints and
+	// makes the current match jump arbitrarily. The widget's marker-anchored
+	// navigation below is the source of truth, so disable the auto-research.
+	// Private API — pinned to @xterm/addon-search@^0.16.0.
+	(addon as unknown as { _updateMatches: () => void })._updateMatches =
+		() => {};
 
-// Search state (remembered for the panel's lifetime).
-let query = "";
-let caseSensitive = false;
-let wholeWord = false;
-let open = false;
+	// Search state (remembered for the panel's lifetime).
+	let query = "";
+	let caseSensitive = false;
+	let wholeWord = false;
+	let open = false;
 
-// Result state, fed by addon.onDidChangeResults.
-let resultCount = 0;
-let resultIndex = -1;
+	// Result state, fed by addon.onDidChangeResults.
+	let resultCount = 0;
+	let resultIndex = -1;
 
-// The current match's line, tracked via an xterm marker so it survives
-// buffer scrolls, row shifts (insert/delete lines) and repaints.
-let anchorMarker: { line: number; dispose: () => void } | null = null;
+	// The current match's line, tracked via an xterm marker so it survives
+	// buffer scrolls, row shifts (insert/delete lines) and repaints.
+	let anchorMarker: { line: number; dispose: () => void } | null = null;
 
 	// Widget DOM (built lazily on first open).
 	let bar: HTMLDivElement | null = null;
@@ -287,6 +289,15 @@ let anchorMarker: { line: number; dispose: () => void } | null = null;
 			} else if (e.key === "ArrowDown") {
 				e.preventDefault();
 				next();
+			} else if (
+				(e.ctrlKey || e.metaKey) &&
+				(e.code === "KeyN" || e.key.toLowerCase() === "n")
+			) {
+				// Ctrl+N while searching: close the widget and start a new
+				// CodePi session (mirrors the terminal-grid Ctrl+N binding).
+				e.preventDefault();
+				close();
+				onNewSession?.();
 			} else if (
 				(e.ctrlKey || e.metaKey) &&
 				(e.code === "KeyF" || e.key.toLowerCase() === "f")

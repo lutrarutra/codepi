@@ -68,7 +68,8 @@ export type SettingsMessage =
 	| { command: "settings:setAskAllowedTools"; tools: string[] }
 	| { command: "settings:openFile"; file: "settings" | "models" | "auth" }
 	| { command: "settings:refresh" }
-	| { command: "settings:openSessions" };
+	| { command: "settings:openSessions" }
+	| { command: "settings:openExtensions" };
 
 export type SettingsReply =
 	| { command: "settings:data"; data: DashboardData }

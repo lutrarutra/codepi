@@ -54,7 +54,6 @@ const DEFAULT_TOOLS = [
 	"edit",
 	"write",
 	"todo",
-	"ask_user_question",
 ];
 
 function createMockPi() {
@@ -83,11 +82,25 @@ function createMockPi() {
 		sendMessage: vi.fn(),
 	};
 
-	return { api, handlers, commands, entries, statuses, getActiveTools: () => activeTools, setActiveTools: (t: string[]) => (activeTools = [...t]) };
+	return {
+		api,
+		handlers,
+		commands,
+		entries,
+		statuses,
+		getActiveTools: () => activeTools,
+		setActiveTools: (t: string[]) => (activeTools = [...t]),
+	};
 }
 
 function createBranchEntry(customType: string, data: unknown) {
-	return { type: "custom", customType, data, id: Math.random().toString(36), branch: [] };
+	return {
+		type: "custom",
+		customType,
+		data,
+		id: Math.random().toString(36),
+		branch: [],
+	};
 }
 
 function createCtx(overrides: Record<string, unknown> = {}) {
@@ -119,7 +132,10 @@ function load() {
 }
 
 /** Invoke the session_start handler (replays persisted mode + applies tools). */
-async function startSession(mock: ReturnType<typeof load>, branch: unknown[] = []) {
+async function startSession(
+	mock: ReturnType<typeof load>,
+	branch: unknown[] = [],
+) {
 	const handler = mock.handlers.get("session_start")?.[0];
 	expect(handler).toBeDefined();
 	const { ctx, notify, confirm, statuses } = createCtx({ branch });
@@ -197,11 +213,7 @@ describe("codepi-modes: registration", () => {
 		for (const name of ["codepi-ask", "codepi-plan", "codepi-implement"]) {
 			expect(mock.commands.has(name), `/${name}`).toBe(true);
 		}
-		for (const event of [
-			"session_start",
-			"tool_call",
-			"before_agent_start",
-		]) {
+		for (const event of ["session_start", "tool_call", "before_agent_start"]) {
 			expect(mock.handlers.has(event), event).toBe(true);
 		}
 	});
@@ -292,7 +304,9 @@ describe("codepi-modes: tool restrictions", () => {
 			createBranchEntry(MODE_ENTRY_TYPE, { mode: "plan" }),
 		]);
 		// Order-insensitive: restored tools append at the end.
-		expect([...mock.getActiveTools()].sort()).toEqual([...DEFAULT_TOOLS].sort());
+		expect([...mock.getActiveTools()].sort()).toEqual(
+			[...DEFAULT_TOOLS].sort(),
+		);
 	});
 
 	it("does not touch tools when switching implement → plan", async () => {
@@ -355,14 +369,18 @@ describe("codepi-modes: mode transitions", () => {
 
 	it("plan → implement requires user confirmation", async () => {
 		const mock = load();
-		await startSession(mock, [createBranchEntry(MODE_ENTRY_TYPE, { mode: "plan" })]);
+		await startSession(mock, [
+			createBranchEntry(MODE_ENTRY_TYPE, { mode: "plan" }),
+		]);
 		const { confirm } = await runCommand(mock, "codepi-implement");
 		expect(confirm).toHaveBeenCalled();
 	});
 
 	it("stays in plan when the user declines the confirmation", async () => {
 		const mock = load();
-		await startSession(mock, [createBranchEntry(MODE_ENTRY_TYPE, { mode: "plan" })]);
+		await startSession(mock, [
+			createBranchEntry(MODE_ENTRY_TYPE, { mode: "plan" }),
+		]);
 		const { statuses, notify } = await runCommand(mock, "codepi-implement", {
 			confirmResult: false,
 		});
@@ -372,7 +390,9 @@ describe("codepi-modes: mode transitions", () => {
 
 	it("switches to implement when the user confirms", async () => {
 		const mock = load();
-		await startSession(mock, [createBranchEntry(MODE_ENTRY_TYPE, { mode: "plan" })]);
+		await startSession(mock, [
+			createBranchEntry(MODE_ENTRY_TYPE, { mode: "plan" }),
+		]);
 		const { statuses } = await runCommand(mock, "codepi-implement", {
 			confirmResult: true,
 		});
@@ -381,7 +401,9 @@ describe("codepi-modes: mode transitions", () => {
 
 	it("no-ops when already in the target mode", async () => {
 		const mock = load();
-		await startSession(mock, [createBranchEntry(MODE_ENTRY_TYPE, { mode: "ask" })]);
+		await startSession(mock, [
+			createBranchEntry(MODE_ENTRY_TYPE, { mode: "ask" }),
+		]);
 		const { notify } = await runCommand(mock, "codepi-ask");
 		expect(notify).toHaveBeenCalledWith(
 			"Already in Ask mode (read-only).",
@@ -393,7 +415,9 @@ describe("codepi-modes: mode transitions", () => {
 describe("codepi-modes: mode-change notice to the agent", () => {
 	it("notifies the agent when switching ask → implement (tools now enabled)", async () => {
 		const mock = load();
-		await startSession(mock, [createBranchEntry(MODE_ENTRY_TYPE, { mode: "ask" })]);
+		await startSession(mock, [
+			createBranchEntry(MODE_ENTRY_TYPE, { mode: "ask" }),
+		]);
 		await runCommand(mock, "codepi-implement");
 		expect(mock.api.sendMessage).toHaveBeenCalledTimes(1);
 		const [message, options] = mock.api.sendMessage.mock.calls[0];
@@ -425,7 +449,9 @@ describe("codepi-modes: mode-change notice to the agent", () => {
 
 	it("does not notify on a no-op transition", async () => {
 		const mock = load();
-		await startSession(mock, [createBranchEntry(MODE_ENTRY_TYPE, { mode: "ask" })]);
+		await startSession(mock, [
+			createBranchEntry(MODE_ENTRY_TYPE, { mode: "ask" }),
+		]);
 		await runCommand(mock, "codepi-ask");
 		expect(mock.api.sendMessage).not.toHaveBeenCalled();
 	});
@@ -440,7 +466,9 @@ describe("codepi-modes: mode-change notice to the agent", () => {
 describe("codepi-modes: tool_call blocking in ask mode", () => {
 	it("blocks edit with a reason in ask mode", async () => {
 		const mock = load();
-		await startSession(mock, [createBranchEntry(MODE_ENTRY_TYPE, { mode: "ask" })]);
+		await startSession(mock, [
+			createBranchEntry(MODE_ENTRY_TYPE, { mode: "ask" }),
+		]);
 		const { result, notify } = await emitToolCall(mock, "edit");
 		expect(result).toEqual({
 			block: true,
@@ -454,17 +482,19 @@ describe("codepi-modes: tool_call blocking in ask mode", () => {
 
 	it("blocks write in ask mode", async () => {
 		const mock = load();
-		await startSession(mock, [createBranchEntry(MODE_ENTRY_TYPE, { mode: "ask" })]);
+		await startSession(mock, [
+			createBranchEntry(MODE_ENTRY_TYPE, { mode: "ask" }),
+		]);
 		const { result } = await emitToolCall(mock, "write");
 		expect(result?.block).toBe(true);
 	});
 
 	it("allows read-only tools but blocks bash in ask mode", async () => {
 		const mock = load();
-		await startSession(mock, [createBranchEntry(MODE_ENTRY_TYPE, { mode: "ask" })]);
-		for (const tool of [
-			...READ_ONLY_TOOL_BASELINE,
-		]) {
+		await startSession(mock, [
+			createBranchEntry(MODE_ENTRY_TYPE, { mode: "ask" }),
+		]);
+		for (const tool of [...READ_ONLY_TOOL_BASELINE]) {
 			const { result } = await emitToolCall(mock, tool);
 			expect(result, tool).toBeUndefined();
 		}
@@ -474,7 +504,9 @@ describe("codepi-modes: tool_call blocking in ask mode", () => {
 
 	it("blocks third-party extension tools in ask mode", async () => {
 		const mock = load();
-		await startSession(mock, [createBranchEntry(MODE_ENTRY_TYPE, { mode: "ask" })]);
+		await startSession(mock, [
+			createBranchEntry(MODE_ENTRY_TYPE, { mode: "ask" }),
+		]);
 		for (const tool of ["subagent", "subagent_wait", "intercom", "todo"]) {
 			const { result, notify } = await emitToolCall(mock, tool);
 			expect(result?.block, tool).toBe(true);
@@ -489,7 +521,9 @@ describe("codepi-modes: tool_call blocking in ask mode", () => {
 	it("allows tools whitelisted in codepi.modes.ask.allowedTools", async () => {
 		writeAskAllowedTools(["web_search", "fetch_content"]);
 		const mock = load();
-		await startSession(mock, [createBranchEntry(MODE_ENTRY_TYPE, { mode: "ask" })]);
+		await startSession(mock, [
+			createBranchEntry(MODE_ENTRY_TYPE, { mode: "ask" }),
+		]);
 		const allowed = await emitToolCall(mock, "web_search");
 		expect(allowed.result).toBeUndefined();
 		const allowed2 = await emitToolCall(mock, "fetch_content");
@@ -510,7 +544,9 @@ describe("codepi-modes: tool_call blocking in ask mode", () => {
 
 	it("does not block edit/write in plan mode", async () => {
 		const mock = load();
-		await startSession(mock, [createBranchEntry(MODE_ENTRY_TYPE, { mode: "plan" })]);
+		await startSession(mock, [
+			createBranchEntry(MODE_ENTRY_TYPE, { mode: "plan" }),
+		]);
 		for (const tool of ["edit", "write"]) {
 			const { result } = await emitToolCall(mock, tool);
 			expect(result, tool).toBeUndefined();
@@ -519,7 +555,9 @@ describe("codepi-modes: tool_call blocking in ask mode", () => {
 
 	it("does not block extension tools in plan/implement modes", async () => {
 		const mock = load();
-		await startSession(mock, [createBranchEntry(MODE_ENTRY_TYPE, { mode: "plan" })]);
+		await startSession(mock, [
+			createBranchEntry(MODE_ENTRY_TYPE, { mode: "plan" }),
+		]);
 		for (const tool of ["subagent", "todo", "bash"]) {
 			const { result } = await emitToolCall(mock, tool);
 			expect(result, tool).toBeUndefined();
@@ -530,7 +568,9 @@ describe("codepi-modes: tool_call blocking in ask mode", () => {
 describe("codepi-modes: system prompt injection", () => {
 	it("injects ask instructions and preserves the base prompt", async () => {
 		const mock = load();
-		await startSession(mock, [createBranchEntry(MODE_ENTRY_TYPE, { mode: "ask" })]);
+		await startSession(mock, [
+			createBranchEntry(MODE_ENTRY_TYPE, { mode: "ask" }),
+		]);
 		const { result, basePrompt } = await emitBeforeAgentStart(mock);
 		expect(result.systemPrompt.startsWith(basePrompt)).toBe(true);
 		expect(result.systemPrompt).toContain("## MODE: ASK (READ-ONLY)");
@@ -539,10 +579,12 @@ describe("codepi-modes: system prompt injection", () => {
 
 	it("injects plan instructions for plan mode", async () => {
 		const mock = load();
-		await startSession(mock, [createBranchEntry(MODE_ENTRY_TYPE, { mode: "plan" })]);
+		await startSession(mock, [
+			createBranchEntry(MODE_ENTRY_TYPE, { mode: "plan" }),
+		]);
 		const { result } = await emitBeforeAgentStart(mock);
 		expect(result.systemPrompt).toContain("## MODE: PLAN (PLANNING ONLY)");
-		expect(result.systemPrompt).toContain("ask_user_question");
+		expect(result.systemPrompt).not.toContain("ask_user_question");
 		expect(result.systemPrompt).toContain("/codepi-implement");
 	});
 
@@ -601,7 +643,6 @@ describe("codepi-modes: ask allowlist settings", () => {
 			"list_dir",
 			"find_files",
 			"get_diagnostics",
-			"ask_user_question",
 			"web_search",
 			"fetch_content",
 			"get_editor_context",
@@ -660,7 +701,9 @@ describe("codepi-modes: ask allowlist settings", () => {
 
 	it("blocks unknown extension tools even with no settings (defaults apply)", async () => {
 		const mock = load();
-		await startSession(mock, [createBranchEntry(MODE_ENTRY_TYPE, { mode: "ask" })]);
+		await startSession(mock, [
+			createBranchEntry(MODE_ENTRY_TYPE, { mode: "ask" }),
+		]);
 		// web_search is in the default allowlist.
 		const allowed = await emitToolCall(mock, "web_search");
 		expect(allowed.result).toBeUndefined();

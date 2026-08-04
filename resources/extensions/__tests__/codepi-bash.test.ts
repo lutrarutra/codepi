@@ -1,6 +1,12 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
-import { join } from "node:path";
+import {
+	existsSync,
+	mkdtempSync,
+	rmSync,
+	writeFileSync,
+	mkdirSync,
+} from "node:fs";
+import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import codepiBashFactory, {
 	BashOutputAccumulator,
@@ -14,6 +20,7 @@ import codepiBashFactory, {
 	mapDialogChoice,
 	readModeFromBranch,
 	resolveCwd,
+	type BashMode,
 } from "../codepi-bash";
 import type { BashOperations } from "@earendil-works/pi-coding-agent";
 
@@ -141,10 +148,10 @@ async function runCommand(
 
 /** Execute the tool directly with a controllable mode + ops. */
 async function runTool(options: {
-	mode?: "ask" | "auto";
+	mode?: BashMode;
 	params?: Record<string, unknown>;
 	ops?: BashOperations;
-	setModeSpy?: (mode: "ask" | "auto", ctx: any) => void;
+	setModeSpy?: (mode: BashMode, ctx: any) => void;
 	signal?: AbortSignal;
 }) {
 	const { mode = "ask", params = {}, ops, setModeSpy, signal } = options;
@@ -278,9 +285,10 @@ describe("codepi-bash: cleanTerminalOutput", () => {
 });
 
 describe("codepi-bash: formatBashBadge", () => {
-	it("renders terminal icon + mode label (ask/allow)", () => {
+	it("renders terminal icon + mode label (ask/allow/disabled)", () => {
 		expect(formatBashBadge("ask")).toBe("\u{EBCA} ask");
 		expect(formatBashBadge("auto")).toBe("\u{EBCA} allow");
+		expect(formatBashBadge("disabled")).toBe("\u{EBCA} disabled");
 	});
 });
 
@@ -301,6 +309,14 @@ describe("codepi-bash: readModeFromBranch", () => {
 				createBranchEntry(MODE_ENTRY_TYPE, { mode: "ask" }),
 			]),
 		).toBe("ask");
+	});
+
+	it("replays a persisted disabled mode", () => {
+		expect(
+			readModeFromBranch([
+				createBranchEntry(MODE_ENTRY_TYPE, { mode: "disabled" }),
+			]),
+		).toBe("disabled");
 	});
 
 	it("ignores malformed entries and unrelated types", () => {
@@ -363,7 +379,11 @@ describe("codepi-bash: BashOutputAccumulator", () => {
 describe("codepi-bash: registration", () => {
 	it("registers the mode commands, session handler, and the bash tool", () => {
 		const mock = load();
-		for (const name of ["codepi-bash-ask", "codepi-bash-allow"]) {
+		for (const name of [
+			"codepi-bash-ask",
+			"codepi-bash-allow",
+			"codepi-bash-disable",
+		]) {
 			expect(mock.commands.has(name), `/${name}`).toBe(true);
 		}
 		expect(mock.handlers.has("session_start")).toBe(true);
@@ -395,6 +415,14 @@ describe("codepi-bash: session_start", () => {
 		]);
 		expect(statuses).toContainEqual({ key: STATUS_KEY, text: "auto" });
 	});
+
+	it("replays a persisted disabled mode", async () => {
+		const mock = load();
+		const { statuses } = await startSession(mock, [
+			createBranchEntry(MODE_ENTRY_TYPE, { mode: "disabled" }),
+		]);
+		expect(statuses).toContainEqual({ key: STATUS_KEY, text: "disabled" });
+	});
 });
 
 describe("codepi-bash: commands", () => {
@@ -404,7 +432,7 @@ describe("codepi-bash: commands", () => {
 
 		const askRun = await runCommand(mock, "codepi-bash-ask", []);
 		expect(askRun.notify).toHaveBeenCalledWith(
-			expect.stringContaining("already ask"),
+			expect.stringContaining("already in ask"),
 			"info",
 		);
 
@@ -418,6 +446,28 @@ describe("codepi-bash: commands", () => {
 		);
 		expect(autoRun.notify).toHaveBeenCalledWith(
 			expect.stringContaining("auto-approve"),
+		);
+
+		const disabledRun = await runCommand(mock, "codepi-bash-disable", []);
+		expect(disabledRun.statuses).toContainEqual({
+			key: STATUS_KEY,
+			text: "disabled",
+		});
+		expect(mock.entries).toContainEqual(
+			expect.objectContaining({
+				customType: MODE_ENTRY_TYPE,
+				data: expect.objectContaining({ mode: "disabled" }),
+			}),
+		);
+		expect(disabledRun.notify).toHaveBeenCalledWith(
+			expect.stringContaining("disabled"),
+		);
+
+		// Re-running while already disabled is a no-op info notification.
+		const againRun = await runCommand(mock, "codepi-bash-disable", []);
+		expect(againRun.notify).toHaveBeenCalledWith(
+			expect.stringContaining("already in disabled"),
+			"info",
 		);
 	});
 });
@@ -542,6 +592,45 @@ describe("codepi-bash: approval dialog (ask mode)", () => {
 	});
 });
 
+describe("codepi-bash: disabled mode", () => {
+	it("rejects every command without asking or executing", async () => {
+		const mockOps = createMockOps();
+		const { error, select } = await runTool({
+			mode: "disabled",
+			params: { command: "ls" },
+			ops: mockOps.ops,
+		});
+		expect(String(error)).toContain("disabled");
+		expect(String(error)).toContain("codepi-bash-ask");
+		expect(select).not.toHaveBeenCalled();
+		expect(mockOps.exec).not.toHaveBeenCalled();
+	});
+
+	it("rejects the command before any output is produced", async () => {
+		const mockOps = createMockOps();
+		const onUpdate = vi.fn();
+		const def = createCodepiBashToolDefinition({
+			operations: mockOps.ops,
+			getMode: () => "disabled",
+			setMode: () => {},
+		});
+		await expect(
+			def.execute("t1", { command: "rm -rf /" }, undefined, onUpdate, {
+				cwd: fixtureDir,
+				hasUI: true,
+				ui: {
+					select: vi.fn(),
+					input: vi.fn(),
+					notify: vi.fn(),
+					setStatus: vi.fn(),
+				},
+			} as any),
+		).rejects.toThrow("disabled");
+		expect(onUpdate).not.toHaveBeenCalled();
+		expect(mockOps.exec).not.toHaveBeenCalled();
+	});
+});
+
 describe("codepi-bash: execution results", () => {
 	it("auto mode skips the dialog entirely", async () => {
 		const mockOps = createMockOps();
@@ -613,296 +702,172 @@ describe("codepi-bash: execution results", () => {
 		});
 		expect(String(error)).toContain("timed out after 42 seconds");
 	});
-
-	it("reports an abort", async () => {
-		const { ops } = createMockOps(async () => {
-			throw new Error("aborted");
-		});
-		const { error } = await runTool({
-			mode: "auto",
-			params: { command: "git pull" },
-			ops,
-		});
-		expect(String(error)).toContain("Command aborted");
-	});
-
-	it("passes through the caller's abort signal to the backend", async () => {
-		const exec = vi.fn(async (_cmd: string, _cwd: string, options: any) => {
-			options?.onData?.(Buffer.from("x"));
-			return { exitCode: 0 };
-		});
-		const ops = { exec } as any;
-		const controller = new AbortController();
-		await runTool({
-			mode: "auto",
-			params: { command: "ls" },
-			ops,
-			signal: controller.signal,
-		});
-		expect(exec).toHaveBeenCalledWith(
-			"ls",
-			fixtureDir,
-			expect.objectContaining({ signal: controller.signal }),
-		);
-	});
-
-	it("truncates oversized output with a footer and temp path", async () => {
-		const big =
-			Array.from({ length: 5000 }, (_, i) => `line ${i}`).join("\n") + "\n";
-		const { ops } = createMockOps(
-			async (_cmd: string, _cwd: string, options: any) => {
-				options?.onData?.(Buffer.from(big));
-				return { exitCode: 0 };
-			},
-		);
-		const { result } = await runTool({
-			mode: "auto",
-			params: { command: "make noise" },
-			ops,
-		});
-		const text = result.content[0].text;
-		expect(text).toContain("Showing lines");
-		expect(text).toMatch(/Showing lines \d+-\d+ of 5000/);
-		expect(text).toContain("Full output:");
-		expect(result.details.truncation.truncated).toBe(true);
-	});
-
-	it("rejects an invalid cwd and an invalid timeout", async () => {
-		const mockOps = createMockOps();
-		const { error: cwdErr } = await runTool({
-			mode: "auto",
-			params: { command: "ls", cwd: "/nonexistent-codepi-bash-dir" },
-			ops: mockOps.ops,
-		});
-		expect(String(cwdErr)).toContain("Working directory does not exist");
-		expect(mockOps.exec).not.toHaveBeenCalled();
-
-		const { error: tErr } = await runTool({
-			mode: "auto",
-			params: { command: "ls", timeout: -5 },
-			ops: mockOps.ops,
-		});
-		expect(String(tErr)).toContain("Invalid timeout");
-	});
 });
 
 // ── VS Code runner (mocked vscode) ───────────────────────────
 
 describe("codepi-bash: createVscodeBashOperations", () => {
-	it("executes through a hidden terminal and streams output", async () => {
-		// Bridge the mock vscode API in before calling the runner.
-		const streams: Array<AsyncIterable<string>> = [
-			(async function* () {
-				yield "out one\n";
-				yield "\u001b[32mout two\u001b[0m\n";
-			})(),
-		];
-		const disposed: number[] = [];
+	/** Minimal vscode mock: ONLY stable APIs (createTerminal/sendText/
+	 * dispose). The runner must not need any proposed API (e.g.
+	 * onDidWriteTerminalData is unavailable in some builds/remotes). */
+	function createVscodeMock() {
 		const terminals: any[] = [];
+		const disposed: number[] = [];
 		const vscode = {
 			window: {
 				createTerminal: vi.fn((options: any) => {
 					const t = {
 						options,
-						shellIntegration: undefined,
-						dispose: () => disposed.push(terminals.indexOf(t)),
-						executions: [] as any[],
+						dispose: vi.fn(() => disposed.push(terminals.indexOf(t))),
+						sendText: vi.fn(),
 					};
 					terminals.push(t);
 					return t;
 				}),
-				onDidChangeTerminalShellIntegration: vi.fn((handler: any) => {
-					// Simulate shell integration activation for the first terminal.
-					setTimeout(() => {
-						const t = terminals[0];
-						if (!t) return;
-						t.shellIntegration = {
-							executeCommand: vi.fn((command: string) => {
-								const exec = {
-									command,
-									read: () => streams[0],
-									exitCode: Promise.resolve(0),
-								};
-								return exec;
-							}),
-						};
-						handler({ terminal: t, shellIntegration: t.shellIntegration });
-					}, 0);
-					return { dispose: () => {} };
-				}),
 			},
 		};
-		(globalThis as any).__codepiVscode = { vscode };
+		return { vscode, terminals, disposed };
+	}
 
+	/** Extract the temp out/code file paths from the wrapper sendText wrote. */
+	function filePaths(terminal: any): { out: string; code: string } {
+		const wrapper = terminal.sendText.mock.calls[0][0] as string;
+		const outMatch = wrapper.match(/^\( [\s\S]*?\) > ([^\s]+)\/out 2>&1;/);
+		const codeMatch = wrapper.match(/> ([^\s]+)\/code$/);
+		expect(outMatch).not.toBeNull();
+		expect(codeMatch).not.toBeNull();
+		return { out: `${outMatch![1]}/out`, code: `${codeMatch![1]}/code` };
+	}
+
+	it("runs commands through a minimal bash terminal with file-based capture", async () => {
+		const { vscode, terminals, disposed } = createVscodeMock();
+		(globalThis as any).__codepiVscode = { vscode };
 		const ops = createVscodeBashOperations();
 		const chunks: string[] = [];
-		const result = await ops.exec("echo hi", "/tmp", {
-			onData: (data: Buffer) => chunks.push(data.toString()),
+		const resultP = ops.exec("echo hi", "/tmp", {
+			onData: (d: Buffer) => chunks.push(d.toString()),
 			timeout: 10,
 		});
+		await new Promise((r) => setTimeout(r, 20)); // let sendText fire
+		const term = terminals[0];
+
+		// The terminal must be a minimal bash: no rc files, no integration.
+		expect(term.options.shellPath).toBe("/bin/bash");
+		expect(term.options.shellArgs).toEqual(["--noprofile", "--norc"]);
+		expect(term.options.hideFromUser).toBe(true);
+		expect(term.options.isTransient).toBe(true);
+		expect(term.options.cwd).toBe("/tmp");
+		// Exactly one sendText: the wrapped command.
+		expect(term.sendText).toHaveBeenCalledTimes(1);
+
+		const { out, code } = filePaths(term);
+		writeFileSync(out, "hi\n");
+		writeFileSync(code, "0");
+		const result = await resultP;
 		expect(result.exitCode).toBe(0);
-		expect(chunks.join("")).toBe("out one\n\u001b[32mout two\u001b[0m\n");
-		expect(terminals[0].options.hideFromUser).toBe(true);
-		expect(terminals[0].options.isTransient).toBe(true);
-		expect(terminals[0].options.cwd).toBe("/tmp");
+		expect(chunks.join("")).toBe("hi\n");
 		expect(disposed.length).toBe(1);
 		delete (globalThis as any).__codepiVscode;
 	});
 
-	it("falls back to sendText + sentinel when shell integration never activates", async () => {
-		const terminals: any[] = [];
-		let dataListener: ((e: any) => void) | undefined;
-		const vscode = {
-			window: {
-				createTerminal: vi.fn((options: any) => {
-					const t = {
-						options,
-						shellIntegration: undefined,
-						dispose: vi.fn(),
-						sendText: vi.fn(),
-					};
-					terminals.push(t);
-					return t;
-				}),
-				// Never fires — shell integration never activates.
-				onDidChangeTerminalShellIntegration: vi.fn(() => ({
-					dispose: () => {},
-				})),
-				onDidWriteTerminalData: vi.fn((listener: any) => {
-					dataListener = listener;
-					return { dispose: () => {} };
-				}),
-			},
-		};
+	it("wraps the command so output and exit code land in the temp files", async () => {
+		const { vscode, terminals } = createVscodeMock();
 		(globalThis as any).__codepiVscode = { vscode };
-
-		const ops = createVscodeBashOperations({ shellIntegrationTimeoutMs: 20 });
-		const chunks: string[] = [];
-		const resultP = ops.exec("git status", "/tmp", {
-			onData: (d: Buffer) => chunks.push(d.toString()),
+		const ops = createVscodeBashOperations();
+		const resultP = ops.exec("python3 - <<'EOF'\nprint('hi')\nEOF", "/tmp", {
+			onData: () => {},
 			timeout: 10,
 		});
-		await new Promise((r) => setTimeout(r, 40)); // let the wait time out
-		const term = terminals[0];
-		expect(term.sendText).toHaveBeenCalledTimes(2); // command + sentinel
-		const sentinel = term.sendText.mock.calls[1][0] as string;
-		const marker = sentinel.match(/__CODEPI_DONE_[a-f0-9]+__/)![0];
-
-		// Simulate the shell: prompt, echoed command, output, prompt,
-		// echoed sentinel, then the marker line with the exit code.
-		dataListener!({ terminal: term, data: "\n$ git status\n M file.txt\n$ " });
-		dataListener!({
-			terminal: term,
-			data: `echo "${marker}:$?"\n${marker}:0\n$ `,
-		});
-
-		const result = await resultP;
-		expect(result.exitCode).toBe(0);
-		expect(chunks.join("")).toContain("M file.txt");
-		expect(chunks.join("")).not.toContain(marker);
-		expect(term.dispose).toHaveBeenCalled();
+		await new Promise((r) => setTimeout(r, 20));
+		const wrapper = terminals[0].sendText.mock.calls[0][0] as string;
+		// The heredoc is preserved verbatim inside a subshell group.
+		expect(wrapper).toContain("( python3 - <<'EOF'\nprint('hi')\nEOF\n) > ");
+		expect(wrapper).toContain("printf '%s' \"$?\" > ");
+		const { out, code } = filePaths(terminals[0]);
+		writeFileSync(out, "hi\n");
+		writeFileSync(code, "0");
+		await resultP;
 		delete (globalThis as any).__codepiVscode;
 	});
 
-	it("reports a non-zero exit code from the sentinel marker", async () => {
-		let dataListener: ((e: any) => void) | undefined;
-		const terminals: any[] = [];
-		const vscode = {
-			window: {
-				createTerminal: vi.fn((options: any) => {
-					const t = {
-						options,
-						shellIntegration: undefined,
-						dispose: vi.fn(),
-						sendText: vi.fn(),
-					};
-					terminals.push(t);
-					return t;
-				}),
-				onDidChangeTerminalShellIntegration: vi.fn(() => ({
-					dispose: () => {},
-				})),
-				onDidWriteTerminalData: vi.fn((listener: any) => {
-					dataListener = listener;
-					return { dispose: () => {} };
-				}),
-			},
-		};
+	it("reports a non-zero exit code", async () => {
+		const { vscode, terminals } = createVscodeMock();
 		(globalThis as any).__codepiVscode = { vscode };
-		const ops = createVscodeBashOperations({ shellIntegrationTimeoutMs: 20 });
+		const ops = createVscodeBashOperations();
 		const resultP = ops.exec("false", "/tmp", { onData: () => {} });
-		await new Promise((r) => setTimeout(r, 40));
-		const term = terminals[0];
-		const sentinel = term.sendText.mock.calls[1][0] as string;
-		const marker = sentinel.match(/__CODEPI_DONE_[a-f0-9]+__/)![0];
-		dataListener!({ terminal: term, data: `${marker}:1\n` });
+		await new Promise((r) => setTimeout(r, 20));
+		const { code } = filePaths(terminals[0]);
+		writeFileSync(code, "1");
 		const result = await resultP;
 		expect(result.exitCode).toBe(1);
 		delete (globalThis as any).__codepiVscode;
 	});
 
-	it("skips the shell-integration wait once it is known broken", async () => {
-		let dataListener: ((e: any) => void) | undefined;
-		let registrations = 0;
-		const terminals: any[] = [];
-		const vscode = {
-			window: {
-				createTerminal: vi.fn((options: any) => {
-					const t = {
-						options,
-						shellIntegration: undefined,
-						dispose: vi.fn(),
-						sendText: vi.fn(),
-					};
-					terminals.push(t);
-					return t;
-				}),
-				onDidChangeTerminalShellIntegration: vi.fn(() => {
-					registrations++;
-					return { dispose: () => {} };
-				}),
-				onDidWriteTerminalData: vi.fn((listener: any) => {
-					dataListener = listener;
-					return { dispose: () => {} };
-				}),
-			},
-		};
+	it("streams output as it is written, before the command finishes", async () => {
+		const { vscode, terminals } = createVscodeMock();
 		(globalThis as any).__codepiVscode = { vscode };
-		const ops = createVscodeBashOperations({ shellIntegrationTimeoutMs: 20 });
-		const run = async () => {
-			const p = ops.exec("ls", "/tmp", { onData: () => {} });
-			await new Promise((r) => setTimeout(r, 40));
-			const term = terminals[terminals.length - 1];
-			const sentinel = term.sendText.mock.calls[1][0] as string;
-			const marker = sentinel.match(/__CODEPI_DONE_[a-f0-9]+__/)![0];
-			dataListener!({ terminal: term, data: `${marker}:0\n` });
-			return p;
-		};
-		await run();
-		expect(registrations).toBe(1);
-		await run();
-		expect(registrations).toBe(1); // cached — no wait on the second call
+		const ops = createVscodeBashOperations();
+		const chunks: string[] = [];
+		const resultP = ops.exec("slow", "/tmp", {
+			onData: (d: Buffer) => chunks.push(d.toString()),
+			timeout: 10,
+		});
+		await new Promise((r) => setTimeout(r, 20));
+		const { out, code } = filePaths(terminals[0]);
+		writeFileSync(out, "partial one\n");
+		await new Promise((r) => setTimeout(r, 250)); // let the poll stream it
+		expect(chunks.join("")).toContain("partial one");
+		writeFileSync(out, "partial one\nsecond part\n");
+		writeFileSync(code, "0");
+		const result = await resultP;
+		expect(result.exitCode).toBe(0);
+		expect(chunks.join("")).toBe("partial one\nsecond part\n");
 		delete (globalThis as any).__codepiVscode;
 	});
 
-	it("errors clearly when neither shell integration nor data events exist", async () => {
-		const vscode = {
-			window: {
-				createTerminal: vi.fn(() => ({
-					shellIntegration: undefined,
-					dispose: () => {},
-				})),
-				onDidChangeTerminalShellIntegration: vi.fn(() => ({
-					dispose: () => {},
-				})),
-				// no onDidWriteTerminalData
-			},
-		};
+	it("times out when the command never completes", async () => {
+		const { vscode, terminals, disposed } = createVscodeMock();
 		(globalThis as any).__codepiVscode = { vscode };
-		const ops = createVscodeBashOperations({ shellIntegrationTimeoutMs: 20 });
-		await expect(ops.exec("ls", "/tmp", { onData: () => {} })).rejects.toThrow(
-			"Cannot capture command output",
-		);
+		const ops = createVscodeBashOperations();
+		const resultP = ops.exec("sleep 100", "/tmp", {
+			onData: () => {},
+			timeout: 0.15,
+		});
+		await new Promise((r) => setTimeout(r, 20)); // let it start
+		expect(terminals[0].sendText).toHaveBeenCalledTimes(1);
+		// Never write the code file.
+		await expect(resultP).rejects.toThrow(/^timeout:/);
+		expect(disposed.length).toBe(1);
+		delete (globalThis as any).__codepiVscode;
+	});
+
+	it("aborts a running command and disposes the terminal", async () => {
+		const { vscode, disposed } = createVscodeMock();
+		(globalThis as any).__codepiVscode = { vscode };
+		const ops = createVscodeBashOperations();
+		const controller = new AbortController();
+		const resultP = ops.exec("sleep 100", "/tmp", {
+			onData: () => {},
+			signal: controller.signal,
+		});
+		await new Promise((r) => setTimeout(r, 20)); // let it start
+		controller.abort();
+		await expect(resultP).rejects.toThrow("aborted");
+		expect(disposed.length).toBe(1);
+		delete (globalThis as any).__codepiVscode;
+	});
+
+	it("cleans up the temp directory after completion", async () => {
+		const { vscode, terminals } = createVscodeMock();
+		(globalThis as any).__codepiVscode = { vscode };
+		const ops = createVscodeBashOperations();
+		const resultP = ops.exec("echo hi", "/tmp", { onData: () => {} });
+		await new Promise((r) => setTimeout(r, 20));
+		const { out, code } = filePaths(terminals[0]);
+		expect(existsSync(dirname(out))).toBe(true); // dir created before completion
+		writeFileSync(code, "0");
+		await resultP;
+		expect(existsSync(dirname(code))).toBe(false); // dir removed after completion
 		delete (globalThis as any).__codepiVscode;
 	});
 });

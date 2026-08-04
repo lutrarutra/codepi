@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { SnapshotTree } from "./SnapshotTree";
 import type {
 	ExtensionsMessage,
@@ -13,6 +13,38 @@ declare global {
 }
 
 const vscode = window.acquireVsCodeApi();
+
+// Sidebar-wide tab switcher (Sessions | Extensions | Settings) — same markup
+// as the settings view; the host switches views via codepi.*Tab commands.
+function SidebarTabs({
+	active,
+	onSelect,
+}: {
+	active: "sessions" | "extensions" | "settings";
+	onSelect: (tab: "sessions" | "extensions" | "settings") => void;
+}): JSX.Element {
+	const tabs = [
+		{ id: "sessions", label: "Sessions" },
+		{ id: "extensions", label: "Extensions" },
+		{ id: "settings", label: "Settings" },
+	] as const;
+	return (
+		<nav className="sidebar-tabs" role="tablist" aria-label="CodePi sidebar">
+			{tabs.map((tab) => (
+				<button
+					key={tab.id}
+					type="button"
+					role="tab"
+					aria-selected={active === tab.id}
+					className={`sidebar-tab${active === tab.id ? " sidebar-tab-active" : ""}`}
+					onClick={() => onSelect(tab.id)}
+				>
+					{tab.label}
+				</button>
+			))}
+		</nav>
+	);
+}
 
 function modeLabel(snapshot: ExtensionsSnapshot): {
 	text: string;
@@ -73,6 +105,19 @@ export function ExtensionsApp() {
 
 	return (
 		<div className="ext-root">
+			<SidebarTabs
+				active="extensions"
+				onSelect={(tab) => {
+					if (tab === "sessions")
+						vscode.postMessage({
+							type: "openSessions",
+						} satisfies ExtensionsMessage);
+					if (tab === "settings")
+						vscode.postMessage({
+							type: "openSettings",
+						} satisfies ExtensionsMessage);
+				}}
+			/>
 			{snapshot && (
 				<div className="ext-header">
 					<div className={`ext-mode ext-mode-${header.tone}`}>
@@ -110,7 +155,10 @@ export function ExtensionsApp() {
 				</div>
 			)}
 			{busy && !snapshot && (
-				<div className="ext-busy">Scanning extensions…</div>
+				<div className="ext-busy" role="status">
+					<span className="loading-spinner" aria-hidden="true" />
+					<span>Scanning extensions…</span>
+				</div>
 			)}
 			{snapshot && (
 				<SnapshotTree snapshot={snapshot} query={query.trim().toLowerCase()} />

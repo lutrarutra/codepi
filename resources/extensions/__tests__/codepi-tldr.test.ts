@@ -44,6 +44,7 @@ function createCtx(
 		ui: {
 			setCompactMode: vi.fn(),
 			isCompactMode: vi.fn(() => undefined),
+			setWorkingVisible: vi.fn(),
 			notify: vi.fn(),
 			...uiOverrides,
 		},
@@ -118,10 +119,17 @@ describe("codepi-compact extension", () => {
 		const mock = createMockPi();
 		codepiTldrFactory(mock.api as any);
 		const sessionStart = mock.handlers.get("session_start")?.[0];
+		const agentStart = mock.handlers.get("agent_start")?.[0];
 		const toggle = mock.commands.get("codepi-toggle-tldr")?.handler;
 		expect(sessionStart).toBeDefined();
+		expect(agentStart).toBeDefined();
 		expect(toggle).toBeDefined();
-		return { mock, sessionStart: sessionStart!, toggle: toggle! };
+		return {
+			mock,
+			sessionStart: sessionStart!,
+			agentStart: agentStart!,
+			toggle: toggle!,
+		};
 	}
 
 	it("registers /codepi-toggle-tldr", () => {
@@ -182,5 +190,98 @@ describe("codepi-compact extension", () => {
 		const reloadCtx = createCtx([createBranchEntry(MODE_ENTRY_TYPE, entry)]);
 		await sessionStart({}, reloadCtx);
 		expect(reloadCtx.ui.setCompactMode).toHaveBeenCalledWith(false);
+	});
+});
+
+describe("working-loader gating in TL;DR mode", () => {
+	function load() {
+		const mock = createMockPi();
+		codepiTldrFactory(mock.api as any);
+		const sessionStart = mock.handlers.get("session_start")?.[0];
+		const agentStart = mock.handlers.get("agent_start")?.[0];
+		const agentEnd = mock.handlers.get("agent_end")?.[0];
+		const toggle = mock.commands.get("codepi-toggle-tldr")?.handler;
+		expect(sessionStart).toBeDefined();
+		expect(agentStart).toBeDefined();
+		expect(agentEnd).toBeDefined();
+		expect(toggle).toBeDefined();
+		return {
+			sessionStart: sessionStart!,
+			agentStart: agentStart!,
+			agentEnd: agentEnd!,
+			toggle: toggle!,
+		};
+	}
+
+	it("hides pi's working loader when TL;DR is on at session start", async () => {
+		const { sessionStart } = load();
+		const ctx = createCtx([]); // nothing configured → default enabled
+		await sessionStart({}, ctx);
+		expect(ctx.ui.setWorkingVisible).toHaveBeenCalledWith(false);
+	});
+
+	it("shows pi's working loader when TL;DR is off at session start", async () => {
+		writeFileSync(
+			join(settingsDir, "settings.json"),
+			JSON.stringify({ codepi: { tldrMode: false } }),
+		);
+		const { sessionStart } = load();
+		const ctx = createCtx([]);
+		await sessionStart({}, ctx);
+		expect(ctx.ui.setWorkingVisible).toHaveBeenCalledWith(true);
+	});
+
+	it("re-asserts loader visibility on agent_start", async () => {
+		const { agentStart } = load();
+		const ctx = createCtx([]);
+		await agentStart({}, ctx);
+		expect(ctx.ui.setWorkingVisible).toHaveBeenCalledWith(false);
+	});
+
+	it("toggle to ON between turns hides the loader", async () => {
+		const { toggle } = load();
+		const ctx = createCtx([]);
+		ctx.ui.isCompactMode = vi.fn(() => false);
+		await toggle("", ctx);
+		expect(ctx.ui.setWorkingVisible).toHaveBeenCalledWith(false);
+	});
+
+	it("toggle to ON during an active turn keeps the loader spinning", async () => {
+		const { agentStart, toggle } = load();
+		const ctx = createCtx([]);
+		await agentStart({}, ctx);
+		ctx.ui.isCompactMode = vi.fn(() => false);
+		await toggle("", ctx);
+		// pi has no compact summary row for the in-flight turn, so the loader
+		// is the only spinner available — it must keep spinning.
+		expect(ctx.ui.setWorkingVisible).toHaveBeenLastCalledWith(true);
+	});
+
+	it("agent_end re-asserts the hidden loader after a mid-turn toggle", async () => {
+		const { agentStart, agentEnd, toggle } = load();
+		const ctx = createCtx([]);
+		await agentStart({}, ctx);
+		ctx.ui.isCompactMode = vi.fn(() => false);
+		await toggle("", ctx);
+		expect(ctx.ui.setWorkingVisible).toHaveBeenLastCalledWith(true);
+		await agentEnd({}, ctx);
+		expect(ctx.ui.setWorkingVisible).toHaveBeenLastCalledWith(false);
+	});
+
+	it("toggle to OFF during an active turn shows the loader", async () => {
+		const { agentStart, toggle } = load();
+		const ctx = createCtx([]);
+		await agentStart({}, ctx);
+		ctx.ui.isCompactMode = vi.fn(() => true);
+		await toggle("", ctx);
+		expect(ctx.ui.setWorkingVisible).toHaveBeenLastCalledWith(true);
+	});
+
+	it("toggle to OFF restores the loader mid-session", async () => {
+		const { toggle } = load();
+		const ctx = createCtx([]);
+		ctx.ui.isCompactMode = vi.fn(() => true);
+		await toggle("", ctx);
+		expect(ctx.ui.setWorkingVisible).toHaveBeenCalledWith(true);
 	});
 });

@@ -13,6 +13,7 @@ export default defineConfig({
 			input: {
 				settings: "settings.html",
 				extensions: "extensions.html",
+				sessions: "sessions.html",
 			},
 			output: {
 				entryFileNames: "assets/[name].js",

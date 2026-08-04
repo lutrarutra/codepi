@@ -76,29 +76,32 @@ async function loadFooter(
 
 // ── Tests ────────────────────────────────────────────────────
 
-// Nerd-font glyphs used by the mode badge (must match codepi-footer.ts).
-const ICON_ASK = "\u{F059}"; // fa-question-circle
-const ICON_PLAN = "\u{F0CA}"; // fa-list-ul
-const ICON_IMPLEMENT = "\u{F121}"; // fa-code
+// Nerd-font codicons used by the mode badge (must match codepi-footer.ts).
+// Codepoints are specific to the bundled Fira Code Nerd Font — verified
+// against its cmap (cod-question U+EB32, cod-checklist U+EAB3, cod-code
+// U+EAC4); the standard Nerd Fonts cheat-sheet codepoints differ for these.
+const ICON_ASK = "\u{EB32}"; // cod-question
+const ICON_PLAN = "\u{EAB3}"; // cod-checklist
+const ICON_IMPLEMENT = "\u{EAC4}"; // cod-code
 const ICON_BASH = "\u{EBCA}"; // cod-terminal_bash (bash approval badge)
 
 describe("codepi-footer: mode badge", () => {
 	it("renders the ASK badge in accent (blue) with icon and lowercase label", async () => {
 		const { component } = await loadFooter("ASK");
 		const [line] = component.render(200);
-		expect(line).toContain(`{accent:${ICON_ASK} ask}`);
+		expect(line).toContain(`{accent:${ICON_ASK} *ask*}`);
 	});
 
 	it("renders the PLAN badge in warning (amber) with icon and lowercase label", async () => {
 		const { component } = await loadFooter("PLAN");
 		const [line] = component.render(200);
-		expect(line).toContain(`{warning:${ICON_PLAN} plan}`);
+		expect(line).toContain(`{warning:${ICON_PLAN} *plan*}`);
 	});
 
 	it("renders the IMPLEMENT badge in success (green) with icon and lowercase label", async () => {
 		const { component } = await loadFooter("IMPLEMENT");
 		const [line] = component.render(200);
-		expect(line).toContain(`{success:${ICON_IMPLEMENT} implement}`);
+		expect(line).toContain(`{success:${ICON_IMPLEMENT} *implement*}`);
 	});
 
 	it("places the mode badge leftmost, before the model name", async () => {
@@ -123,8 +126,11 @@ describe("codepi-footer: mode badge", () => {
 			mockTheme,
 			createFooterData("PLAN", "main"),
 		);
-		const [line] = component.render(200);
-		const modeIdx = line.indexOf(`{warning:${ICON_PLAN} plan}`);
+		// Wide render: the mock theme's {color:text} tokens inflate visible
+		// width, and the footer is inset by the side margin — a narrow render
+		// would truncate the rightmost (branch) segment.
+		const [line] = component.render(400);
+		const modeIdx = line.indexOf(`{warning:${ICON_PLAN} *plan*}`);
 		const modelIdx = line.indexOf("{accent:claude-sonnet-4}");
 		const levelIdx = line.indexOf("{muted:high}");
 		const branchIdx = line.indexOf("{toolDiffAdded: main}");
@@ -166,6 +172,14 @@ describe("codepi-footer: mode badge", () => {
 		);
 	});
 
+	it("renders the bash badge with disabled highlighted in error", async () => {
+		const { component } = await loadFooter(undefined, "disabled");
+		const [line] = component.render(200);
+		expect(line).toContain(
+			`{error:${ICON_BASH} }{dim:ask/allow/}{error:*disabled*}`,
+		);
+	});
+
 	it("renders no bash badge when the codepi-bash extension is absent", async () => {
 		const { component } = await loadFooter(undefined, undefined);
 		const [line] = component.render(200);
@@ -176,5 +190,18 @@ describe("codepi-footer: mode badge", () => {
 		const { component } = await loadFooter("IMPLEMENT");
 		const [line] = component.render(40);
 		expect(line.length).toBeLessThanOrEqual(40 * 2); // ANSI codes inflate length
+	});
+
+	it("insets the footer by one cell on each side", async () => {
+		const { component } = await loadFooter("ASK");
+		const [line] = component.render(400);
+		// One leading and one trailing cell of margin — content never touches
+		// the terminal edges. The leftmost content is the ↑ input stat (the
+		// mode badge is right-aligned); a wide render keeps the mock-theme
+		// brace inflation from truncating it away.
+		expect(line.startsWith(" ")).toBe(true);
+		expect(line.endsWith(" ")).toBe(true);
+		expect(line.slice(1).startsWith("{success:↑}{text:0}")).toBe(true);
+		expect(line).toContain(`{accent:${ICON_ASK} *ask*}`);
 	});
 });

@@ -11,6 +11,7 @@ body {
 }
 
 .ext-root {
+	--codepi-page-padding: 8px;
 	display: flex;
 	flex-direction: column;
 	gap: 8px;
@@ -100,9 +101,13 @@ body {
 }
 
 .ext-busy {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	gap: 8px;
 	color: var(--vscode-descriptionForeground);
+	font-size: 11px;
 	padding: 12px 0;
-	text-align: center;
 }
 
 .ext-tree {

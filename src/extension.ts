@@ -5,7 +5,11 @@ import * as fs from "node:fs";
 import { createVscodeTools } from "./tools/index";
 import { disposeDiagnosticsCache } from "./tools/diagnostics";
 import { installAutoVerify } from "./auto-verify";
-import { SessionTreeProvider, SessionTreeItem } from "./views/session-tree";
+import {
+	createSessionActivityTracker,
+	readBashApprovalMode,
+} from "./session-activity";
+import { SessionsViewProvider } from "./views/sessions-view";
 import { ReviewManager, pendingLineCounts } from "./review/review-manager";
 import {
 	ReviewDecorations,
@@ -92,7 +96,7 @@ interface SessionState {
 const sessions = new Map<string, SessionState>();
 let extensionContext: vscode.ExtensionContext | undefined;
 let codePiSessionDir: string | undefined;
-let treeProvider: SessionTreeProvider | undefined;
+let sessionsProvider: SessionsViewProvider | undefined;
 
 /** Live mode chip data: the visible panel's session, else any session. */
 function getModeInfoFromSessions(): ModeInfo {
@@ -341,13 +345,19 @@ export async function activate(context: vscode.ExtensionContext) {
 	fs.mkdirSync(codePiSessionDir, { recursive: true });
 	await offerLegacyMigration(context, agentDir, codePiSessionDir);
 
-	// Register session tree provider
-	treeProvider = new SessionTreeProvider(codePiSessionDir);
-	const treeView = vscode.window.createTreeView("codepi.sessionsList", {
-		treeDataProvider: treeProvider,
-		showCollapseAll: false,
-	});
-	context.subscriptions.push(treeView);
+	// Sessions sidebar tab (webview — the tabstrip header is rendered by the
+	// view itself, with Sessions open by default).
+	sessionsProvider = new SessionsViewProvider(
+		context.extensionUri,
+		codePiSessionDir,
+	);
+	context.subscriptions.push(
+		vscode.window.registerWebviewViewProvider(
+			SessionsViewProvider.viewType,
+			sessionsProvider,
+			{ webviewOptions: { retainContextWhenHidden: true } },
+		),
+	);
 
 	// Restore TUI tabs that were open before a window reload. VS Code persists
 	// open webview panels and revives them here; the webview content persisted
@@ -592,19 +602,13 @@ export async function activate(context: vscode.ExtensionContext) {
 	context.subscriptions.push(
 		vscode.commands.registerCommand(
 			"codepi.openSession",
-			async (arg?: string | SessionTreeItem, opts?: { fromTree?: boolean }) => {
-				let sessionPath: string | undefined;
-				if (typeof arg === "string") {
-					sessionPath = arg;
-				} else if (arg instanceof SessionTreeItem) {
-					sessionPath = arg.session.path;
-				}
-				if (!sessionPath) {
+			async (arg?: string, opts?: { fromTree?: boolean }) => {
+				if (!arg) {
 					await pickSession();
 					return;
 				}
 				// Reuse the existing terminal tab if the session is already open.
-				await openSessionTerminal(sessionPath, opts);
+				await openSessionTerminal(arg, opts);
 			},
 		),
 	);
@@ -612,13 +616,13 @@ export async function activate(context: vscode.ExtensionContext) {
 	context.subscriptions.push(
 		vscode.commands.registerCommand(
 			"codepi.renameSession",
-			async (item?: SessionTreeItem) => {
-				if (!item) return;
-				await treeProvider?.renameSession(item.session.path);
+			async (arg?: { path?: string }) => {
+				if (!arg?.path) return;
+				const newName = await sessionsProvider?.renameSession(arg.path);
 				// Keep an open session's terminal tab title in sync with the new name.
 				for (const [, state] of sessions) {
-					if (state.sessionPath === item.session.path) {
-						const name = state.sessionManager.getSessionName?.();
+					if (state.sessionPath === arg.path) {
+						const name = newName || state.sessionManager.getSessionName?.();
 						if (name) {
 							state.pty.setTitle(
 								name.length > 50 ? name.slice(0, 50) + "…" : name,
@@ -634,8 +638,8 @@ export async function activate(context: vscode.ExtensionContext) {
 	context.subscriptions.push(
 		vscode.commands.registerCommand(
 			"codepi.deleteSession",
-			async (item?: SessionTreeItem) => {
-				if (!item) return;
+			async (arg?: { path?: string }) => {
+				if (!arg?.path) return;
 				const confirm = await vscode.window.showWarningMessage(
 					`Delete this session? This cannot be undone.`,
 					{ modal: true },
@@ -644,21 +648,21 @@ export async function activate(context: vscode.ExtensionContext) {
 				if (confirm !== "Delete") return;
 
 				// Close any panel hosting this session
-				const sessionPath = item.session.path;
+				const sessionPath = arg.path;
 				for (const [, state] of sessions) {
 					if (state.sessionPath === sessionPath) {
 						state.panel.dispose();
 						break;
 					}
 				}
-				await treeProvider?.deleteSession(sessionPath);
+				await sessionsProvider?.deleteSession(sessionPath);
 			},
 		),
 	);
 
 	context.subscriptions.push(
 		vscode.commands.registerCommand("codepi.refreshSessions", () => {
-			treeProvider?.refresh();
+			void sessionsProvider?.refresh();
 		}),
 	);
 
@@ -802,9 +806,8 @@ async function openSessionTerminal(
 }
 
 async function pickSession(): Promise<void> {
-	// Quick pick to select a session — not needed for now since the tree view
-	// handles this, but useful as a fallback
-	const sessions = treeProvider ? await getSessionsFromProvider() : [];
+	// Quick pick to select a session — fallback for the palette command.
+	const sessions = await getSessionsFromProvider();
 	if (sessions.length === 0) {
 		vscode.window.showInformationMessage(
 			"No sessions available. Create a new one first.",
@@ -1179,9 +1182,6 @@ async function setupSessionPanel(
 	// Messages posted before the webview finishes loading are dropped by VS
 	// Code — anything config-like is sent in response to `tuiReady` below.
 
-	// Progress/icon bridge — filled once `state` exists (constructor runs first).
-	let updateStatusIcon: (busy: boolean) => void = () => {};
-
 	const pty = new WebviewPty(
 		panel.webview,
 		initialTitle,
@@ -1189,7 +1189,11 @@ async function setupSessionPanel(
 		(title) => {
 			panel.title = title;
 		},
-		(busy) => updateStatusIcon(busy),
+		// Tab indicator is owned by the session-activity tracker (idle /
+		// working / waiting / error icons) once the backend starts — see
+		// startTuiBackend. The TUI's own progress flag still drives the
+		// " ●" suffix on the title via setProgress/setTitle.
+		() => {},
 	);
 
 	const state: SessionState = {
@@ -1209,9 +1213,10 @@ async function setupSessionPanel(
 	};
 	sessions.set(sessionId, state);
 
-	// Tab indicator: green dot (idle) / yellow dot (generating) / red (error).
+	// Tab indicator: white dot (idle) / cyan (working) / yellow (waiting for
+	// user input) / red (error). Refined by the session-activity tracker once
+	// the backend starts.
 	setPanelIcon(panel, "idle");
-	updateStatusIcon = (busy) => setPanelIcon(panel, busy ? "busy" : "idle");
 
 	// Webview messages: terminal input / resize / ready.
 	panel.webview.onDidReceiveMessage(
@@ -1264,6 +1269,10 @@ async function setupSessionPanel(
 					break;
 				case "codepi:openLink":
 					void openTerminalLink(msg.link as CodePiOpenLinkPayload);
+					break;
+				case "codepi:newSession":
+					// Ctrl+N in the terminal webview: new session in a new tab.
+					void createNewSession();
 					break;
 				case "tuiError":
 					void vscode.window.showErrorMessage(
@@ -1524,6 +1533,18 @@ async function startTuiBackend(state: SessionState): Promise<void> {
 	});
 	state.runtime = runtime;
 
+	// Tab indicator: drive the panel icon from the session's activity —
+	// cyan while generating, yellow while a tool waits on user input
+	// (ask_user_question dialog, or the bash approval dialog in "ask" mode),
+	// white when idle, red on a failed turn.
+	state.disposables.push(
+		createSessionActivityTracker({
+			subscribe: (listener) => runtime.session.subscribe(listener),
+			bashMode: () => readBashApprovalMode(state.sessionManager.getBranch()),
+			onActivity: (activity) => setPanelIcon(state.panel, activity),
+		}),
+	);
+
 	// Auto-verify: after a turn that edited files, lint exactly those files
 	// and feed the findings back to the model (mode from codepi.autoVerify).
 	const autoVerify = installAutoVerify(runtime.session, {
@@ -1544,7 +1565,7 @@ async function startTuiBackend(state: SessionState): Promise<void> {
 
 	state.isBackendReady = true;
 	state.isBusy = true;
-	treeProvider?.refresh();
+	void sessionsProvider?.refresh();
 
 	// Dismiss the webview's loading overlay (PI logo + dots). The TUI's first
 	// render lands right after run() below, so the fade covers the gap.
@@ -1633,11 +1654,12 @@ function getWorkspaceRoot(): string {
 
 /**
  * Set the tab icon to a colored status dot (no logo):
- * green = idle, yellow = generating, red = backend error.
+ * white = idle, cyan = working/generating, yellow = waiting for user input
+ * (question / permission approval), red = backend error.
  */
 function setPanelIcon(
 	panel: vscode.WebviewPanel,
-	mode: "idle" | "busy" | "error",
+	mode: "idle" | "working" | "waiting" | "error",
 ): void {
 	const uri = vscode.Uri.joinPath(
 		extensionContext!.extensionUri,

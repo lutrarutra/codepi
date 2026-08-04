@@ -3,20 +3,22 @@
  *
  * A bundled PI extension that OVERRIDES pi's built-in bash tool (extension
  * tools win over builtins in the tool registry) and executes commands through
- * the VS Code terminal API (hidden transient terminal + shell integration
- * `executeCommand`) instead of node's child_process.
+ * a hidden, transient VS Code terminal running a minimal bash
+ * (`--noprofile --norc`) instead of node's child_process.
  *
  * Ported from pi's built-in bash tool (packages/coding-agent/src/core/tools/
  * bash.ts): same schema semantics, same truncation behavior (last ~2000 lines
  * / ~50KB, full output spilled to a temp file), same renderCall/renderResult
  * presentation. The execution backend and the approval gate are CodePi's.
  *
- * Per-session approval modes:
+ * Per-session bash modes:
  *   - ask (default): the 4-option dialog (Yes / No / Revise / auto-approve all)
  *   - auto: commands run without asking
- * Toggle with /codepi-bash-ask and /codepi-bash-allow; the active mode is
- * persisted to the session branch and shown in the custom footer via the
- * "codepi-bash" status key.
+ *   - disabled: every bash command is rejected (forces the agent onto the
+ *     dedicated read/edit/write/grep tools)
+ * Switch with /codepi-bash-ask, /codepi-bash-allow, /codepi-bash-disable; the
+ * active mode is persisted to the session branch and shown in the custom
+ * footer via the "codepi-bash" status key.
  *
  * The agent is told to treat bash as a LAST RESORT (dedicated tools exist for
  * read/edit/write/grep/find/diagnostics) — see the tool description and
@@ -42,7 +44,17 @@ import {
 import { Container, Text, truncateToWidth } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import { randomBytes } from "node:crypto";
-import { createWriteStream, existsSync, statSync } from "node:fs";
+import {
+	closeSync,
+	createWriteStream,
+	existsSync,
+	mkdirSync,
+	openSync,
+	readFileSync,
+	readSync,
+	rmSync,
+	statSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
 
@@ -53,14 +65,13 @@ const STATUS_KEY = "codepi-bash";
 export const DEFAULT_TIMEOUT_SECONDS = 120;
 const MAX_COMMANDS = 32;
 const MAX_TITLE_CHARS = 100;
-const SHELL_INTEGRATION_TIMEOUT_MS = 8000;
 const VSCODE_BRIDGE_KEY = "__codepiVscode";
 const DEFAULT_MAX_LINES = 2000;
 const DEFAULT_MAX_BYTES = 50 * 1024;
 const BASH_PREVIEW_LINES = 5;
 const BASH_UPDATE_THROTTLE_MS = 100;
 
-export type BashMode = "ask" | "auto";
+export type BashMode = "ask" | "auto" | "disabled";
 export type DialogChoice = "approve" | "deny" | "revise" | "auto" | "cancel";
 
 /** The 4-option approval dialog. Option 0 is pre-selected → Enter approves. */
@@ -219,12 +230,14 @@ export function cleanTerminalOutput(raw: string, command: string): string {
 
 /**
  * Footer badge text — terminal icon + mode label (`\u{EBCA} ask` /
- * `\u{EBCA} allow`). The icon is nf-cod-terminal_bash, the same glyph
- * codepi-footer.ts renders for the "codepi-bash" footer status.
+ * `\u{EBCA} allow` / `\u{EBCA} disabled`). The icon is nf-cod-terminal_bash,
+ * the same glyph codepi-footer.ts renders for the "codepi-bash" footer status.
  */
 export function formatBashBadge(mode: BashMode): string {
 	const icon = "\u{EBCA}";
-	return mode === "ask" ? `${icon} ask` : `${icon} allow`;
+	if (mode === "ask") return `${icon} ask`;
+	if (mode === "auto") return `${icon} allow`;
+	return `${icon} disabled`;
 }
 
 /** Replay the persisted approval mode from the session branch (default ask). */
@@ -236,7 +249,13 @@ export function readModeFromBranch(branch: readonly unknown[]): BashMode {
 			continue;
 		}
 		const data = isRecord(entry.data) ? entry.data : {};
-		if (data.mode === "ask" || data.mode === "auto") mode = data.mode;
+		if (
+			data.mode === "ask" ||
+			data.mode === "auto" ||
+			data.mode === "disabled"
+		) {
+			mode = data.mode;
+		}
 	}
 	return mode;
 }
@@ -435,45 +454,24 @@ export async function getVscode(): Promise<any | undefined> {
 	}
 }
 
-/** Wait for shell integration on a freshly created terminal (≤ 5s). */
-function waitForShellIntegration(
-	vscode: any,
-	terminal: any,
-	timeoutMs: number,
-): Promise<any | undefined> {
-	return new Promise((resolvePromise) => {
-		if (terminal.shellIntegration) {
-			resolvePromise(terminal.shellIntegration);
-			return;
-		}
-		let settled = false;
-		const finish = (value: any) => {
-			if (settled) return;
-			settled = true;
-			clearTimeout(timer);
-			try {
-				listener.dispose();
-			} catch {
-				/* already disposed */
-			}
-			resolvePromise(value);
-		};
-		const timer = setTimeout(() => finish(undefined), timeoutMs);
-		const listener = vscode.window.onDidChangeTerminalShellIntegration(
-			(event: any) => {
-				if (event.terminal === terminal) finish(event.shellIntegration);
-			},
-		);
-	});
-}
-
-/** Create the hidden, transient terminal all execution paths share. */
+/** Create the hidden, transient terminal all commands run in. */
 function createHiddenTerminal(vscode: any, cwd: string): any {
 	return vscode.window.createTerminal({
 		name: "CodePi bash",
 		cwd,
 		hideFromUser: true,
 		isTransient: true,
+		// A MINIMAL shell on purpose: no rc files, no prompt themes (p10k,
+		// etc.), no shell-integration scripts. Running in the user's heavy
+		// interactive shell breaks command execution: prompt themes clobber
+		// $? and re-render prompts into the captured stream, and VS Code's
+		// shell-integration exit-code tracking never settles for heredoc/
+		// multi-line input. A bare bash + the sentinel marker (see
+		// runViaSendText) gives exact exit codes and clean output for every
+		// command shape. Env is inherited from the extension host — the same
+		// semantics as pi's built-in bash tool.
+		shellPath: "/bin/bash",
+		shellArgs: ["--noprofile", "--norc"],
 	});
 }
 
@@ -481,24 +479,17 @@ function createHiddenTerminal(vscode: any, cwd: string): any {
  * BashOperations backend backed by a per-command hidden VS Code terminal.
  * Terminal disposal is the kill switch for timeouts and aborts.
  *
- * Two execution paths, both 100% VS Code API:
- * 1. Shell integration (preferred): `executeCommand` + `read()` stream + the
- *    reported `exitCode` — clean output boundaries.
- * 2. Fallback when shell integration never activates (injection failure,
- *    slow/odd shell rc): `sendText` + `window.onDidWriteTerminalData` + a
- *    unique sentinel marker echoing the exit code. The outcome is cached per
- *    window so a broken environment doesn't pay the activation wait on every
- *    command.
+ * One execution path, 100% STABLE VS Code APIs (`createTerminal`/`sendText`/
+ * `dispose`): the command runs with output redirected to a temp file, and a
+ * sentinel writes the exit code to a second temp file which is polled. No
+ * shell integration and no proposed API (see createHiddenTerminal for why
+ * the shell is minimal; `onDidWriteTerminalData` is unavailable in some
+ * builds/remotes).
  *
  * Follows pi's BashOperations contract: throws Error("timeout:<secs>") on
  * timeout and Error("aborted") on abort (the tool's execute formats them).
  */
-export function createVscodeBashOperations(options?: {
-	shellIntegrationTimeoutMs?: number;
-}): BashOperations {
-	const shellIntegrationTimeoutMs =
-		options?.shellIntegrationTimeoutMs ?? SHELL_INTEGRATION_TIMEOUT_MS;
-	let shellIntegrationBroken: boolean | undefined;
+export function createVscodeBashOperations(): BashOperations {
 	return {
 		async exec(command, cwd, { onData, signal, timeout }) {
 			if (signal?.aborted) {
@@ -511,7 +502,7 @@ export function createVscodeBashOperations(options?: {
 				);
 			}
 
-			// One hidden terminal per command, shared by both execution paths.
+			// One hidden terminal per command; disposing it is the kill switch.
 			const terminal = createHiddenTerminal(vscode, cwd);
 			let disposed = false;
 			const dispose = () => {
@@ -523,157 +514,71 @@ export function createVscodeBashOperations(options?: {
 					/* ignore */
 				}
 			};
-
-			if (shellIntegrationBroken !== true) {
-				const shellIntegration = await waitForShellIntegration(
-					vscode,
-					terminal,
-					shellIntegrationTimeoutMs,
-				).catch(() => undefined);
-				if (shellIntegration) {
-					try {
-						return await runViaShellIntegration(shellIntegration, command, {
-							onData,
-							signal,
-							timeout,
-							dispose,
-						});
-					} catch (err) {
-						dispose();
-						throw err;
-					}
-				}
-				shellIntegrationBroken = true;
-				console.warn(
-					"[codepi-bash] VS Code shell integration did not activate — falling back to sendText for this window.",
-				);
-			}
+			const dir = join(
+				tmpdir(),
+				`codepi-bash-${randomBytes(8).toString("hex")}`,
+			);
+			mkdirSync(dir, { recursive: true });
 			try {
-				return await runViaSendText(vscode, terminal, command, {
+				return await runWithOutputCapture(terminal, command, {
 					onData,
 					signal,
 					timeout,
+					dir,
 				});
 			} finally {
 				dispose();
+				rmSync(dir, { recursive: true, force: true });
 			}
 		},
 	};
 }
 
-/** Preferred path: shell integration `executeCommand` with a clean output stream. */
-async function runViaShellIntegration(
-	shellIntegration: any,
-	command: string,
-	options: {
-		onData: (data: Buffer) => void;
-		signal: AbortSignal | undefined;
-		timeout?: number;
-		dispose: () => void;
-	},
-): Promise<{ exitCode: number | null }> {
-	const { onData, signal, timeout, dispose } = options;
-	const execution = shellIntegration.executeCommand(command);
-	const reader = (async () => {
-		try {
-			for await (const chunk of execution.read()) {
-				onData(Buffer.from(String(chunk)));
-			}
-		} catch {
-			/* terminal disposed mid-stream */
-		}
-	})();
-
-	let timedOut = false;
-	const onAbort = () => {
-		dispose();
-	};
-	if (signal) {
-		if (signal.aborted) onAbort();
-		else signal.addEventListener("abort", onAbort, { once: true });
-	}
-	let timer: ReturnType<typeof setTimeout> | undefined;
-	const timeoutMs =
-		timeout !== undefined ? Math.round(timeout * 1000) : undefined;
-	if (timeoutMs !== undefined && timeoutMs > 0) {
-		timer = setTimeout(() => {
-			timedOut = true;
-			dispose();
-		}, timeoutMs);
-	}
-
-	let exitCode: number | null | undefined;
-	try {
-		exitCode = await execution.exitCode;
-	} catch {
-		exitCode = null; // rejected — shell integration broke or terminal disposed
-	}
-	await reader;
-	if (timer) clearTimeout(timer);
-	if (signal) signal.removeEventListener("abort", onAbort);
-	dispose();
-
-	if (signal?.aborted) {
-		throw new Error("aborted");
-	}
-	if (timedOut) {
-		throw new Error(`timeout:${timeout}`);
-	}
-	return { exitCode: exitCode ?? null };
-}
-
 /**
- * Fallback path: submit via `sendText`, capture raw terminal data, and wait
- * for a unique sentinel marker that echoes the command's exit code. Works
- * without shell integration. The marker + echoed sentinel are stripped from
- * the output before it is streamed to the caller.
+ * Execute via `sendText` in the minimal terminal, capturing output and the
+ * exit code through temp files instead of the (proposed, often unavailable)
+ * `onDidWriteTerminalData` event:
+ *
+ *   ( <command>
+ *   ) > <dir>/out 2>&1; printf '%s' "$?" > <dir>/code
+ *
+ * The subshell keeps `exit`/`cd`/backgrounding scoped to the command, and
+ * output is captured verbatim (no echo/prompt noise). Output is streamed by
+ * polling <dir>/out for growth; completion is detected by <dir>/code
+ * appearing (a parse error on the wrapper leaves the shell waiting and
+ * surfaces as a timeout — bounded, not a hang). Needs only stable VS Code
+ * APIs; interactive TUI programs lose their pty, which is acceptable for a
+ * coding-agent bash tool.
  */
-async function runViaSendText(
-	vscode: any,
+async function runWithOutputCapture(
 	terminal: any,
 	command: string,
 	options: {
 		onData: (data: Buffer) => void;
 		signal: AbortSignal | undefined;
 		timeout?: number;
+		dir: string;
 	},
 ): Promise<{ exitCode: number | null }> {
-	const { onData, signal, timeout } = options;
-	if (typeof vscode.window.onDidWriteTerminalData !== "function") {
-		throw new Error(
-			"Cannot capture command output: this VS Code version has neither shell integration nor onDidWriteTerminalData.",
-		);
-	}
-	const id = randomBytes(4).toString("hex");
-	const marker = `__CODEPI_DONE_${id}__`;
-	const sentinel = `echo "${marker}:$?"`;
-	const markerRe = new RegExp(`${marker}:(-?\\d+)`);
-
-	let buffer = "";
-	let listener: { dispose(): void } | undefined;
-	let timer: ReturnType<typeof setTimeout> | undefined;
-	let settled = false;
+	const { onData, signal, timeout, dir } = options;
+	const outFile = join(dir, "out");
+	const codeFile = join(dir, "code");
+	const wrapper = `( ${command}\n) > ${outFile} 2>&1; printf '%s' "$?" > ${codeFile}`;
 
 	return new Promise((resolve, reject) => {
+		let settled = false;
+		let lastSize = 0;
+		let poll: ReturnType<typeof setInterval> | undefined;
+		let timer: ReturnType<typeof setTimeout> | undefined;
+
 		const cleanup = () => {
-			try {
-				listener?.dispose();
-			} catch {
-				/* already disposed */
-			}
+			if (poll) clearInterval(poll);
 			if (timer) clearTimeout(timer);
 			if (signal) signal.removeEventListener("abort", onAbort);
 		};
-		const succeed = (exitCode: number | null, output: string) => {
+		const finish = (exitCode: number | null) => {
 			if (settled) return;
 			settled = true;
-			// Strip the echoed sentinel command line and any partial marker noise.
-			const cleaned = output
-				.split("\n")
-				.filter((line) => !line.includes(marker))
-				.join("\n")
-				.trim();
-			if (cleaned) onData(Buffer.from(cleaned));
 			cleanup();
 			resolve({ exitCode });
 		};
@@ -698,33 +603,38 @@ async function runViaSendText(
 			}, timeoutMs);
 		}
 
-		// This VS Code build gates `onDidWriteTerminalData` behind the
-		// `terminalDataWriteEvent` API proposal: the property exists but the
-		// call throws when package.json#enabledApiProposals does not declare it
-		// (and the launch did not pass --enable-proposed-api). Convert that into
-		// a clear tool error instead of a crash — the preferred shell-integration
-		// path never reaches here.
-		try {
-			listener = vscode.window.onDidWriteTerminalData((event: any) => {
-				if (event.terminal !== terminal) return;
-				buffer += String(event.data ?? "");
-				const m = buffer.match(markerRe);
-				if (!m) return;
-				const exitCode = Number.parseInt(m[1], 10);
-				const cut = buffer.indexOf(m[0]);
-				succeed(Number.isNaN(exitCode) ? null : exitCode, buffer.slice(0, cut));
-			});
-		} catch {
-			fail(
-				new Error(
-					"Cannot capture command output: the terminal data event is not available in this VS Code build. Start CodePi with --enable-proposed-api lutrarutra.codepi (the launch config already does) so the fallback output capture can work.",
-				),
-			);
-			return;
-		}
+		poll = setInterval(() => {
+			// Stream any newly written output.
+			try {
+				const size = statSync(outFile).size;
+				if (size > lastSize) {
+					const fd = openSync(outFile, "r");
+					try {
+						const chunk = Buffer.alloc(size - lastSize);
+						readSync(fd, chunk, 0, chunk.length, lastSize);
+						lastSize = size;
+						onData(chunk);
+					} finally {
+						closeSync(fd);
+					}
+				}
+			} catch {
+				/* out file not created yet */
+			}
+			// Completion: the exit-code file appears with content. Skip empty
+			// reads (the sentinel may be mid-write) and check again next poll.
+			try {
+				const code = readFileSync(codeFile, "utf8").trim();
+				if (code !== "") {
+					const exitCode = Number.parseInt(code, 10);
+					finish(Number.isNaN(exitCode) ? null : exitCode);
+				}
+			} catch {
+				/* not finished yet */
+			}
+		}, 100);
 
-		terminal.sendText(command);
-		terminal.sendText(sentinel);
+		terminal.sendText(wrapper);
 	});
 }
 
@@ -928,7 +838,7 @@ export interface CodepiBashToolOptions {
  * - `command` accepting a string OR an array (joined with " && "),
  * - a per-call `cwd` (default: session cwd),
  * - a default timeout,
- * - the ask/auto approval gate,
+ * - the ask/auto/disabled gate,
  * - last-resort guidance in the description + promptGuidelines.
  */
 export function createCodepiBashToolDefinition(
@@ -954,6 +864,13 @@ export function createCodepiBashToolDefinition(
 			onUpdate,
 			ctx,
 		): Promise<AgentToolResult<unknown>> {
+			// ── Disabled gate ──
+			if (getMode() === "disabled") {
+				throw new Error(
+					"The bash tool is disabled. Enable it with /codepi-bash-ask (ask before every command) or /codepi-bash-allow (auto-approve all commands).",
+				);
+			}
+
 			const {
 				command: rawCommand,
 				cwd: rawCwd,
@@ -1144,7 +1061,7 @@ export function createCodepiBashToolDefinition(
 						throw new Error(
 							appendStatus(
 								outputText,
-								"Could not determine the command's exit code (shell integration did not report one).",
+								"Could not determine the command's exit code (the sentinel did not report one).",
 							),
 						);
 					}
@@ -1211,9 +1128,12 @@ export default function (pi: ExtensionAPI) {
 		currentMode = mode;
 		ctx.ui.setStatus(STATUS_KEY, mode);
 		pi.appendEntry(MODE_ENTRY_TYPE, { mode, timestamp: Date.now() });
-		ctx.ui.notify(
-			`Bash approval: ${mode === "ask" ? "ask before every command" : "auto-approve all commands"}.`,
-		);
+		const messages: Record<BashMode, string> = {
+			ask: "Bash approval: ask before every command.",
+			auto: "Bash approval: auto-approve all commands.",
+			disabled: "Bash tool disabled — commands are rejected until re-enabled.",
+		};
+		ctx.ui.notify(messages[mode]);
 	}
 
 	// Recover the persisted mode (also fires on session reload/fork).
@@ -1228,7 +1148,7 @@ export default function (pi: ExtensionAPI) {
 	): Promise<void> {
 		await ctx.waitForIdle();
 		if (currentMode === mode) {
-			ctx.ui.notify(`Bash approval is already ${mode}.`, "info");
+			ctx.ui.notify(`Bash is already in ${mode} mode.`, "info");
 			return;
 		}
 		setMode(mode, ctx);
@@ -1242,6 +1162,11 @@ export default function (pi: ExtensionAPI) {
 	pi.registerCommand("codepi-bash-allow", {
 		description: "Auto-approve all bash commands",
 		handler: async (_args, ctx) => transitionTo("auto", ctx),
+	});
+
+	pi.registerCommand("codepi-bash-disable", {
+		description: "Disable the bash tool",
+		handler: async (_args, ctx) => transitionTo("disabled", ctx),
 	});
 
 	pi.registerTool(

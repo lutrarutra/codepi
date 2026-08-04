@@ -6,14 +6,6 @@ import {
 	resolveUri,
 	type DiagnosticSeverityName,
 } from "./diagnostics";
-import { askUserQuestionTool } from "./ask-user-question";
-export { askUserQuestionTool } from "./ask-user-question";
-export type {
-	Question,
-	QuestionOption,
-	QuestionAnswer,
-	AskQuestionsParams,
-} from "./ask-user-question";
 import { ReviewManager } from "../review/review-manager";
 import type { EditProposal } from "../review/types";
 import { applyEditsToContent } from "../review/edit-apply";
@@ -880,7 +872,11 @@ export const getDiagnosticsTool: VscodeTool = {
 		required: [],
 	},
 	async execute(_toolCallId, params) {
-		const { path: filePath, severity, limit } = params as {
+		const {
+			path: filePath,
+			severity,
+			limit,
+		} = params as {
 			path?: string;
 			severity?: DiagnosticSeverityName;
 			limit?: number;
@@ -941,7 +937,6 @@ export function createVscodeTools(review: ReviewManager): VscodeTool[] {
 		findFilesTool,
 		grepTool,
 		getDiagnosticsTool,
-		askUserQuestionTool,
 	];
 }
 

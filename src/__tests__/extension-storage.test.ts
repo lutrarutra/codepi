@@ -21,7 +21,7 @@ describe("CodePi session storage routing", () => {
 		);
 		const tree = normalizeWhitespace(
 			readFileSync(
-				join(process.cwd(), "src", "views", "session-tree.ts"),
+				join(process.cwd(), "src", "views", "sessions-view.ts"),
 				"utf8",
 			),
 		);
@@ -82,7 +82,7 @@ describe("CodePi session storage routing", () => {
 		expect(
 			countMatches(
 				tree,
-				/SessionManager\.list\s*\(\s*this\.cwd\s*,\s*this\.sessionDir\s*,?\s*\)/g,
+				/SessionManager\.list\s*\(\s*(?:this\.)?cwd\s*,\s*this\.sessionDir\s*,?\s*\)/g,
 			),
 		).toBe(1);
 	});

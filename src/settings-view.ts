@@ -97,6 +97,9 @@ export class SettingsViewProvider implements vscode.WebviewViewProvider {
 				case "settings:openSessions":
 					await vscode.commands.executeCommand("codepi.openSessionsTab");
 					break;
+				case "settings:openExtensions":
+					await vscode.commands.executeCommand("codepi.openExtensionsTab");
+					break;
 			}
 		} catch (err) {
 			this.post({

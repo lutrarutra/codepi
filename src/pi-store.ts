@@ -233,7 +233,6 @@ export const ASK_MODE_DEFAULT_ALLOWED_TOOLS: readonly string[] = [
 	"list_dir",
 	"find_files",
 	"get_diagnostics",
-	"ask_user_question",
 	"web_search",
 	"fetch_content",
 	// codepi-context tools are pure reads of editor/git state — safe in
@@ -256,7 +255,6 @@ export const ASK_MODE_DEFAULT_ALLOWED_TOOLS_PRE_CONTEXT: readonly string[] = [
 	"list_dir",
 	"find_files",
 	"get_diagnostics",
-	"ask_user_question",
 	"web_search",
 	"fetch_content",
 ];
@@ -275,7 +273,6 @@ export const ASK_MODE_DEFAULT_ALLOWED_TOOLS_PRE_HEAD: readonly string[] = [
 	"list_dir",
 	"find_files",
 	"get_diagnostics",
-	"ask_user_question",
 	"web_search",
 	"fetch_content",
 	"get_editor_context",

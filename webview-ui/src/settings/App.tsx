@@ -15,6 +15,38 @@ function post(message: SettingsMessage): void {
 	vscode.postMessage(message);
 }
 
+// Sidebar-wide tab switcher (Sessions | Extensions | Settings). Each webview
+// view renders its own copy; the host switches views via codepi.*Tab commands.
+function SidebarTabs({
+	active,
+	onSelect,
+}: {
+	active: "sessions" | "extensions" | "settings";
+	onSelect: (tab: "sessions" | "extensions" | "settings") => void;
+}): JSX.Element {
+	const tabs = [
+		{ id: "sessions", label: "Sessions" },
+		{ id: "extensions", label: "Extensions" },
+		{ id: "settings", label: "Settings" },
+	] as const;
+	return (
+		<nav className="sidebar-tabs" role="tablist" aria-label="CodePi sidebar">
+			{tabs.map((tab) => (
+				<button
+					key={tab.id}
+					type="button"
+					role="tab"
+					aria-selected={active === tab.id}
+					className={`sidebar-tab${active === tab.id ? " sidebar-tab-active" : ""}`}
+					onClick={() => onSelect(tab.id)}
+				>
+					{tab.label}
+				</button>
+			))}
+		</nav>
+	);
+}
+
 function formatPackageSummary(packages: DashboardData["packages"]): string {
 	if (packages.configured === 0) return "No Pi packages configured.";
 	const installed = `${packages.installed} installed`;
@@ -393,6 +425,14 @@ export function SettingsApp(): JSX.Element {
 	return (
 		<div className="settings-page">
 			<header className="settings-header">
+				<SidebarTabs
+					active="settings"
+					onSelect={(tab) => {
+						if (tab === "sessions") post({ command: "settings:openSessions" });
+						if (tab === "extensions")
+							post({ command: "settings:openExtensions" });
+					}}
+				/>
 				<div>
 					<h1>CodePi settings</h1>
 					<p className="settings-help">
@@ -400,13 +440,6 @@ export function SettingsApp(): JSX.Element {
 						sessions remain computer-specific.
 					</p>
 				</div>
-				<button
-					className="settings-button settings-button-secondary"
-					type="button"
-					onClick={() => post({ command: "settings:openSessions" })}
-				>
-					Sessions
-				</button>
 			</header>
 
 			{error && (

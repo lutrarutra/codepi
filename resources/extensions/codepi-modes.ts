@@ -47,7 +47,6 @@ export const READ_ONLY_TOOL_BASELINE: readonly string[] = [
 	"list_dir",
 	"find_files",
 	"get_diagnostics",
-	"ask_user_question",
 	"web_search",
 	"fetch_content",
 	// codepi-context tools are pure reads of editor/git state — safe in
@@ -138,7 +137,7 @@ Implement mode with /codepi-implement (or /codepi-plan to plan first) — mode
 switches are user-only, you cannot make them for the user.`,
 	plan: `## MODE CHANGED: PLAN (PLANNING ONLY)
 
-The user switched you to **Plan mode**. Produce a detailed, actionable plan (explore with read/grep/find/ls, ask clarifying questions with ask_user_question, document it in docs/plans/, track steps with todo) and do NOT implement it. You may write plan/documentation files, but must not modify source code.`,
+The user switched you to **Plan mode**. Produce a detailed, actionable plan (explore with read/grep/find/ls, ask clarifying questions, document it in docs/plans/, track steps with todo) and do NOT implement it. You may write plan/documentation files, but must not modify source code.`,
 	implement: `## MODE CHANGED: IMPLEMENT (FULL ACCESS)
 
 The user switched you to **Implement mode**. The \`edit\` and \`write\` tools are enabled — you may modify files and implement changes. Any previous read-only mode instructions no longer apply.`,
@@ -171,7 +170,7 @@ You are in **Ask (read-only) mode**.
   tools are DISABLED — you cannot modify or create files, and you cannot
   delegate work that would do so.
 - Only read-only tools are available: read, grep, find, ls, list_dir,
-  find_files, get_diagnostics, ask_user_question — plus anything the user
+  find_files, get_diagnostics — plus anything the user
   whitelists in \`codepi.modes.ask.allowedTools\` (settings.json).
 - Do not attempt to change files, and never suggest that you will.
 - You cannot switch modes — /codepi-ask, /codepi-plan, and /codepi-implement
@@ -191,14 +190,14 @@ NOT to implement it.
 Workflow:
 1. **Brainstorm**: explore the current implementation with read/grep/find/ls.
    Identify what exists, what is missing, and what should change.
-2. **Clarify**: ask the user clarifying questions with the ask_user_question
-   tool until the requirements are unambiguous.
+2. **Clarify**: ask the user clarifying questions until the requirements
+   are unambiguous.
 3. **Document**: write the plan to a markdown file, e.g.
    \`docs/plans/<feature>.md\`, with a step-by-step implementation breakdown.
 4. **Track**: add implementation todos using the todo tool so each planned step
    becomes a tracked task.
-5. **Confirm**: when the plan is complete, ask the user (ask_user_question)
-   whether they are satisfied and want to proceed. If they do, tell them to
+5. **Confirm**: when the plan is complete, ask the user whether they are
+   satisfied and want to proceed. If they do, tell them to
    run \`/codepi-implement\`; CodePi asks "Switch to Implement mode?" and
    performs the switch on their confirmation — plan → implement is the one
    mode change CodePi can make for the user, and only with their yes.

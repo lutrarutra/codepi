@@ -9,6 +9,7 @@ import {
 	groupTurnsForCompact,
 	summarizeToolCall,
 	type CompactSegment,
+	CompactTurnSummary,
 } from "../../../node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/compact-summary.js";
 
 /** Assert a segment is a turn and narrow its type. */
@@ -34,7 +35,9 @@ describe("groupTurnsForCompact", () => {
 		const user = { role: "user", timestamp: 1 };
 		const toolMsg = {
 			role: "assistant",
-			content: [{ type: "toolCall", name: "bash", arguments: { command: "ls" } }],
+			content: [
+				{ type: "toolCall", name: "bash", arguments: { command: "ls" } },
+			],
 		};
 		const toolResult = {
 			role: "toolResult",
@@ -47,7 +50,12 @@ describe("groupTurnsForCompact", () => {
 			role: "assistant",
 			content: [{ type: "text", text: "done" }],
 		};
-		const segments = groupTurnsForCompact([user, toolMsg, toolResult, finalMsg]);
+		const segments = groupTurnsForCompact([
+			user,
+			toolMsg,
+			toolResult,
+			finalMsg,
+		]);
 		expect(segments).toHaveLength(1);
 		const turn = asTurn(segments[0]);
 		expect(turn.entries).toHaveLength(3);
@@ -62,7 +70,9 @@ describe("groupTurnsForCompact", () => {
 		};
 		const toolMsg = {
 			role: "assistant",
-			content: [{ type: "toolCall", name: "read", arguments: { path: "a.ts" } }],
+			content: [
+				{ type: "toolCall", name: "read", arguments: { path: "a.ts" } },
+			],
 		};
 		const turn = asTurn(groupTurnsForCompact([user, commentary, toolMsg])[0]);
 		expect(turn.finalResponse).toBeUndefined();
@@ -78,7 +88,10 @@ describe("groupTurnsForCompact", () => {
 	});
 
 	it("handles assistant messages without a preceding user message", () => {
-		const finalMsg = { role: "assistant", content: [{ type: "text", text: "hi" }] };
+		const finalMsg = {
+			role: "assistant",
+			content: [{ type: "text", text: "hi" }],
+		};
 		const segments = groupTurnsForCompact([finalMsg]);
 		expect(segments).toHaveLength(1);
 		expect(asTurn(segments[0]).userMessage).toBeUndefined();
@@ -93,7 +106,9 @@ describe("aggregateCompactTurn", () => {
 				role: "assistant",
 				model: "model-a",
 				usage: usage(),
-				content: [{ type: "toolCall", name: "bash", arguments: { command: "ls" } }],
+				content: [
+					{ type: "toolCall", name: "bash", arguments: { command: "ls" } },
+				],
 			},
 			{
 				role: "toolResult",
@@ -116,7 +131,10 @@ describe("aggregateCompactTurn", () => {
 		expect(stats.toolCalls).toBe(1);
 		expect(stats.toolFailures).toBe(1);
 		expect(stats.model).toBe("model-b");
-		expect(stats.latest).toEqual({ kind: "thought", text: "first thought line" });
+		expect(stats.latest).toEqual({
+			kind: "thought",
+			text: "first thought line",
+		});
 	});
 
 	it("returns zeroed stats for an empty turn", () => {
@@ -133,6 +151,75 @@ describe("aggregateCompactTurn", () => {
 			model: undefined,
 			latest: undefined,
 		});
+	});
+});
+
+describe("CompactTurnSummary stats line", () => {
+	function finishedSummary() {
+		return new CompactTurnSummary(undefined, {
+			stats: {
+				input: 372_000,
+				output: 4_100,
+				reasoning: 0,
+				cacheRead: 0,
+				cacheWrite: 0,
+				cost: 0.05,
+				toolCalls: 5,
+				toolFailures: 4,
+				model: "deepseek-v4-flash-2508",
+				latest: undefined,
+			},
+			startTime: 0,
+			endTime: 0,
+			finished: true,
+		});
+	}
+
+	it("renders the full model name without ellipsis truncation", () => {
+		const text = finishedSummary().getStatsText();
+		expect(text).toContain("deepseek-v4-flash-2508");
+		expect(text).not.toContain("…");
+	});
+
+	it("renders every stats segment (tools, tokens, cost)", () => {
+		const text = finishedSummary().getStatsText();
+		expect(text).toContain("✓1");
+		expect(text).toContain("✗4");
+		expect(text).toContain("↑372k");
+		expect(text).toContain("↓4.1k");
+		expect(text).toContain("$0.05");
+		expect(text).toContain(" tools");
+	});
+
+	it("counts each tool call once despite repeated streaming updates", () => {
+		const summary = new CompactTurnSummary(undefined);
+		// message_update re-emits the whole message on every delta: the same
+		// tool call id is reported many times before execution starts.
+		summary.noteToolCall("bash", { command: "ls" }, "call-1");
+		summary.noteToolCall("bash", { command: "ls" }, "call-1");
+		summary.noteToolCall("bash", { command: "ls" }, "call-1");
+		summary.noteToolCall("grep", { pattern: "x" }, "call-2");
+		expect(summary.getStatsText()).toContain("…2");
+		expect(summary.getStatsText()).not.toContain("…3");
+	});
+
+	it("decrements the running count when a tool execution ends", () => {
+		const summary = new CompactTurnSummary(undefined);
+		summary.noteToolCall("bash", { command: "ls" }, "call-1");
+		summary.noteToolCall("grep", { pattern: "x" }, "call-2");
+		summary.toolEnded("bash", false);
+		expect(summary.getStatsText()).toContain("…1");
+		expect(summary.getStatsText()).toContain("✓1");
+		summary.toolEnded("grep", true);
+		expect(summary.getStatsText()).not.toContain("…");
+		expect(summary.getStatsText()).toContain("✗1");
+	});
+
+	it("hides the running count once the turn is finished", () => {
+		const summary = new CompactTurnSummary(undefined);
+		summary.noteToolCall("bash", { command: "ls" }, "call-1");
+		summary.setFinished(false);
+		expect(summary.getStatsText()).not.toContain("…");
 	});
 });
 
@@ -155,7 +242,9 @@ describe("formatters", () => {
 		expect(summarizeToolCall("read", { path: "/a/b.ts", offset: 10 })).toBe(
 			"read /a/b.ts",
 		);
-		expect(summarizeToolCall("bash", { command: "ls -la" })).toBe("bash ls -la");
+		expect(summarizeToolCall("bash", { command: "ls -la" })).toBe(
+			"bash ls -la",
+		);
 		expect(summarizeToolCall("grep", { pattern: "foo", path: "src/" })).toBe(
 			"grep foo",
 		);

@@ -47,7 +47,11 @@ export interface ExtensionsSnapshot {
 	loadErrors: Array<{ path: string; error: string }>;
 }
 
-export type ExtensionsMessage = { type: "getSnapshot" } | { type: "refresh" };
+export type ExtensionsMessage =
+	| { type: "getSnapshot" }
+	| { type: "refresh" }
+	| { type: "openSessions" }
+	| { type: "openSettings" };
 
 export type ExtensionsReply =
 	| { type: "snapshot"; snapshot: ExtensionsSnapshot }

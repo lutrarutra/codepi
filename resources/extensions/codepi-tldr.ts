@@ -78,6 +78,21 @@ export function readTldrModeOverride(
 
 export default function (pi: ExtensionAPI) {
 	let currentEnabled = DEFAULT_TLDR_MODE;
+	// True between agent_start and agent_end. A compact toggle fired mid-turn
+	// cannot create the compact summary row (pi only starts one when a turn
+	// BEGINS in compact mode), so hiding the loader then would leave no
+	// spinner at all until the turn ends.
+	let turnActive = false;
+
+	/**
+	 * Sync pi's working loader with the mode. In TL;DR mode the summary row
+	 * has its own spinner, so pi's loader (the "✳ …" icon + rotating verb
+	 * line, customizable via setWorkingIndicator/setWorkingMessage) is hidden
+	 * entirely. Restored when TL;DR is off.
+	 */
+	function applyWorkingLoader(ctx: ExtensionContext, enabled: boolean): void {
+		ctx.ui.setWorkingVisible(!enabled);
+	}
 
 	/** Resolve and apply the effective mode from ctx, without notifying. */
 	function applyEffectiveMode(ctx: ExtensionContext): void {
@@ -86,11 +101,31 @@ export default function (pi: ExtensionAPI) {
 		const enabled = override ?? setting ?? DEFAULT_TLDR_MODE;
 		currentEnabled = enabled;
 		ctx.ui.setCompactMode(enabled);
+		applyWorkingLoader(ctx, enabled);
 	}
 
-	// Recover the persisted mode (also fires on session reload/fork).
+	// Recover the persisted mode (also fires on session reload/fork). A
+	// reload mid-turn must not treat the in-flight turn as active: the turn
+	// state was reconstructed, and applyEffectiveMode already asserted the
+	// compact loader state.
 	pi.on("session_start", async (_event, ctx) => {
+		turnActive = false;
 		applyEffectiveMode(ctx);
+	});
+
+	// Re-assert loader visibility every turn: pi resets workingVisible to
+	// true internally on session reset, and the loader would otherwise be
+	// created when streaming starts.
+	pi.on("agent_start", async (_event, ctx) => {
+		turnActive = true;
+		applyWorkingLoader(ctx, currentEnabled);
+	});
+
+	// Turn finished: drop the turn-active gate and re-assert the compact
+	// state, which clears the loader kept spinning by a mid-turn toggle.
+	pi.on("agent_end", async (_event, ctx) => {
+		turnActive = false;
+		applyWorkingLoader(ctx, currentEnabled);
 	});
 
 	pi.registerCommand("codepi-toggle-tldr", {
@@ -100,7 +135,15 @@ export default function (pi: ExtensionAPI) {
 			const next = !(ctx.ui.isCompactMode?.() ?? currentEnabled);
 			currentEnabled = next;
 			ctx.ui.setCompactMode(next);
-			pi.appendEntry(MODE_ENTRY_TYPE, { enabled: next, timestamp: Date.now() });
+			// Toggling ON mid-turn: pi has no compact summary row for the
+			// in-flight turn, so hiding the loader would leave no spinner at
+			// all. Keep it spinning; agent_end/agent_start re-assert the
+			// compact (hidden) state.
+			ctx.ui.setWorkingVisible(!next || turnActive);
+			pi.appendEntry(MODE_ENTRY_TYPE, {
+				enabled: next,
+				timestamp: Date.now(),
+			});
 			ctx.ui.notify(
 				next
 					? "TL;DR mode on — agent activity collapses to a summary."

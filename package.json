@@ -16,6 +16,11 @@
     "Chat",
     "Programming Languages"
   ],
+  "icon": "media/favicon.png",
+  "galleryBanner": {
+    "color": "#09090b",
+    "theme": "dark"
+  },
   "main": "./dist/extension.js",
   "enabledApiProposals": [
     "terminalDataWriteEvent"
@@ -49,6 +54,7 @@
         {
           "id": "codepi.sessionsList",
           "name": "Sessions",
+          "type": "webview",
           "when": "codepi.sidebarTab == sessions"
         },
         {
@@ -161,21 +167,10 @@
       }
     ],
     "menus": {
-      "view/title": [
+      "commandPalette": [
         {
-          "command": "codepi.newSession",
-          "when": "view == codepi.sessionsList",
-          "group": "navigation"
-        },
-        {
-          "command": "codepi.refreshSessions",
-          "when": "view == codepi.sessionsList",
-          "group": "navigation"
-        },
-        {
-          "command": "codepi.openSettingsTab",
-          "when": "view == codepi.sessionsList",
-          "icon": "$(gear)"
+          "command": "codepi.openExtensionsTab",
+          "when": "false"
         }
       ],
       "view/item/context": [

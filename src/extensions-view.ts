@@ -53,6 +53,14 @@ export class ExtensionsViewProvider implements vscode.WebviewViewProvider {
 
 	private async handleMessage(msg: ExtensionsMessage): Promise<void> {
 		try {
+			if (msg.type === "openSessions") {
+				await vscode.commands.executeCommand("codepi.openSessionsTab");
+				return;
+			}
+			if (msg.type === "openSettings") {
+				await vscode.commands.executeCommand("codepi.openSettingsTab");
+				return;
+			}
 			if (msg.type === "refresh") {
 				const sdk = await getSdk();
 				// Not re-exported from the SDK root in the pinned version; call

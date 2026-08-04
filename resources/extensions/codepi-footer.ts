@@ -117,10 +117,12 @@ export default function (pi: ExtensionAPI) {
 					// Git branch — use success color
 					const gitStr = branch ? theme.fg("toolDiffAdded", " " + branch) : "";
 
-					// Mode badge (codepi-modes extension) — icon + lowercase label, next
-					// to the thinking level. ASK → accent (blue), PLAN → warning
+					// Mode badge (codepi-modes extension) — icon + lowercase bold label,
+					// next to the thinking level. ASK → accent (blue), PLAN → warning
 					// (amber), IMPLEMENT → success (green). Icons are nerd-font
-					// glyphs shipped in the bundled Fira Code Nerd Font.
+					// codicons shipped in the bundled Fira Code Nerd Font (same family
+					// as the bash badge below); the label is bold like the bash
+					// badge's ask/allow so both read at the same visual weight.
 					const modeStatus = footerData
 						.getExtensionStatuses()
 						.get("codepi-modes");
@@ -128,10 +130,10 @@ export default function (pi: ExtensionAPI) {
 						string,
 						{ icon: string; label: string; color: string }
 					> = {
-						ASK: { icon: "\u{F059}", label: "ask", color: "accent" },
-						PLAN: { icon: "\u{F0CA}", label: "plan", color: "warning" },
+						ASK: { icon: "\u{EB32}", label: "ask", color: "accent" },
+						PLAN: { icon: "\u{EAB3}", label: "plan", color: "warning" },
 						IMPLEMENT: {
-							icon: "\u{F121}",
+							icon: "\u{EAC4}",
 							label: "implement",
 							color: "success",
 						},
@@ -140,16 +142,16 @@ export default function (pi: ExtensionAPI) {
 					const modeBadge = modeStyle
 						? theme.fg(
 								modeStyle.color as any,
-								modeStyle.icon + " " + modeStyle.label,
+								modeStyle.icon + " " + theme.bold(modeStyle.label),
 							)
 						: "";
 
 					// Bash approval badge (codepi-bash extension) — shown only when
-					// the extension is loaded. Terminal icon + BOTH mode options
-					// (`ask/allow`) so it reads as a toggle, never confused with the
-					// codepi-modes badge. The ACTIVE option is highlighted (bold +
-					// color: ask → warning/amber, allow → success/green) and the
-					// inactive one is dimmed — no brackets needed.
+					// the extension is loaded. Terminal icon + ALL mode options
+					// (ask/allow/disabled) so it reads as a toggle, never confused with
+					// the codepi-modes badge. The ACTIVE option is highlighted (bold +
+					// color: ask → warning/amber, allow → success/green, disabled →
+					// error/red) and the inactive ones are dimmed — no brackets needed.
 					// Rendered right of the thinking level, immediately left of the
 					// git branch.
 					const bashStatus = footerData
@@ -165,7 +167,11 @@ export default function (pi: ExtensionAPI) {
 								? theme.fg("success", BASH_ICON + " ") +
 									theme.fg("dim", "ask/") +
 									theme.fg("success", theme.bold("allow"))
-								: "";
+								: bashStatus === "disabled"
+									? theme.fg("error", BASH_ICON + " ") +
+										theme.fg("dim", "ask/allow/") +
+										theme.fg("error", theme.bold("disabled"))
+									: "";
 
 					// ===== LEFT: stats with │ separators between each =====
 					const leftParts = [
@@ -191,15 +197,28 @@ export default function (pi: ExtensionAPI) {
 					const right = rightParts.join(" " + theme.fg("dim", "•") + " ");
 					const midSep = right ? " " + theme.fg("dim", "│") + " " : "";
 
+					// Side margin: keep the footer content off the terminal edges (1
+					// cell ≈ 5-10px depending on the terminal font).
+					const MARGIN = 1;
+					const innerWidth = Math.max(1, width - MARGIN * 2);
+
 					// Pad left side so right side is right-aligned
 					const leftContent = left + midSep;
 					const padNeeded = Math.max(
 						1,
-						width - visibleWidth(leftContent) - visibleWidth(right),
+						innerWidth - visibleWidth(leftContent) - visibleWidth(right),
 					);
 					const pad = " ".repeat(padNeeded);
 
-					return [truncateToWidth(leftContent + pad + right, width)];
+					const content = truncateToWidth(
+						leftContent + pad + right,
+						innerWidth,
+					);
+					return [
+						" ".repeat(MARGIN) +
+							content +
+							" ".repeat(Math.max(0, width - MARGIN - visibleWidth(content))),
+					];
 				},
 			};
 		});

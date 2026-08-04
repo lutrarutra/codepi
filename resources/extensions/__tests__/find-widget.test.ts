@@ -36,7 +36,8 @@ beforeAll(() => {
 			disconnect() {}
 		};
 	}
-	(HTMLCanvasElement.prototype as any).getContext = () => new Proxy(
+	(HTMLCanvasElement.prototype as any).getContext = () =>
+		new Proxy(
 			{},
 			{
 				get(t: any, p: string | symbol) {
@@ -74,7 +75,9 @@ async function openWidget(
 ) {
 	const find = createFindWidget(term, container);
 	find.open();
-	const input = container.querySelector(".codepi-find-input") as HTMLInputElement;
+	const input = container.querySelector(
+		".codepi-find-input",
+	) as HTMLInputElement;
 	input.value = query;
 	input.dispatchEvent(new Event("input", { bubbles: true }));
 	const key = (k: string) =>

@@ -19,7 +19,7 @@ import {
 	matchesKey,
 } from "@earendil-works/pi-tui";
 import { readFile, writeFile, rm, mkdir } from "node:fs/promises";
-import { dirname, relative, resolve } from "node:path";
+import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
 
 // Custom session entry types
 // New name: filechanges
@@ -71,13 +71,16 @@ function stripAtPrefix(p: string): string {
 function normalizeToolPath(
 	cwd: string,
 	raw: string,
-): { absPath: string; relPath: string } {
+): { absPath: string; relPath: string; inCwd: boolean } {
 	const cleaned = stripAtPrefix(raw);
 	const absPath = resolve(cwd, cleaned);
-	// Use relative path for storage/UI when possible. If it escapes cwd, keep the cleaned input.
+	// True when the resolved path stays inside cwd. Out-of-cwd paths (e.g.
+	// /tmp edits) are NOT tracked by this extension — only cwd files are.
 	const rel = relative(cwd, absPath);
-	const relPath = rel && !rel.startsWith("..") && rel !== "" ? rel : cleaned;
-	return { absPath, relPath };
+	const inCwd = !isAbsolute(rel) && rel !== ".." && !rel.startsWith(`..${sep}`);
+	// Use relative path for storage/UI when possible. If it escapes cwd, keep the cleaned input.
+	const relPath = inCwd && rel !== "" ? rel : cleaned;
+	return { absPath, relPath, inCwd };
 }
 
 async function readTextOrNull(absPath: string): Promise<string | null> {
@@ -107,8 +110,17 @@ function countDiffLines(unifiedDiff: string): {
 	return { added, removed };
 }
 
+/** Diff-stat parts with zero counts omitted: [+1] / [-2] / [+1,-2] / []. */
+function addedRemovedParts(added: number, removed: number): string[] {
+	const parts: string[] = [];
+	if (added > 0) parts.push(`+${added}`);
+	if (removed > 0) parts.push(`-${removed}`);
+	return parts;
+}
+
 function formatAddedRemovedPlain(added: number, removed: number): string {
-	return `(+${added}/-${removed})`;
+	const parts = addedRemovedParts(added, removed);
+	return parts.length === 0 ? "" : `(${parts.join("/")})`;
 }
 
 /**
@@ -123,21 +135,27 @@ function pendingCountsFor(
 }
 
 function styleAddedRemovedForList(theme: any, text: string): string {
-	// File rows use "+x/-y" as description; other rows use normal sentences.
-	const m = text.match(/^\+(\d+)\/-(\d+)$/);
-	if (!m) return theme.fg("muted", text);
-	const added = Number(m[1]);
-	const removed = Number(m[2]);
-
-	const plus =
-		added === 0
-			? theme.fg("text", `+${added}`)
-			: theme.fg("success", `+${added}`);
-	const minus =
-		removed === 0
-			? theme.fg("text", `-${removed}`)
-			: theme.fg("error", `-${removed}`);
-	return plus + theme.fg("text", "/") + minus;
+	// File rows use diff-stat descriptions built by formatAddedRemovedPlain
+	// ("(+1)", "(+1/-2)", "(-2)"); other rows use normal sentences. Zero
+	// counts are omitted upstream, so every part is a real change.
+	const inner =
+		text.startsWith("(") && text.endsWith(")") ? text.slice(1, -1) : text;
+	const parts = inner.split("/");
+	if (
+		parts.length === 0 ||
+		parts.length > 2 ||
+		parts.some((p) => !/^[+-]\d+$/.test(p))
+	) {
+		return theme.fg("muted", text);
+	}
+	const styled = parts.map((p) =>
+		theme.fg(p.startsWith("+") ? "success" : "error", p),
+	);
+	return (
+		theme.fg("text", "(") +
+		styled.join(theme.fg("text", "/")) +
+		theme.fg("text", ")")
+	);
 }
 
 function formatStatus(
@@ -157,13 +175,23 @@ function formatStatus(
 	return theme.fg("muted", `Δ ${edited}  + ${created}`);
 }
 
+/** Stable ordering: alphabetical by display path. The reconcile loop
+ * re-stamps updatedAt every second, so recency order would reshuffle on
+ * every re-render; alphabetical keeps the list identical across renders. */
+function byDisplayPath(a: TrackedFile, b: TrackedFile): number {
+	return a.displayPath.localeCompare(b.displayPath);
+}
+
 function buildWidgetLines(
 	tracked: Map<string, TrackedFile>,
 	pending: Map<string, { added: number; removed: number }>,
 	theme?: any,
 ): string[] | undefined {
 	if (tracked.size === 0) return undefined;
-	const items = [...tracked.values()].sort((a, b) => b.updatedAt - a.updatedAt);
+	// Stable ordering: the reconcile loop re-stamps updatedAt every second, so
+	// recency order would reshuffle on each re-render. Alphabetical keeps the
+	// list identical across renders.
+	const items = [...tracked.values()].sort(byDisplayPath);
 	const max = 8;
 	const lines: string[] = [];
 
@@ -176,29 +204,23 @@ function buildWidgetLines(
 		const { added, removed } = pendingCountsFor(t, pending);
 
 		if (!theme) {
-			lines.push(
-				`${tag} ${t.displayPath} ${formatAddedRemovedPlain(added, removed)}`,
-			);
+			const stat = formatAddedRemovedPlain(added, removed);
+			lines.push(`${tag} ${t.displayPath}${stat ? ` ${stat}` : ""}`);
 			continue;
 		}
 
 		const prefix =
 			theme.fg("muted", `${tag} `) + theme.fg("muted", `${t.displayPath} `);
-		let counts: string;
-		const plus =
-			added === 0
-				? theme.fg("text", `+${added}`)
-				: theme.fg("success", `+${added}`);
-		const minus =
-			removed === 0
-				? theme.fg("text", `-${removed}`)
-				: theme.fg("error", `-${removed}`);
-		counts =
-			theme.fg("text", "(") +
-			plus +
-			theme.fg("text", "/") +
-			minus +
-			theme.fg("text", ")");
+		const parts = addedRemovedParts(added, removed);
+		const styled = parts.map((p) =>
+			theme.fg(p.startsWith("+") ? "success" : "error", p),
+		);
+		const counts =
+			parts.length === 0
+				? ""
+				: theme.fg("text", "(") +
+					styled.join(theme.fg("text", "/")) +
+					theme.fg("text", ")");
 
 		lines.push(prefix + counts);
 	}
@@ -502,9 +524,7 @@ export default function (pi: ExtensionAPI) {
 			);
 		}
 
-		const items = [...tracked.values()].sort(
-			(a, b) => b.updatedAt - a.updatedAt,
-		);
+		const items = [...tracked.values()].sort(byDisplayPath);
 
 		const errors: string[] = [];
 
@@ -591,9 +611,7 @@ export default function (pi: ExtensionAPI) {
 			updateUi(ctx);
 
 			if (!ctx.hasUI) {
-				const items = [...tracked.values()].sort(
-					(a, b) => b.updatedAt - a.updatedAt,
-				);
+				const items = [...tracked.values()].sort(byDisplayPath);
 				if (items.length === 0) {
 					console.log("filechanges: no pi-made modifications recorded.");
 					return;
@@ -609,9 +627,7 @@ export default function (pi: ExtensionAPI) {
 				await ctx.waitForIdle();
 				updateUi(ctx);
 
-				const items = [...tracked.values()].sort(
-					(a, b) => b.updatedAt - a.updatedAt,
-				);
+				const items = [...tracked.values()].sort(byDisplayPath);
 				if (items.length === 0) {
 					ctx.ui.notify(
 						"filechanges: no pi-made modifications recorded.",
@@ -637,7 +653,7 @@ export default function (pi: ExtensionAPI) {
 						label: `${t.kind === "new" ? "+" : "Δ"} ${t.displayPath}`,
 						description: (() => {
 							const c = pendingCountsFor(t, pendingByRelPath);
-							return `+${c.added}/-${c.removed}`;
+							return formatAddedRemovedPlain(c.added, c.removed);
 						})(),
 					})),
 				];
@@ -788,7 +804,13 @@ export default function (pi: ExtensionAPI) {
 			if (entry.customType === ENTRY_BASELINE) {
 				const data = entry.data as any;
 				if (!data?.path) continue;
-				const { absPath, relPath } = normalizeToolPath(ctx.cwd, data.path);
+				const { absPath, relPath, inCwd } = normalizeToolPath(
+					ctx.cwd,
+					data.path,
+				);
+				// Skip out-of-cwd baselines (e.g. /tmp edits recorded by a
+				// different cwd/session) — only cwd files are tracked.
+				if (!inCwd) continue;
 				baselines.set(relPath, {
 					path: relPath,
 					absPath,
@@ -872,7 +894,11 @@ export default function (pi: ExtensionAPI) {
 			isToolCallEventType("edit", event) ||
 			isToolCallEventType("write", event)
 		) {
-			const { absPath, relPath } = normalizeToolPath(ctx.cwd, event.input.path);
+			const { absPath, relPath, inCwd } = normalizeToolPath(
+				ctx.cwd,
+				event.input.path,
+			);
+			if (!inCwd) return; // only track changes inside the session cwd
 			const before = await readTextOrNull(absPath);
 			pendingByToolCallId.set(event.toolCallId, {
 				path: relPath,

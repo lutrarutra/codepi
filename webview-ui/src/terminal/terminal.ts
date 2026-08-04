@@ -249,7 +249,9 @@ function hideLoading(): void {
 		term.open(container);
 		applyBackground();
 
-		const find = createFindWidget(term, container);
+		const find = createFindWidget(term, container, () =>
+			post({ command: "codepi:newSession" }),
+		);
 
 		// Ctrl+click links (VS Code built-in terminal behavior): every word in
 		// the TUI output is a link candidate; the hover underline + tooltip only
@@ -388,6 +390,17 @@ function hideLoading(): void {
 				// twice; open() is idempotent anyway).
 				e.preventDefault();
 				find.open();
+				return false;
+			}
+			if (ctrlLike && isKey("n")) {
+				// Ctrl+N: launch a new CodePi session in a new tab. Unlike
+				// Ctrl+F (idempotent open), creating a session must happen
+				// exactly once, so act only on keydown — the handler also runs
+				// for the synthesized keypress.
+				e.preventDefault();
+				if (e.type === "keydown") {
+					post({ command: "codepi:newSession" });
+				}
 				return false;
 			}
 			if (e.key === "Escape" && find.isOpen()) {
