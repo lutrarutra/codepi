@@ -1,13 +1,15 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 // The pure compact-mode logic ships inside the pi dist patch (compact-summary).
 // Deep import via relative path: the pi package's "exports" map only exposes
 // "." and this module is not part of the public API surface.
 import {
 	aggregateCompactTurn,
+	formatActivityLine,
 	formatCompactDuration,
 	formatTokenCount,
 	groupTurnsForCompact,
 	summarizeToolCall,
+	ACTIVITY_REFRESH_INTERVAL_MS,
 	type CompactSegment,
 	CompactTurnSummary,
 } from "../../../node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/compact-summary.js";
@@ -185,19 +187,18 @@ describe("CompactTurnSummary stats line", () => {
 		const text = finishedSummary().getStatsText();
 		expect(text).toContain("✓1");
 		expect(text).toContain("✗4");
-		expect(text).toContain("↑372k");
-		expect(text).toContain("↓4.1k");
+		expect(text).toContain("↑ 372k");
+		expect(text).toContain("↓ 4.1k");
 		expect(text).toContain("$0.05");
 		expect(text).toContain(" tools");
 	});
 
-	it("renders thinking tokens as the font thought-bubble glyph plus a spaced count", () => {
+	it("renders thinking tokens as the fa-brain glyph plus a spaced count", () => {
 		const text = finishedSummary().getStatsText();
-		// md-thought-bubble (U+F07F6, surrogate pair \uDB81\uDDF6) from the
-		// bundled Fira Code Nerd Font — a monochrome 1-cell glyph (unlike the
-		// wide 🧠 emoji) so it cannot bleed into the token count; a space
-		// keeps them clearly apart.
-		expect(text).toContain("\uDB81\uDDF6 1.2k");
+		// fa-brain (U+EE9C) from the bundled Fira Code Nerd Font — a
+		// monochrome 1-cell glyph (unlike the wide 🧠 emoji) so it cannot bleed
+		// into the token count; a space keeps them clearly apart.
+		expect(text).toContain("\u{EE9C} 1.2k");
 		expect(text).not.toContain("🧠");
 	});
 
@@ -266,5 +267,183 @@ describe("formatters", () => {
 			"grep foo",
 		);
 		expect(summarizeToolCall("edit", {})).toBe("edit");
+	});
+});
+
+describe("formatActivityLine", () => {
+	it("shows spinner + text while live", () => {
+		expect(
+			formatActivityLine({ live: true, text: "bash", spinnerFrame: 0 }),
+		).toBe("⠋ bash");
+		expect(
+			formatActivityLine({
+				live: true,
+				text: "checking the docs",
+				spinnerFrame: 1,
+			}),
+		).toBe("⠙ checking the docs");
+	});
+
+	it("shows the bare spinner while live with no sampled activity yet", () => {
+		expect(
+			formatActivityLine({ live: true, text: undefined, spinnerFrame: 2 }),
+		).toBe("⠹");
+	});
+
+	it("shows static text without a spinner once finished", () => {
+		expect(formatActivityLine({ live: false, text: "done" })).toBe("done");
+		expect(formatActivityLine({ live: false, text: undefined })).toBe("");
+	});
+});
+
+describe("CompactTurnSummary live activity row", () => {
+	// Rows carry ANSI color codes (theme.fg works in the test env), so raw
+	// string length exceeds the visible width — compare the stripped length.
+	const stripAnsi = (s: string) => s.replace(/\u001b\[[0-9;]*m/g, "");
+	it("shows spinner + tool name and parameters while a tool runs", () => {
+		const summary = new CompactTurnSummary(undefined);
+		summary.noteToolCall(
+			"bash",
+			{ command: "ls -la /very/long/path" },
+			"call-1",
+		);
+		const rows = summary.render(60);
+		expect(rows).toHaveLength(2);
+		expect(rows[1]).toContain("⠋");
+		expect(rows[1]).toContain("bash ls -la");
+	});
+
+	it("collapses a long tool call to a single row with an ellipsis", () => {
+		const summary = new CompactTurnSummary(undefined);
+		summary.noteToolCall("bash", { command: "x".repeat(300) }, "call-1");
+		const rows = summary.render(40);
+		expect(rows).toHaveLength(2);
+		expect(stripAnsi(rows[1]).length).toBe(40);
+		expect(stripAnsi(rows[1])).toContain("...");
+	});
+
+	it("ignores streaming tool output entirely (only tool calls/thoughts show)", () => {
+		const summary = new CompactTurnSummary(undefined);
+		// No tool running, no thought: output must not appear at all.
+		summary.notePartialResult({
+			content: [{ type: "text", text: "streaming output line" }],
+		});
+		expect(summary.render(60)[1]).not.toContain("streaming output");
+		summary.noteToolCall("grep", { pattern: "x" }, "call-1");
+		summary.notePartialResult({
+			content: [{ type: "text", text: "more output" }],
+		});
+		const rows = summary.render(60);
+		expect(rows[1]).toContain("grep");
+		expect(rows[1]).not.toContain("more output");
+	});
+
+	it("flushes a thought that arrived during a tool run once the tool ends", () => {
+		const summary = new CompactTurnSummary(undefined);
+		summary.noteToolCall("bash", { command: "ls" }, "call-1");
+		summary.addThinkingDelta("planning the next step");
+		expect(summary.render(60)[1]).toContain("bash");
+		expect(summary.render(60)[1]).not.toContain("planning");
+		summary.toolEnded("bash", false);
+		const rows = summary.render(60);
+		expect(rows[1]).toContain("⠋");
+		expect(rows[1]).toContain("planning the next step");
+		expect(rows[1]).not.toContain("bash");
+	});
+
+	it("moves the spinner off the stats row (single spinner, activity row)", () => {
+		const summary = new CompactTurnSummary(undefined);
+		summary.noteToolCall("bash", { command: "ls" }, "call-1");
+		expect(summary.getStatsText()).toContain("…1");
+		expect(summary.getStatsText()).not.toContain("⠋");
+	});
+
+	it("shows the bare spinner while live with no activity yet", () => {
+		const summary = new CompactTurnSummary(undefined);
+		const rows = summary.render(60);
+		expect(rows).toHaveLength(2);
+		expect(rows[1]).toContain("⠋");
+	});
+
+	it("clips a long thought to a single row with an ellipsis", () => {
+		const summary = new CompactTurnSummary(undefined);
+		summary.addThinkingDelta("word ".repeat(300)); // shown immediately
+		for (const width of [80, 40, 25]) {
+			const rows = summary.render(width);
+			expect(rows).toHaveLength(2);
+			expect(stripAnsi(rows[1]).length).toBe(width);
+		}
+		expect(stripAnsi(summary.render(30)[1])).toContain("...");
+	});
+
+	it("shows a new thought immediately, then samples updates at the refresh interval", () => {
+		// Date must be faked too: the refresh window compares Date.now().
+		vi.useFakeTimers({ toFake: ["Date", "setInterval", "clearInterval"] });
+		vi.setSystemTime(0);
+		try {
+			const summary = new CompactTurnSummary(undefined);
+			summary.startTurn();
+			// First delta shows right away (nothing displayed yet).
+			summary.addThinkingDelta("first draft");
+			expect(summary.render(60)[1]).toContain("first draft");
+			// Same thought keeps streaming: held until the refresh window.
+			summary.addThinkingDelta(" and more words");
+			vi.advanceTimersByTime(ACTIVITY_REFRESH_INTERVAL_MS / 2);
+			expect(summary.render(60)[1]).not.toContain("and more");
+			vi.advanceTimersByTime(ACTIVITY_REFRESH_INTERVAL_MS + 80);
+			expect(summary.render(60)[1]).toContain("and more");
+			summary.dispose();
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
+	it("shows a tool call immediately when it interrupts a thought", () => {
+		const summary = new CompactTurnSummary(undefined);
+		summary.addThinkingDelta("thinking hard");
+		expect(summary.render(60)[1]).toContain("thinking hard");
+		// Tool start is an activity-kind change: no 1s wait.
+		summary.noteToolCall("bash", { command: "ls" }, "call-1");
+		const rows = summary.render(60);
+		expect(rows[1]).toContain("bash");
+		expect(rows[1]).not.toContain("thinking hard");
+	});
+
+	it("samples a newer tool call at the refresh boundary (tool→tool holds)", () => {
+		vi.useFakeTimers({ toFake: ["Date", "setInterval", "clearInterval"] });
+		vi.setSystemTime(0);
+		try {
+			const summary = new CompactTurnSummary(undefined);
+			summary.startTurn();
+			summary.noteToolCall("bash", { command: "ls" }, "call-1");
+			expect(summary.render(60)[1]).toContain("bash");
+			summary.noteToolCall("grep", { pattern: "x" }, "call-2");
+			// Same kind: newest name waits for the refresh window.
+			vi.advanceTimersByTime(ACTIVITY_REFRESH_INTERVAL_MS / 2);
+			expect(summary.render(60)[1]).toContain("bash");
+			expect(summary.render(60)[1]).not.toContain("grep");
+			vi.advanceTimersByTime(ACTIVITY_REFRESH_INTERVAL_MS);
+			expect(summary.render(60)[1]).toContain("grep");
+			summary.dispose();
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
+	it("does not update while a tool runs without new thoughts/tool calls", () => {
+		vi.useFakeTimers({ toFake: ["Date", "setInterval", "clearInterval"] });
+		vi.setSystemTime(0);
+		try {
+			const summary = new CompactTurnSummary(undefined);
+			summary.startTurn();
+			summary.noteToolCall("bash", { command: "ls" }, "call-1");
+			vi.advanceTimersByTime(ACTIVITY_REFRESH_INTERVAL_MS * 3);
+			const rows = summary.render(60);
+			expect(rows[1]).toContain("bash");
+			expect(rows[1]).not.toContain("...");
+			summary.dispose();
+		} finally {
+			vi.useRealTimers();
+		}
 	});
 });

@@ -53,12 +53,25 @@ index 2e8e67c..b0ac8e2 100644
          extensionRunnerRef,
          sessionStartEvent: options.sessionStartEvent,
      });
+diff --git a/node_modules/@earendil-works/pi-coding-agent/dist/core/settings-manager.js b/node_modules/@earendil-works/pi-coding-agent/dist/core/settings-manager.js
+index 4021796..328b1c6 100644
+--- a/node_modules/@earendil-works/pi-coding-agent/dist/core/settings-manager.js
++++ b/node_modules/@earendil-works/pi-coding-agent/dist/core/settings-manager.js
+@@ -864,7 +864,7 @@ export class SettingsManager {
+         this.save();
+     }
+     getEditorPaddingX() {
+-        return this.settings.editorPaddingX ?? 0;
++        return this.settings.editorPaddingX ?? 1;
+     }
+     setEditorPaddingX(padding) {
+         this.globalSettings.editorPaddingX = Math.max(0, Math.min(3, Math.floor(padding)));
 diff --git a/node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/compact-summary.d.ts b/node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/compact-summary.d.ts
 new file mode 100644
-index 0000000..22533b6
+index 0000000..2276f1e
 --- /dev/null
 +++ b/node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/compact-summary.d.ts
-@@ -0,0 +1,54 @@
+@@ -0,0 +1,62 @@
 +/**
 + * Compact mode: per-turn transcript summaries for the interactive mode.
 + */
@@ -100,6 +113,13 @@ index 0000000..22533b6
 +export declare function summarizeToolCall(name: string, args: unknown): string;
 +export declare function groupTurnsForCompact(messages: Message[]): CompactSegment[];
 +export declare function aggregateCompactTurn(entries: Message[]): CompactTurnStats;
++export declare const ACTIVITY_REFRESH_INTERVAL_MS = 1500;
++export interface ActivityLineOptions {
++    live: boolean;
++    text?: string;
++    spinnerFrame?: number;
++}
++export declare function formatActivityLine(options: ActivityLineOptions): string;
 +export declare class CompactTurnSummary extends Container {
 +    constructor(ui: { requestRender(): void }, initial?: CompactTurnSummaryOptions);
 +    startTurn(): void;
@@ -111,14 +131,15 @@ index 0000000..22533b6
 +    addUsage(usage: { input?: number; output?: number; reasoning?: number; cacheRead?: number; cacheWrite?: number; cost?: { total?: number } }): void;
 +    setFinished(aborted?: boolean): void;
 +    applyStats(stats: CompactTurnStats): void;
++    getActivityText(): string;
 +    dispose(): void;
 +}
 diff --git a/node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/compact-summary.js b/node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/compact-summary.js
 new file mode 100644
-index 0000000..c13092d
+index 0000000..52ae523
 --- /dev/null
 +++ b/node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/compact-summary.js
-@@ -0,0 +1,421 @@
+@@ -0,0 +1,521 @@
 +/**
 + * Compact mode: per-turn transcript summaries for the interactive mode.
 + *
@@ -198,6 +219,21 @@ index 0000000..c13092d
 +
 +function firstLineOf(text) {
 +    return truncateActivity(String(text).split("\n")[0]);
++}
++
++/**
++ * Pure builder for the activity row content (unstyled).
++ *
++ * Live turns: spinner + the displayed activity text (sampled by the
++ * component — tool name while a tool runs, otherwise the newest thought),
++ * or the bare spinner before anything was sampled. Finished turns: the
++ * activity as plain static text (no spinner).
++ */
++export function formatActivityLine({ live, text, spinnerFrame }) {
++    if (!live)
++        return text ?? "";
++    const spinner = SPINNER_FRAMES[spinnerFrame] ?? "";
++    return text ? `${spinner} ${text}` : spinner;
 +}
 +
 +/**
@@ -321,12 +357,24 @@ index 0000000..c13092d
 +const SPINNER_INTERVAL_MS = 80;
 +
 +/**
++ * Activity text refreshes at most this often (1.5s): the newest thought / tool
++ * call at check time is shown, then held until the window elapses. The
++ * spinner itself keeps ticking at SPINNER_INTERVAL_MS.
++ */
++export const ACTIVITY_REFRESH_INTERVAL_MS = 1500;
++
++/**
 + * Per-turn summary row shown in compact mode:
-+ *   ⠋ ✓11 ✗1 tools · ↑12.3k ↓4.5k 󰟶 1.2k · $0.42 · 32s · model
-+ *   latest thought / tool call line (text-muted)
++ *   ✓11 ✗1 tools · ↑ 12.3k ↓ 4.5k 󰟶 1.2k · $0.42 · 32s · model   (stats row)
++ *   ⠋ bash / ⠋ current thought… / ⠋                       (activity row, muted)
 + *
-+ * Live turns animate the spinner and elapsed time; finished turns render a
-+ * static record. The component stays in the transcript after finishing.
++ * Live turns animate the spinner and elapsed time. The stats row is a stable
++ * record; the activity row shows the current state — the running tool call
++ * (spinner + name + parameters, one line) while a tool executes, or the
++ * first line of the current thought while reasoning — sampled at most once
++ * per second, always showing the newest activity at check time. Finished
++ * turns render a static record. The component stays in the transcript after
++ * finishing.
 + */
 +export class CompactTurnSummary extends Container {
 +    constructor(ui, initial = {}) {
@@ -340,6 +388,9 @@ index 0000000..c13092d
 +        this.latestActivity = undefined;
 +        this.model = undefined;
 +        this.thinkingBuffer = "";
++        this.runningTool = undefined;
++        this.pendingThought = undefined;
++        this.lastDisplayAt = 0;
 +        this.startedAt = initial.startTime;
 +        this.endedAt = initial.endTime;
 +        this.finished = false;
@@ -372,6 +423,9 @@ index 0000000..c13092d
 +        this.toolsFail = 0;
 +        this.toolsRunning = 0;
 +        this.seenToolIds = new Set();
++        this.runningTool = undefined;
++        this.pendingThought = undefined;
++        this.lastDisplayAt = 0;
 +        this.startSpinner();
 +    }
 +
@@ -382,12 +436,48 @@ index 0000000..c13092d
 +        }
 +    }
 +
-+    /** Feed a thinking_delta while the model is reasoning. */
++    /** Feed a thinking_delta while the model is reasoning (1.5s-sampled display). */
 +    addThinkingDelta(delta) {
 +        if (!delta)
 +            return;
 +        this.thinkingBuffer = `${this.thinkingBuffer}${delta}`.slice(-600);
-+        this.latestActivity = { kind: "thought", text: firstLineOf(this.thinkingBuffer) };
++        // Sampled: the newest first line is shown immediately when no thought
++        // is displayed yet, then refreshed at most once per second (from the
++        // spinner tick) — word-by-word deltas don't flash by unreadably.
++        this.pendingThought = { kind: "thought", text: firstLineOf(this.thinkingBuffer) };
++        this.maybeUpdateActivity();
++    }
++
++    /**
++     * Refresh the live activity line from the newest state.
++     *
++     * Policy (1.5s sampling): a change of activity kind (thought ↔ tool) shows
++     * immediately; refreshed text of the same activity (a streaming thought,
++     * or a newer tool call while another runs) is sampled at most once per
++     * ACTIVITY_REFRESH_INTERVAL_MS, showing the newest content at check
++     * time. If nothing new arrived since the last display (e.g. a tool that
++     * is taking a while), nothing is updated. `force` bypasses the window
++     * (turn ending).
++     */
++    maybeUpdateActivity(force = false) {
++        const now = Date.now();
++        // The running tool wins over any interleaved thought; otherwise the
++        // newest thought line.
++        const next = this.runningTool
++            ? { kind: "tool", text: this.runningTool.text }
++            : this.pendingThought;
++        if (!next)
++            return;
++        const current = this.latestActivity;
++        if (current && current.kind === next.kind && current.text === next.text)
++            return;
++        const sameActivity = current && current.kind === next.kind;
++        if (sameActivity && !force && now - this.lastDisplayAt < ACTIVITY_REFRESH_INTERVAL_MS)
++            return;
++        this.latestActivity = next;
++        this.lastDisplayAt = now;
++        if (next.kind === "thought")
++            this.pendingThought = undefined;
 +        this.updateStatsLine();
 +    }
 +
@@ -405,19 +495,21 @@ index 0000000..c13092d
 +                this.seenToolIds.add(id);
 +            this.toolsRunning++;
 +        }
-+        this.latestActivity = { kind: "tool", text: summarizeToolCall(name, args) };
++        // Live indicator: spinner + tool name + primary parameter, clipped to
++        // one line by the row's TruncatedText ("..."). Streaming output
++        // never appears.
++        this.runningTool = { name, text: summarizeToolCall(name, args) };
++        this.maybeUpdateActivity();
 +        this.updateStatsLine();
 +    }
 +
-+    /** Partial streaming output from a running tool. */
-+    notePartialResult(partial) {
-+        if (!partial || typeof partial !== "object")
-+            return;
-+        const textContent = partial.content?.find?.((c) => c.type === "text");
-+        if (textContent && typeof textContent.text === "string" && textContent.text.trim()) {
-+            this.latestActivity = { kind: "output", text: firstLineOf(textContent.text) };
-+            this.updateStatsLine();
-+        }
++    /**
++     * Partial streaming output from a running tool — intentionally ignored:
++     * the activity row only ever shows the latest tool call or thought, and
++     * while a tool runs it shows spinner + tool name.
++     */
++    notePartialResult(_partial) {
++        // no-op: tool output stays collapsed in TL;DR mode.
 +    }
 +
 +    /** A tool finished executing. */
@@ -429,6 +521,13 @@ index 0000000..c13092d
 +        else {
 +            this.toolsOk++;
 +        }
++        if (this.toolsRunning === 0) {
++            // Last tool done: drop the tool indicator — any thought that
++            // streamed in during the run takes over immediately (activity
++            // kind change).
++            this.runningTool = undefined;
++        }
++        this.maybeUpdateActivity();
 +        this.updateStatsLine();
 +    }
 +
@@ -452,6 +551,7 @@ index 0000000..c13092d
 +        this.finished = true;
 +        this.endedAt = Date.now();
 +        this.stopSpinner();
++        this.maybeUpdateActivity(true);
 +        if (aborted && !this.latestActivity) {
 +            this.latestActivity = { kind: "aborted", text: "aborted" };
 +        }
@@ -484,6 +584,7 @@ index 0000000..c13092d
 +        this.stopSpinner();
 +        this.spinnerInterval = setInterval(() => {
 +            this.spinnerFrame = (this.spinnerFrame + 1) % SPINNER_FRAMES.length;
++            this.maybeUpdateActivity();
 +            this.updateStatsLine();
 +        }, SPINNER_INTERVAL_MS);
 +    }
@@ -497,9 +598,6 @@ index 0000000..c13092d
 +
 +    getStatsText() {
 +        const parts = [];
-+        if (!this.finished) {
-+            parts.push(safeThemeFg("accent", SPINNER_FRAMES[this.spinnerFrame] ?? ""));
-+        }
 +        if (this.toolsOk > 0 || this.toolsFail > 0 || this.toolsRunning > 0) {
 +            const toolParts = [];
 +            if (this.toolsOk > 0)
@@ -512,11 +610,11 @@ index 0000000..c13092d
 +        }
 +        const tokens = [];
 +        if (this.usage.input > 0)
-+            tokens.push(safeThemeFg("success", "↑") + safeThemeFg("text", formatTokenCount(this.usage.input)));
++            tokens.push(safeThemeFg("success", "↑") + safeThemeFg("text", " " + formatTokenCount(this.usage.input)));
 +        if (this.usage.output > 0)
-+            tokens.push(safeThemeFg("error", "↓") + safeThemeFg("text", formatTokenCount(this.usage.output)));
++            tokens.push(safeThemeFg("error", "↓") + safeThemeFg("text", " " + formatTokenCount(this.usage.output)));
 +        if (this.usage.reasoning > 0)
-+            tokens.push(safeThemeFg("accent", "\uDB81\uDDF6") + safeThemeFg("text", " " + formatTokenCount(this.usage.reasoning)));
++            tokens.push(safeThemeFg("accent", "\u{EE9C}") + safeThemeFg("text", " " + formatTokenCount(this.usage.reasoning)));
 +        if (tokens.length > 0)
 +            parts.push(tokens.join(" "));
 +        if (this.usage.cost > 0)
@@ -534,10 +632,33 @@ index 0000000..c13092d
 +        const text = this.getStatsText();
 +        this.statsLine = new TruncatedText(text ? ` ${text}` : "", 0, 0);
 +        this.children[0] = this.statsLine;
-+        this.activityLine.setText(this.latestActivity ? safeThemeFg("muted", this.latestActivity.text) : "");
++        const activity = this.getActivityText();
++        // TruncatedText guarantees a single terminal row (clips with "...");
++        // an empty activity collapses to no row at all (plain Text).
++        this.activityLine = activity
++            ? new TruncatedText(activity, 2, 0)
++            : new Text("", 2, 0);
++        this.children[1] = this.activityLine;
 +        if (this.ui) {
 +            this.ui.requestRender();
 +        }
++    }
++
++    /** Styled activity row content: accent spinner + muted sampled text. */
++    getActivityText() {
++        const raw = formatActivityLine({
++            live: !this.finished,
++            text: this.latestActivity?.text,
++            spinnerFrame: this.spinnerFrame,
++        });
++        if (!raw)
++            return "";
++        if (this.finished)
++            return safeThemeFg("muted", raw);
++        const sep = raw.indexOf(" ");
++        if (sep === -1)
++            return safeThemeFg("accent", raw);
++        return safeThemeFg("accent", raw.slice(0, sep)) + safeThemeFg("muted", raw.slice(sep));
 +    }
 +}
 diff --git a/node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/interactive-mode.d.ts b/node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/interactive-mode.d.ts

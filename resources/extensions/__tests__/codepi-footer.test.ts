@@ -175,9 +175,7 @@ describe("codepi-footer: mode badge", () => {
 	it("renders the bash badge with disabled highlighted in error", async () => {
 		const { component } = await loadFooter(undefined, "disabled");
 		const [line] = component.render(200);
-		expect(line).toContain(
-			`{error:${ICON_BASH} }{error:*disabled*}`,
-		);
+		expect(line).toContain(`{error:${ICON_BASH} }{error:*disabled*}`);
 	});
 
 	it("renders no bash badge when the codepi-bash extension is absent", async () => {
@@ -204,7 +202,7 @@ describe("codepi-footer: mode badge", () => {
 		// brace inflation from truncating it away.
 		expect(line.startsWith(" ")).toBe(true);
 		expect(line.endsWith(" ")).toBe(true);
-		expect(line.slice(1).startsWith("{success:↑}{text:0}")).toBe(true);
+		expect(line.slice(1).startsWith("{success:↑}{text: 0}")).toBe(true);
 		expect(line).toContain(`{accent:${ICON_ASK} *ask*}`);
 	});
 });
@@ -224,7 +222,7 @@ describe("codepi-footer: responsive split", () => {
 		const lines = component.render(200);
 		expect(lines).toHaveLength(2);
 		// Left row: stats, flush left.
-		expect(lines[0].startsWith(" {success:↑}{text:0}")).toBe(true);
+		expect(lines[0].startsWith(" {success:↑}{text: 0}")).toBe(true);
 		// Right row: every right-side segment survives — no "..." collapse.
 		expect(lines[1]).toContain(`{success:${ICON_IMPLEMENT} *implement*}`);
 		expect(lines[1]).toContain(

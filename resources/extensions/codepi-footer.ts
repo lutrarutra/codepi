@@ -87,9 +87,9 @@ export default function (pi: ExtensionAPI) {
 
 					// Colored stat labels — using valid theme token names only
 					const arrowUp =
-						theme.fg("success", "↑") + theme.fg("text", fmt(input));
+						theme.fg("success", "↑") + theme.fg("text", " " + fmt(input));
 					const arrowDown =
-						theme.fg("error", "↓") + theme.fg("text", fmt(output));
+						theme.fg("error", "↓") + theme.fg("text", " " + fmt(output));
 					const reasoningStr =
 						reasoning > 0
 							? theme.fg("accent", "\u{EE9C}") +
@@ -215,9 +215,7 @@ export default function (pi: ExtensionAPI) {
 							" ".repeat(MARGIN) +
 							lead +
 							row +
-							" ".repeat(
-								Math.max(0, width - MARGIN - visibleWidth(lead + row)),
-							)
+							" ".repeat(Math.max(0, width - MARGIN - visibleWidth(lead + row)))
 						);
 					};
 
@@ -233,7 +231,9 @@ export default function (pi: ExtensionAPI) {
 							1,
 							innerWidth - visibleWidth(leftContent) - visibleWidth(right),
 						);
-						return [makeRow(leftContent + " ".repeat(padNeeded) + right, false)];
+						return [
+							makeRow(leftContent + " ".repeat(padNeeded) + right, false),
+						];
 					}
 					if (!right) {
 						// Right-less footer (defensive; today's right side always has

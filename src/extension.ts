@@ -293,10 +293,10 @@ export async function activate(context: vscode.ExtensionContext) {
 					return readTerminalShortcutEnabled(
 						readJsonFile(getSettingsPath()) ?? {},
 					);
-			} catch {
-				return true;
-			}
-		},
+				} catch {
+					return true;
+				}
+			},
 			readShell: () => vscode.env.shell,
 			onDidChangeTerminalShellIntegration: (listener) =>
 				vscode.window.onDidChangeTerminalShellIntegration(listener),
@@ -1330,8 +1330,7 @@ async function setupSessionPanel(
 	// editor group.
 	panel.onDidChangeViewState(
 		(e: vscode.WebviewPanelOnDidChangeViewStateEvent) => {
-			const focused =
-				e.webviewPanel.active && e.webviewPanel.visible;
+			const focused = e.webviewPanel.active && e.webviewPanel.visible;
 			void vscode.commands.executeCommand(
 				"setContext",
 				"codepi.webviewFocused",
@@ -1745,9 +1744,11 @@ function getWorkspaceRoot(): string {
 // ── Panel Status Icon ────────────────────────────────────────
 
 /**
- * Set the tab icon to a colored status dot (no logo):
- * white = idle, cyan = working/generating, yellow = waiting for user input
- * (question / permission approval), red = backend error.
+ * Set the tab icon to the favicon artwork (media/favicon.svg: dark rounded
+ * square + glyph) recolored by state — white = idle, cyan =
+ * working/generating, yellow = waiting for user input (question / permission
+ * approval), red = backend error. Only the glyph color changes; the
+ * background stays the favicon's own #09090b.
  */
 function setPanelIcon(
 	panel: vscode.WebviewPanel,
@@ -1756,7 +1757,7 @@ function setPanelIcon(
 	const uri = vscode.Uri.joinPath(
 		extensionContext!.extensionUri,
 		"media",
-		`pi-icon-${mode}.svg`,
+		`favicon-${mode}.svg`,
 	);
 	panel.iconPath = { light: uri, dark: uri };
 }
