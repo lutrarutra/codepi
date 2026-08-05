@@ -85,7 +85,7 @@ export const DIALOG_OPTIONS = [
 const BASH_DESCRIPTION = `Run a shell command through the VS Code terminal, in the given working directory. Returns stdout and stderr. Output is truncated to the last ${DEFAULT_MAX_LINES} lines or ${DEFAULT_MAX_BYTES / 1024}KB (whichever is hit first); if truncated, the full output is saved to a temp file and the path is reported. Optionally provide a timeout in seconds (default ${DEFAULT_TIMEOUT_SECONDS}). \`command\` may be a single command string or an array of commands, which are joined with " && " and run sequentially.
 
 USE ONLY AS A LAST RESORT — prefer the dedicated tools whenever they can do the job:
-- search file names → find_files
+- search file names → find
 - search file CONTENTS → grep (never use bash grep)
 - read files → read
 - create/edit files → write / edit (never use bash sed, echo >, or cat >)
@@ -93,8 +93,9 @@ USE ONLY AS A LAST RESORT — prefer the dedicated tools whenever they can do th
 Use bash only for what a shell uniquely does: build/test/install/run commands, git operations, process management, and filesystem operations beyond the other tools' scope.`;
 
 const BASH_PROMPT_GUIDELINES: string[] = [
-	"Prefer dedicated tools over bash: grep for content search, find_files for file names, read for file contents, edit/write for changes, get_diagnostics for problems. Use bash only when a shell uniquely does the job (build, test, run, git, install, process management).",
+	"Prefer dedicated tools over bash: grep for content search, find for file names, read for file contents, edit/write for changes, get_diagnostics for problems. Use bash only when a shell uniquely does the job (build, test, run, git, install, process management).",
 	"Do not use bash for tasks other tools already cover (no `bash grep`, no `bash sed`-style edits).",
+	"Use the cwd parameter to set the working directory instead of prefixing commands with `cd <dir> &&`. The session cwd is already the default.",
 ];
 
 const BASH_SCHEMA = Type.Object({

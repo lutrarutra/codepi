@@ -43,14 +43,6 @@ body {
 	color: var(--vscode-charts-green, #89d185);
 }
 
-.ext-legend {
-	display: flex;
-	gap: 8px;
-	flex-wrap: wrap;
-	font-size: 11px;
-	color: var(--vscode-descriptionForeground);
-}
-
 .ext-controls {
 	display: flex;
 	gap: 6px;
@@ -197,6 +189,7 @@ body {
 	align-items: center;
 	gap: 6px;
 	font-size: 12px;
+	padding: 2px 0;
 }
 
 .cmd-name {
@@ -220,20 +213,14 @@ body {
 	padding: 1px 6px;
 	border-radius: 8px;
 	white-space: nowrap;
-}
-
-.chip-safe {
-	background: var(--vscode-inputValidation-infoBackground, transparent);
-	color: var(--vscode-charts-green, #89d185);
-	border: 1px solid var(--vscode-charts-green, #89d185);
-}
-
-.chip-whitelisted {
-	color: var(--vscode-charts-yellow, #e2c08d);
-	border: 1px solid var(--vscode-charts-yellow, #e2c08d);
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	line-height: 1.2;
 }
 
 .chip-blocked {
+	background: var(--vscode-inputValidation-errorBackground, transparent);
 	color: var(--vscode-errorForeground, #f48771);
 	border: 1px solid var(--vscode-errorForeground, #f48771);
 }
@@ -241,4 +228,17 @@ body {
 .card-meta {
 	font-size: 10px;
 	color: var(--vscode-descriptionForeground);
+}
+
+.row-overridden {
+	opacity: 0.5;
+}
+
+.row-overridden .tool-name {
+	text-decoration: line-through;
+}
+
+.tag-override {
+	color: var(--vscode-charts-yellow, #e2c08d);
+	font-style: italic;
 }

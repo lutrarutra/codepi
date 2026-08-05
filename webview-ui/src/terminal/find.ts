@@ -29,6 +29,7 @@ export function createFindWidget(
 	term: Terminal,
 	container: HTMLElement,
 	onNewSession?: () => void,
+	onViewportMoved?: () => void,
 ): FindWidget {
 	const addon = new SearchAddon();
 	term.loadAddon(addon);
@@ -196,6 +197,11 @@ export function createFindWidget(
 		});
 		if (ok) {
 			registerAnchor();
+			// Navigation scrolled the viewport to a match — that is the user's
+			// intent, so the viewport anchor must follow (and the guard must
+			// not snap the viewport back to the pre-find position on the next
+			// write).
+			onViewportMoved?.();
 		} else {
 			safe(() => term.clearSelection());
 		}
@@ -344,7 +350,7 @@ export function createFindWidget(
 		}
 	};
 
-	addon.onDidChangeResults((e) => {
+	addon.onDidChangeResults((e: { resultIndex: number; resultCount: number }) => {
 		resultIndex = e.resultIndex;
 		resultCount = e.resultCount;
 		updateCounter();

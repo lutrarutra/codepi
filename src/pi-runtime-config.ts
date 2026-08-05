@@ -36,6 +36,7 @@ export function buildPiRuntimeResourcePaths(
 		["codepi-modes", "codepi-modes.ts"],
 		["codepi-bash", "codepi-bash.ts"],
 		["codepi-context", "codepi-context.ts"],
+		["codepi-task", "codepi-task.ts"],
 	]
 		.filter(([id]) =>
 			enabledIds.has(
@@ -44,7 +45,8 @@ export function buildPiRuntimeResourcePaths(
 					| "codepi-diff"
 					| "codepi-modes"
 					| "codepi-bash"
-					| "codepi-context",
+					| "codepi-context"
+					| "codepi-task",
 			),
 		)
 		.map(([, filename]) => join(extensionResourcesDir, filename));

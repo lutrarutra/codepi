@@ -243,7 +243,7 @@ describe("buildSnapshot", () => {
 				description: "Read a file",
 				askMode: "safe",
 			},
-			{ name: "bash", label: "Bash", description: "Run", askMode: "blocked" },
+			{ name: "bash", label: "Bash", description: "Run", askMode: "blocked", overriddenBy: "codepi-bash" },
 		]);
 		expect(snapshot.loadErrors).toEqual([
 			{
@@ -274,6 +274,35 @@ describe("buildSnapshot", () => {
 			coreTools: [],
 		});
 		expect(snapshot.extensions[0].enabled).toBe(false);
+	});
+
+	it("marks core tools overridden by enabled extensions", () => {
+		const snapshot2 = buildSnapshot({
+			...ROOTS,
+			settings: {},
+			mode: { active: false },
+			extensions: [
+				{
+					resolvedPath: "/ext/codepi/resources/extensions/codepi-bash.ts",
+					commands: new Map(),
+					tools: new Map([["bash", { definition: { name: "bash", label: "Bash", description: "Run" } }]]),
+					flags: new Map(),
+					shortcuts: new Map(),
+					handlers: new Map(),
+					messageRenderers: new Map(),
+				},
+			],
+			loadErrors: [],
+			coreCommands: [],
+			coreTools: [
+				{ name: "read", label: "Read", description: "Read a file" },
+				{ name: "bash", label: "Bash", description: "Run" },
+				{ name: "grep", label: "Grep", description: "Grep" },
+			],
+		});
+		expect(snapshot2.core.tools[0].overriddenBy).toBeUndefined();
+		expect(snapshot2.core.tools[1].overriddenBy).toBe("codepi-bash");
+		expect(snapshot2.core.tools[2].overriddenBy).toBeUndefined();
 	});
 
 	it("produces a JSON-safe snapshot", () => {

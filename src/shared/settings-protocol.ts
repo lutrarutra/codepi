@@ -7,6 +7,7 @@ export interface BundledResourceRow {
 		| "codepi-modes"
 		| "codepi-bash"
 		| "codepi-context"
+		| "codepi-task"
 		| "nebula-pulse";
 	label: string;
 	kind: "extension" | "theme";

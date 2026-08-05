@@ -9,6 +9,13 @@
  *      - `ask_user_question` (the pi agent package dialog) always blocks
  *      - `bash` only blocks when the per-session approval mode is "ask" (the
  *        4-option Yes/No/Revise/auto-approve dialog gates every invocation)
+ *  - `extension_ui_start/end` — an extension opened a blocking UI dialog
+ *    (ctx.ui.select / ctx.ui.input, e.g. the safety-guard "Allow this
+ *    action?" permission dialog). The dialog opens inside the tool_call
+ *    hook, so `tool_execution_start` alone cannot detect it — the session
+ *    emits these events when the interactive mode shows/hides the dialog.
+ *    Only flips to "waiting" while a turn is active, so user-initiated
+ *    extension dialogs (slash commands) while idle stay white.
  *  - `turn_end` with `message.errorMessage` — failed turn (red)
  *
  * Limitation (shared with installAutoVerify): the subscription is attached to
@@ -27,6 +34,8 @@ export type ActivityEvent = {
 	toolCallId?: string;
 	toolName?: string;
 	message?: { errorMessage?: string };
+	/** Which extension UI surface opened/closed ("select" | "input"). */
+	ui?: string;
 };
 
 const INPUT_TOOL_NAMES = new Set(["ask_user_question"]);
@@ -87,10 +96,17 @@ export function createSessionActivityTracker(options: {
 	onActivity: (activity: SessionActivity) => void;
 }): SessionActivityTracker {
 	let activity: SessionActivity = "idle";
+	// True between turn_start and agent_end — gates extension-UI dialogs so
+	// only agent-blocking dialogs flip the indicator to "waiting".
+	let turnActive = false;
 	// toolCallIds of input tools currently executing. Keyed by id (not name) so
 	// an end event always clears its own start — even when the bash approval
 	// mode flips mid-execution (auto-approve picked inside the dialog).
 	const pendingInputToolIds = new Set<string>();
+	// Extension UI dialogs currently open (ctx.ui.select / ctx.ui.input).
+	// Counted (not boolean) so nested dialogs — e.g. approve → "Revise…" —
+	// keep the "waiting" state until the last one closes.
+	let pendingExtensionUiCount = 0;
 
 	const set = (next: SessionActivity): void => {
 		if (next === activity) return;
@@ -101,6 +117,7 @@ export function createSessionActivityTracker(options: {
 	const dispose = options.subscribe((event) => {
 		switch (event.type) {
 			case "turn_start":
+				turnActive = true;
 				set("working");
 				break;
 			case "tool_execution_start": {
@@ -108,24 +125,55 @@ export function createSessionActivityTracker(options: {
 				if (input) {
 					pendingInputToolIds.add(event.toolCallId ?? event.toolName ?? "");
 				}
-				set(pendingInputToolIds.size > 0 ? "waiting" : "working");
+				set(
+					pendingInputToolIds.size > 0 || pendingExtensionUiCount > 0
+						? "waiting"
+						: "working",
+				);
 				break;
 			}
 			case "tool_execution_end":
 				pendingInputToolIds.delete(event.toolCallId ?? event.toolName ?? "");
-				set(pendingInputToolIds.size > 0 ? "waiting" : "working");
+				set(
+					pendingInputToolIds.size > 0 || pendingExtensionUiCount > 0
+						? "waiting"
+						: "working",
+				);
 				break;
 			case "turn_end":
 				set(event.message?.errorMessage ? "error" : "working");
 				break;
 			case "agent_end":
+				turnActive = false;
+				pendingExtensionUiCount = 0;
 				set("idle");
 				break;
 			case "compaction_start":
 				set("working");
 				break;
 			case "compaction_end":
+				turnActive = false;
+				pendingExtensionUiCount = 0;
 				set("idle");
+				break;
+			// Extension UI dialog opened (e.g. safety-guard's permission
+			// dialog, or codepi-bash's approval in any mode) — the agent is
+			// blocked on user input until it closes.
+			case "extension_ui_start":
+				pendingExtensionUiCount++;
+				if (turnActive) set("waiting");
+				break;
+			case "extension_ui_end":
+				pendingExtensionUiCount = Math.max(0, pendingExtensionUiCount - 1);
+				if (turnActive) {
+					set(
+						pendingInputToolIds.size > 0 || pendingExtensionUiCount > 0
+							? "waiting"
+							: "working",
+					);
+				}
+				// No turn active: the dialog never flipped the indicator (only
+				// agent-blocking dialogs do), so nothing to restore.
 				break;
 		}
 	});

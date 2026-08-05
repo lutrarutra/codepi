@@ -90,6 +90,48 @@ describe("createSessionActivityTracker", () => {
 		expect(t.activities()).toEqual(["working", "error", "idle"]);
 	});
 
+	it("marks extension UI dialogs (safety-guard permission) as waiting even in bash auto mode", () => {
+		// The exact reported case: bash auto-approve is on, so tool_execution_start
+		// stays "working" — but safety-guard opens its "Allow this action?" dialog
+		// inside the tool_call hook, which must flip the icon to waiting.
+		const auto = makeTracker(() => "auto");
+		auto.emit({ type: "turn_start" });
+		auto.emit({ type: "tool_execution_start", toolName: "bash" });
+		auto.emit({ type: "extension_ui_start" });
+		auto.emit({ type: "extension_ui_end" });
+		auto.emit({ type: "tool_execution_end", toolName: "bash" });
+		auto.emit({ type: "agent_end" });
+		expect(auto.activities()).toEqual(["working", "waiting", "working", "idle"]);
+	});
+
+	it("does not flip to waiting for extension dialogs while idle (slash commands)", () => {
+		const t = makeTracker();
+		t.emit({ type: "extension_ui_start" });
+		t.emit({ type: "extension_ui_end" });
+		expect(t.activities()).toEqual([]);
+	});
+
+	it("keeps waiting while an input tool and an extension dialog overlap", () => {
+		const t = makeTracker();
+		t.emit({ type: "tool_execution_start", toolName: "ask_user_question" });
+		t.emit({ type: "extension_ui_start" });
+		t.emit({ type: "extension_ui_end" });
+		t.emit({ type: "tool_execution_end", toolName: "ask_user_question" });
+		expect(t.activities()).toEqual(["waiting", "working"]);
+	});
+
+	it("stays waiting across nested dialogs (approve → Revise…)", () => {
+		const t = makeTracker(() => "ask");
+		t.emit({ type: "turn_start" });
+		t.emit({ type: "tool_execution_start", toolName: "bash" });
+		t.emit({ type: "extension_ui_start" }); // approval dialog
+		t.emit({ type: "extension_ui_end" }); // picked "Revise…"
+		t.emit({ type: "extension_ui_start" }); // revision input
+		t.emit({ type: "extension_ui_end" });
+		t.emit({ type: "tool_execution_end", toolName: "bash" });
+		expect(t.activities()).toEqual(["working", "waiting", "working"]);
+	});
+
 	it("treats compaction as busy work", () => {
 		const t = makeTracker();
 		t.emit({ type: "compaction_start" });

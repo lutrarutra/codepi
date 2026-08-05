@@ -22,7 +22,7 @@ export const ASK_ALLOWED_TOOLS_KEY = ["codepi", "modes", "ask", "allowedTools"];
 /**
  * Mirror of the SDK's BUILTIN_SLASH_COMMANDS (dist/core/slash-commands.js),
  * which is not re-exported from the package root. The SDK version is pinned
- * via patch-package (patches/@earendil-works+pi-coding-agent+0.80.1.patch);
+ * via patch-package (patches/@earendil-works+pi-coding-agent+0.83.0.patch);
  * refresh this list if the pinned SDK changes it.
  */
 export const CORE_SLASH_COMMANDS: ReadonlyArray<{
@@ -233,7 +233,7 @@ export function buildSnapshot(input: BuildSnapshotInput): ExtensionsSnapshot {
 	};
 	// Bundled toggles: codepi.bundledExtensions.<id> — id matches displayName
 	// for bundled extensions (codepi-footer, codepi-diff, codepi-modes,
-	// codepi-bash, codepi-context).
+	// codepi-bash, codepi-context, codepi-task).
 	const s = isRecord(input.settings) ? input.settings : {};
 	const codepi = isRecord(s.codepi) ? s.codepi : {};
 	const bundledConfig = isRecord(codepi.bundledExtensions)
@@ -267,9 +267,41 @@ export function buildSnapshot(input: BuildSnapshotInput): ExtensionsSnapshot {
 		};
 	});
 
-	const coreTools: ToolEntry[] = input.coreTools.map((def) =>
+	const coreToolsAll: ToolEntry[] = input.coreTools.map((def) =>
 		toolEntry(def?.name ?? "?", def, baseline, whitelist),
 	);
+
+	// Deduplicate core tools by name: later registrations override earlier
+	// ones (same Map.set ordering as the runtime). Mark earlier duplicates.
+	const seenNames = new Set<string>();
+	const coreTools: ToolEntry[] = [];
+	for (let i = coreToolsAll.length - 1; i >= 0; i--) {
+		const tool = coreToolsAll[i];
+		if (seenNames.has(tool.name)) {
+			tool.overriddenBy = "CodePi (host)";
+			coreTools.unshift(tool);
+		} else {
+			seenNames.add(tool.name);
+			coreTools.unshift(tool);
+		}
+	}
+
+	// Detect core tools overridden by enabled extensions.
+	const enabledExtToolNames = new Map<string, string>();
+	for (const ext of extensions) {
+		if (!ext.enabled) continue;
+		for (const tool of ext.tools) {
+			enabledExtToolNames.set(tool.name, ext.displayName);
+		}
+	}
+	for (const tool of coreTools) {
+		// Host override takes precedence over extension override labeling.
+		if (tool.overriddenBy) continue;
+		const overridingExt = enabledExtToolNames.get(tool.name);
+		if (overridingExt) {
+			tool.overriddenBy = overridingExt;
+		}
+	}
 
 	return {
 		generatedAt: input.generatedAt ?? Date.now(),

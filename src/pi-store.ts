@@ -36,6 +36,7 @@ export interface BundledResourceMetadata {
 		| "codepi-modes"
 		| "codepi-bash"
 		| "codepi-context"
+		| "codepi-task"
 		| "nebula-pulse";
 	label: string;
 	kind: "extension" | "theme";
@@ -70,6 +71,12 @@ export const BUNDLED_RESOURCES: readonly BundledResourceMetadata[] = [
 	{
 		id: "codepi-context",
 		label: "Editor context (snapshot + tools)",
+		kind: "extension",
+		enabledByDefault: true,
+	},
+	{
+		id: "codepi-task",
+		label: "Project tasks (.pi/tasks.json)",
 		kind: "extension",
 		enabledByDefault: true,
 	},
@@ -230,8 +237,6 @@ export const ASK_MODE_DEFAULT_ALLOWED_TOOLS: readonly string[] = [
 	"grep",
 	"find",
 	"ls",
-	"list_dir",
-	"find_files",
 	"get_diagnostics",
 	"web_search",
 	"fetch_content",
@@ -240,6 +245,11 @@ export const ASK_MODE_DEFAULT_ALLOWED_TOOLS: readonly string[] = [
 	// get_editor_context for live state).
 	"get_editor_context",
 	"get_git_diff",
+	// codepi-task: list is a pure read; run is available read-only ONLY for
+	// tasks marked readOnly: true in .pi/tasks.json (enforced by the
+	// codepi-task extension itself via the codepi-modes:mode branch entries).
+	"codepi-task-run",
+	"codepi-task-list",
 ];
 
 /**
@@ -272,6 +282,25 @@ export const ASK_MODE_DEFAULT_ALLOWED_TOOLS_PRE_HEAD: readonly string[] = [
 	"ls",
 	"list_dir",
 	"find_files",
+	"get_diagnostics",
+	"web_search",
+	"fetch_content",
+	"get_editor_context",
+	"get_git_diff",
+];
+
+/**
+ * The Ask-mode allowlist as seeded before codepi-task existed (the default
+ * with context tools and head, but without the task tools). Used to migrate
+ * settings.json files auto-seeded with that default so the (read-only) task
+ * tools become available in Ask mode too.
+ */
+export const ASK_MODE_DEFAULT_ALLOWED_TOOLS_PRE_TASKS: readonly string[] = [
+	"read",
+	"head",
+	"grep",
+	"find",
+	"ls",
 	"get_diagnostics",
 	"web_search",
 	"fetch_content",
@@ -353,6 +382,7 @@ export function seedAskModeAllowedToolsIfMissing(settingsPath: string): void {
 	const HISTORICAL_DEFAULTS: readonly (readonly string[])[] = [
 		ASK_MODE_DEFAULT_ALLOWED_TOOLS_PRE_CONTEXT,
 		ASK_MODE_DEFAULT_ALLOWED_TOOLS_PRE_HEAD,
+		ASK_MODE_DEFAULT_ALLOWED_TOOLS_PRE_TASKS,
 	];
 	const matchesHistoricalDefault = HISTORICAL_DEFAULTS.some((historical) => {
 		const oldDefault = new Set(historical);
@@ -373,6 +403,7 @@ export interface BundledResourceConfig {
 		"codepi-modes": boolean;
 		"codepi-bash": boolean;
 		"codepi-context": boolean;
+		"codepi-task": boolean;
 	};
 	bundledThemes: {
 		"nebula-pulse": boolean;
@@ -394,6 +425,7 @@ export function readBundledResourceConfig(
 			"codepi-modes": true,
 			"codepi-bash": true,
 			"codepi-context": true,
+			"codepi-task": true,
 		},
 		bundledThemes: { "nebula-pulse": true },
 	};
@@ -428,6 +460,10 @@ export function readBundledResourceConfig(
 				typeof extensions?.["codepi-context"] === "boolean"
 					? extensions["codepi-context"]
 					: defaults.bundledExtensions["codepi-context"],
+			"codepi-task":
+				typeof extensions?.["codepi-task"] === "boolean"
+					? extensions["codepi-task"]
+					: defaults.bundledExtensions["codepi-task"],
 		},
 		bundledThemes: {
 			"nebula-pulse":
@@ -468,6 +504,7 @@ export function getEnabledBundledResources(
 						| "codepi-modes"
 						| "codepi-bash"
 						| "codepi-context"
+						| "codepi-task"
 				]
 			: config.bundledThemes["nebula-pulse"],
 	).map((resource) => ({ ...resource }));

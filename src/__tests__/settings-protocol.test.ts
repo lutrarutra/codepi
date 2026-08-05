@@ -29,7 +29,7 @@ describe("settings dashboard protocol", () => {
 			{ settings: true, models: false, auth: true },
 		);
 
-		expect(JSON.stringify(data)).not.toContain("sk-");
+		expect(JSON.stringify(data)).not.toMatch(/sk-[A-Za-z0-9_-]{8,}/);
 		expect(JSON.stringify(data)).not.toContain("token");
 		expect(data.terminalPrefs).toEqual({ fontFamily: "Menlo", fontSize: 16 });
 		expect(data.autoVerify).toBe("nextTurn");

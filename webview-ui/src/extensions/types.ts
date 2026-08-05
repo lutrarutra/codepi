@@ -15,6 +15,8 @@ export interface ToolEntry {
 	label: string;
 	description: string;
 	askMode: AskMode;
+	/** Display name of the enabled extension that overrides this tool, if any. */
+	overriddenBy?: string;
 }
 
 export interface ExtensionEntry {

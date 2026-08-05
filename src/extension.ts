@@ -94,6 +94,11 @@ interface SessionState {
 // sessionId → live TUI session. Each session runs its own InteractiveMode
 // inside a webview panel hosting xterm.js (editor area).
 const sessions = new Map<string, SessionState>();
+/** The CodePi panel currently focused — its editor group is where Ctrl+N
+ *  should open new sessions (as a tab on top of the current one).
+ *  `ViewColumn.Active` is unreliable for webviews: when the active editor is
+ *  itself a webview, VS Code can split the new panel into a fresh group. */
+let activeSessionPanel: vscode.WebviewPanel | undefined;
 let extensionContext: vscode.ExtensionContext | undefined;
 let codePiSessionDir: string | undefined;
 let sessionsProvider: SessionsViewProvider | undefined;
@@ -666,7 +671,7 @@ export async function activate(context: vscode.ExtensionContext) {
 		}),
 	);
 
-	// pi 0.80.1's TUI exposes model switching through its own keybinding and
+	// pi 0.83.0's TUI exposes model switching through its own keybinding and
 	// /model command; no programmatic hook is available, so the palette command
 	// points at the native path.
 	context.subscriptions.push(
@@ -729,6 +734,7 @@ async function pollFileChangesSync(state: SessionState): Promise<void> {
 	}
 	if (changed) {
 		updateReviewStatusBar();
+		syncPendingReviewDots();
 	}
 }
 
@@ -1056,7 +1062,11 @@ async function startTuiSession(
 	const panel = vscode.window.createWebviewPanel(
 		"codepi-tui",
 		computeSessionTitle(sessionManager),
-		vscode.ViewColumn.Active,
+		// Open in the focused CodePi panel's editor group (as a new tab on top
+		// of the current session) rather than a fresh split. ViewColumn.Active
+		// is unreliable here: when the active editor is itself a webview, VS
+		// Code can create a new editor group beside it instead of stacking tabs.
+		activeSessionPanel?.viewColumn ?? vscode.ViewColumn.Active,
 		{
 			enableScripts: true,
 			retainContextWhenHidden: true,
@@ -1285,9 +1295,43 @@ async function setupSessionPanel(
 		state.disposables,
 	);
 
+	// Track whether a CodePi TUI tab is the active editor so VS Code
+	// keybindings (Ctrl+N → new session) only apply when focused. Also track
+	// WHICH panel is focused so new sessions open in its editor group.
+	panel.onDidChangeViewState(
+		(e: vscode.WebviewPanelOnDidChangeViewStateEvent) => {
+			const focused =
+				e.webviewPanel.active && e.webviewPanel.visible;
+			void vscode.commands.executeCommand(
+				"setContext",
+				"codepi.webviewFocused",
+				focused,
+			);
+			if (focused) {
+				activeSessionPanel = e.webviewPanel;
+			} else if (activeSessionPanel === e.webviewPanel) {
+				// This panel lost focus — another panel's event will claim it,
+				// or none is focused anymore.
+				activeSessionPanel = undefined;
+			}
+		},
+		undefined,
+		state.disposables,
+	);
+	// Set initial state — the panel is active when first created.
+	activeSessionPanel = panel;
+	void vscode.commands.executeCommand(
+		"setContext",
+		"codepi.webviewFocused",
+		true,
+	);
+
 	// Clean up session state when its webview panel is closed.
 	panel.onDidDispose(
 		() => {
+			if (activeSessionPanel === panel) {
+				activeSessionPanel = undefined;
+			}
 			cleanupSession(sessionId);
 		},
 		undefined,
@@ -1328,6 +1372,17 @@ function cleanupSession(sessionId: string): void {
 	if (!state) return;
 
 	sessions.delete(sessionId);
+
+	// When the last CodePi panel closes, revert Ctrl+N to normal
+	// VS Code behavior (new untitled file).
+	if (sessions.size === 0) {
+		void vscode.commands.executeCommand(
+			"setContext",
+			"codepi.webviewFocused",
+			false,
+		);
+	}
+
 	// Pending-edit tab dots must drop for this session's files.
 	syncPendingReviewDots();
 
@@ -1512,6 +1567,13 @@ async function startTuiBackend(state: SessionState): Promise<void> {
 			cwd: opts.cwd,
 			agentDir,
 			noTools: "builtin",
+			// Replace pi's built-in tool set entirely (read/bash/edit/write/grep/
+			// find/ls) with nothing — every tool the agent gets comes from
+			// customTools (read, head, write, edit, find, ls, grep,
+			// get_diagnostics) or from bundled extensions (codepi-bash's bash,
+			// codepi-diff, codepi-tldr, codepi-context). No pi built-in can ever
+			// leak into the registry, so codepi-bash is the ONLY bash available.
+			baseToolsOverride: {},
 			customTools,
 			sessionManager: opts.sessionManager,
 			sessionStartEvent: { type: "session_start", reason: "startup" },
@@ -1610,7 +1672,7 @@ function registerPendingReviewDots(context: vscode.ExtensionContext): void {
 		provideFileDecoration(uri: vscode.Uri) {
 			if (!pendingReviewUris.has(uri.toString())) return undefined;
 			return {
-				badge: "●",
+				badge: "•",
 				color: new vscode.ThemeColor("chat.editedFileForeground"),
 				tooltip: "CodePi: edits pending review",
 			};

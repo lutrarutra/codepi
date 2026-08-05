@@ -7,14 +7,10 @@ import type {
 } from "./types";
 
 function AskChip({ askMode }: { askMode: ToolEntry["askMode"] }) {
-	switch (askMode) {
-		case "safe":
-			return <span className="chip chip-safe">✓ read-only safe</span>;
-		case "whitelisted":
-			return <span className="chip chip-whitelisted">★ whitelisted</span>;
-		case "blocked":
-			return <span className="chip chip-blocked">🔒 blocked in Ask</span>;
+	if (askMode === "blocked") {
+		return <span className="chip chip-blocked">🔒 blocked in Ask</span>;
 	}
+	return null;
 }
 
 function CommandRow({ cmd }: { cmd: CommandEntry }) {
@@ -29,14 +25,18 @@ function CommandRow({ cmd }: { cmd: CommandEntry }) {
 	);
 }
 
-function ToolRow({ tool }: { tool: ToolEntry }) {
+function ToolRow({ tool, showOverride }: { tool: ToolEntry; showOverride?: boolean }) {
 	return (
-		<div className="row">
+		<div className={`row${tool.overriddenBy ? " row-overridden" : ""}`}>
 			<span className="tool-name">{tool.name}</span>
-			{tool.label && tool.label !== tool.name && (
-				<span className="row-desc">{tool.label}</span>
+			<span className="row-desc">
+				{tool.label && tool.label !== tool.name ? tool.label : ""}
+			</span>
+			{tool.overriddenBy && showOverride ? (
+				<span className="tag tag-override">overridden by {tool.overriddenBy}</span>
+			) : (
+				<AskChip askMode={tool.askMode} />
 			)}
-			<AskChip askMode={tool.askMode} />
 		</div>
 	);
 }
@@ -48,6 +48,7 @@ function Card({
 	commands,
 	tools,
 	meta,
+	showOverride,
 }: {
 	title: string;
 	badge: string;
@@ -55,6 +56,7 @@ function Card({
 	commands: CommandEntry[];
 	tools: ToolEntry[];
 	meta?: string;
+	showOverride?: boolean;
 }) {
 	return (
 		<div className={`card${disabled ? " card-disabled" : ""}`}>
@@ -77,7 +79,7 @@ function Card({
 				<div className="group">
 					<div className="group-label">Tools</div>
 					{tools.map((tool) => (
-						<ToolRow key={tool.name} tool={tool} />
+						<ToolRow key={tool.name} tool={tool} showOverride={showOverride} />
 					))}
 				</div>
 			)}
@@ -106,6 +108,8 @@ function matchesCore(snapshot: ExtensionsSnapshot, query: string): boolean {
 	if (!query) return true;
 	const hay = [
 		"pi core",
+		"tools",
+		"commands",
 		...snapshot.core.commands.map((c) => c.name),
 		...snapshot.core.tools.map((t) => t.name),
 	]
@@ -141,13 +145,22 @@ export function SnapshotTree({
 				/>
 			))}
 			{coreVisible && (
-				<Card
-					title="pi core (SDK)"
+				<>
+					<Card
+						title="pi core — Tools"
+						badge="builtin"
+						commands={[]}
+						tools={snapshot.core.tools}
+						showOverride
+					/>
+					<Card
+					title="pi core — Commands"
 					badge="builtin"
 					commands={snapshot.core.commands}
-					tools={snapshot.core.tools}
+					tools={[]}
 					meta="Built-in slash commands and SDK tools — not from any extension"
 				/>
+				</>
 			)}
 			{filtered.length === 0 && !coreVisible && (
 				<div className="row-desc">Nothing matches “{query}”.</div>

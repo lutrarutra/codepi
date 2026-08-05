@@ -355,7 +355,7 @@ function AskAllowedToolsCard({ tools }: { tools: string[] }): JSX.Element {
 				/>
 			</div>
 			<p className="settings-help" id="ask-tools-help">
-				e.g. read, grep, find, ls, list_dir, find_files, get_diagnostics,
+				e.g. read, head, grep, find, ls, get_diagnostics,
 				ask_user_question, web_search, fetch_content
 			</p>
 		</section>

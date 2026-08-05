@@ -176,7 +176,7 @@ describe("codepi-footer: mode badge", () => {
 		const { component } = await loadFooter(undefined, "disabled");
 		const [line] = component.render(200);
 		expect(line).toContain(
-			`{error:${ICON_BASH} }{dim:ask/allow/}{error:*disabled*}`,
+			`{error:${ICON_BASH} }{error:*disabled*}`,
 		);
 	});
 

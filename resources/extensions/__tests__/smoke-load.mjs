@@ -134,5 +134,23 @@ await loadExtension("../codepi-tldr.ts", "codepi-tldr", {
 	events: ["session_start"],
 });
 
+await loadExtension("../codepi-task.ts", "codepi-task", {
+	commands: [
+		"codepi-task-create",
+		"codepi-task-edit",
+		"codepi-task-delete",
+		"codepi-task-run",
+		"codepi-task-list",
+	],
+	events: ["before_agent_start", "agent_start", "tool_result", "agent_end"],
+	tools: [
+		"codepi-task-create",
+		"codepi-task-edit",
+		"codepi-task-delete",
+		"codepi-task-run",
+		"codepi-task-list",
+	],
+});
+
 console.log("smoke test: PASS");
 process.exit(0);

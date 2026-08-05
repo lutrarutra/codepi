@@ -24,7 +24,8 @@ GIT_VERSION := $(shell git describe --tags --abbrev=0 2>/dev/null | sed 's/^v//'
 VSCE ?= $(or $(shell command -v vsce 2>/dev/null),npx --yes @vscode/vsce)
 
 .PHONY: help all build build-webview build-extension check-types lint test unit \
-	watch dev smoke verify package vsix install uninstall clean version _sync-version
+	watch dev smoke verify package vsix install uninstall clean version _sync-version \
+	deps deps-root deps-webview
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) \
@@ -34,7 +35,7 @@ help: ## Show this help
 
 all: build ## Alias for `build`
 
-build: build-webview build-extension ## Full production build (webview + extension)
+build: deps build-webview build-extension ## Full production build (webview + extension)
 
 build-webview: ## Build the webview UI (vite, tsc, terminal, fonts)
 	@npm --prefix webview-ui run build
@@ -96,6 +97,16 @@ release: verify package ## Verify everything, then produce the .vsix
 
 uninstall: ## Uninstall CodePi from VS Code
 	code --uninstall-extension lutrarutra.codepi
+
+## ── Dependencies ───────────────────────────────────────────
+
+deps: deps-root deps-webview ## Install all dependencies (root + webview-ui)
+
+deps-root: ## Install root dependencies
+	@npm install
+
+deps-webview: ## Install webview-ui dependencies
+	@npm --prefix webview-ui install
 
 ## ── Cleanup ─────────────────────────────────────────────────
 

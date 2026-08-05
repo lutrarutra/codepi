@@ -231,6 +231,7 @@ function isBundledResourceId(
 		id === "codepi-modes" ||
 		id === "codepi-bash" ||
 		id === "codepi-context" ||
+		id === "codepi-task" ||
 		id === "nebula-pulse"
 	);
 }

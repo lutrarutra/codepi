@@ -413,7 +413,7 @@ export function createEditFileTool(review: ReviewManager): VscodeTool {
 
 /** List directory contents in the workspace. */
 export const listDirTool: VscodeTool = {
-	name: "list_dir",
+	name: "ls",
 	label: "List Directory",
 	description:
 		"List files and directories in a given path using VS Code's workspace file system.",
@@ -451,10 +451,10 @@ export const listDirTool: VscodeTool = {
 const DEFAULT_EXCLUDE =
 	"{node_modules,.git,dist,build,out,target,.next,__pycache__,.venv,*.min.js}";
 
-/** ── Tool: find_files — Search file names/paths by glob ───────────── */
+/** ── Tool: find — Search file names/paths by glob ───────────── */
 
 export const findFilesTool: VscodeTool = {
-	name: "find_files",
+	name: "find",
 	label: "Find Files",
 	description:
 		"Search for files and directories by name/glob pattern using VS Code's file index. " +

@@ -55,6 +55,12 @@ describe("bundled resource policy", () => {
 				enabledByDefault: true,
 			},
 			{
+				id: "codepi-task",
+				label: "Project tasks (.pi/tasks.json)",
+				kind: "extension",
+				enabledByDefault: true,
+			},
+			{
 				id: "nebula-pulse",
 				label: "Nebula Pulse theme",
 				kind: "theme",
@@ -71,6 +77,7 @@ describe("bundled resource policy", () => {
 				"codepi-modes": true,
 				"codepi-bash": true,
 				"codepi-context": true,
+				"codepi-task": true,
 			},
 			bundledThemes: { "nebula-pulse": true },
 		});
@@ -91,6 +98,7 @@ describe("bundled resource policy", () => {
 				"codepi-modes": true,
 				"codepi-bash": true,
 				"codepi-context": true,
+				"codepi-task": true,
 			},
 			bundledThemes: { "nebula-pulse": true },
 		});

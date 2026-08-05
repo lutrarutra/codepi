@@ -113,7 +113,7 @@ panel, terminal-backed bash, and a Settings dashboard.
   (`isCaseSensitive`), include/exclude globs (`**/*.ts`), path scoping, and a
   result cap — backed by ripgrep (`@vscode/ripgrep-universal`, with a
   fallback to the system `rg`).
-- **`find_files`** — CodePi's replacement for pi's stock `find`: locate files
+- **`find`** — CodePi's replacement for pi's stock `find`: locate files
   and directories by name/glob over VS Code's file index
   (`**/*.ts`, `src/**/*.css`), with sensible default excludes (node_modules,
   .git, dist, build, …).
@@ -188,7 +188,7 @@ make help            # list all rules
 ### Dependencies
 
 - [pi.dev](https://pi.dev) — the customizable coding agent.
-- [@vscode/ripgrep-universal](https://www.npmjs.com/package/@vscode/ripgrep-universal) — ripgrep for Node.js, used for `grep` and `find_files`.
+- [@vscode/ripgrep-universal](https://www.npmjs.com/package/@vscode/ripgrep-universal) — ripgrep for Node.js, used for `grep` and `find`.
 - [@vscode/webview-ui-toolkit](https://www.npmjs.com/package/@vscode/webview-ui-toolkit) — toolkit for building VS Code webviews.
 - [custom footer, filechanges extension, @abhinand5](https://github.com/abhinand5/pi-setup)
   - `codepi-footer` based on @abhinand5's custom footer

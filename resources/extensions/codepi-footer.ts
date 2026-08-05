@@ -51,10 +51,10 @@ export default function (pi: ExtensionAPI) {
 					for (const e of ctx.sessionManager.getBranch()) {
 						if (e.type === "message" && e.message.role === "assistant") {
 							const m = e.message as AssistantMessage;
-							input += m.usage.input;
-							output += m.usage.output;
-							cost += m.usage.cost.total;
-							reasoning += m.usage.reasoningTokens ?? 0;
+							input += m.usage.input ?? 0;
+							output += m.usage.output ?? 0;
+							cost += m.usage.cost?.total ?? 0;
+							reasoning += m.usage.reasoning ?? 0;
 						}
 					}
 
@@ -147,13 +147,11 @@ export default function (pi: ExtensionAPI) {
 						: "";
 
 					// Bash approval badge (codepi-bash extension) — shown only when
-					// the extension is loaded. Terminal icon + ALL mode options
-					// (ask/allow/disabled) so it reads as a toggle, never confused with
-					// the codepi-modes badge. The ACTIVE option is highlighted (bold +
-					// color: ask → warning/amber, allow → success/green, disabled →
-					// error/red) and the inactive ones are dimmed — no brackets needed.
-					// Rendered right of the thinking level, immediately left of the
-					// git branch.
+					// the extension is loaded. Terminal icon + toggle pair (ask/allow)
+					// or disabled. The ACTIVE option is highlighted (bold + color:
+					// ask → warning/amber, allow → success/green, disabled →
+					// error/red) — no brackets needed. Rendered right of the thinking
+					// level, immediately left of the git branch.
 					const bashStatus = footerData
 						.getExtensionStatuses()
 						.get("codepi-bash");
@@ -169,7 +167,6 @@ export default function (pi: ExtensionAPI) {
 									theme.fg("success", theme.bold("allow"))
 								: bashStatus === "disabled"
 									? theme.fg("error", BASH_ICON + " ") +
-										theme.fg("dim", "ask/allow/") +
 										theme.fg("error", theme.bold("disabled"))
 									: "";
 

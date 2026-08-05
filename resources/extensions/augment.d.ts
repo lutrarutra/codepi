@@ -1,9 +1,9 @@
 /**
- * Augmentation of pi 0.80.1's ExtensionAPI types. This file must remain a
+ * Augmentation of pi 0.83.0's ExtensionAPI types. This file must remain a
  * MODULE (the import below) so the `declare module` block merges with the real
  * package instead of shadowing it.
  *
- * pi 0.80.1 emits session_switch / session_fork / session_tree /
+ * pi 0.83.0 emits session_switch / session_fork / session_tree /
  * session_shutdown at runtime but omits them from the ExtensionAPI `on()`
  * overloads — the bundled extensions use them, so declare them here.
  */

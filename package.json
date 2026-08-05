@@ -55,18 +55,21 @@
           "id": "codepi.sessionsList",
           "name": "Sessions",
           "type": "webview",
+          "icon": "$(history)",
           "when": "codepi.sidebarTab == sessions"
         },
         {
           "id": "codepi.settings",
           "name": "Settings",
           "type": "webview",
+          "icon": "$(gear)",
           "when": "codepi.sidebarTab == settings"
         },
         {
           "id": "codepi.extensions",
           "name": "Extensions",
           "type": "webview",
+          "icon": "$(extensions)",
           "when": "codepi.sidebarTab == extensions"
         }
       ]
@@ -183,7 +186,19 @@
           "when": "view == codepi.sessionsList && viewItem == session"
         }
       ]
-    }
+    },
+    "keybindings": [
+      {
+        "command": "-workbench.action.files.newUntitledFile",
+        "key": "ctrl+n",
+        "when": "codepi.webviewFocused"
+      },
+      {
+        "command": "codepi.newSession",
+        "key": "ctrl+n",
+        "when": "codepi.webviewFocused"
+      }
+    ]
   },
   "scripts": {
     "vscode:prepublish": "npm run build",
@@ -200,7 +215,7 @@
     "postinstall": "patch-package"
   },
   "dependencies": {
-    "@earendil-works/pi-coding-agent": "^0.80.1",
+    "@earendil-works/pi-coding-agent": "^0.83.0",
     "@lydell/node-pty": "^1.2.0-beta.14",
     "@vscode/ripgrep-universal": "^1.18.0",
     "openai": "^7.0.0"

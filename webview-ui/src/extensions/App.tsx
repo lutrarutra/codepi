@@ -123,11 +123,6 @@ export function ExtensionsApp() {
 					<div className={`ext-mode ext-mode-${header.tone}`}>
 						{header.text}
 					</div>
-					<div className="ext-legend">
-						<span className="chip chip-safe">✓ read-only safe</span>
-						<span className="chip chip-whitelisted">★ whitelisted (user)</span>
-						<span className="chip chip-blocked">🔒 blocked in Ask mode</span>
-					</div>
 					<div className="ext-controls">
 						<input
 							className="ext-search"

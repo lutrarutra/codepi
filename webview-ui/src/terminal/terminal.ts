@@ -11,6 +11,7 @@ import {
 	createTerminalLinkProvider,
 } from "./links";
 import { createScrollbackClearFilter } from "./scrollback";
+import { createViewportAnchor } from "./viewport-anchor";
 import { createFindWidget } from "./find";
 
 // VSCode injects acquireVsCodeApi() globally — get it once at module level
@@ -249,8 +250,18 @@ function hideLoading(): void {
 		term.open(container);
 		applyBackground();
 
-		const find = createFindWidget(term, container, () =>
-			post({ command: "codepi:newSession" }),
+		// Viewport content-anchor (see viewport-anchor.ts) — created before
+		// the find widget so find navigation can hand its viewport moves to
+		// the anchor. Full rationale lives in the module; in short: the
+		// user's scroll position must never be yanked to the top by pi's
+		// repaints or xterm's overflow behavior.
+		const viewportAnchor = createViewportAnchor(term);
+
+		const find = createFindWidget(
+			term,
+			container,
+			() => post({ command: "codepi:newSession" }),
+			() => viewportAnchor.noteUserScroll(),
 		);
 
 		// Ctrl+click links (VS Code built-in terminal behavior): every word in
@@ -392,17 +403,6 @@ function hideLoading(): void {
 				find.open();
 				return false;
 			}
-			if (ctrlLike && isKey("n")) {
-				// Ctrl+N: launch a new CodePi session in a new tab. Unlike
-				// Ctrl+F (idempotent open), creating a session must happen
-				// exactly once, so act only on keydown — the handler also runs
-				// for the synthesized keypress.
-				e.preventDefault();
-				if (e.type === "keydown") {
-					post({ command: "codepi:newSession" });
-				}
-				return false;
-			}
 			if (e.key === "Escape" && find.isOpen()) {
 				// Widget open but focus back on the terminal (clicked the grid):
 				// Esc closes it instead of reaching pi.
@@ -477,6 +477,41 @@ function hideLoading(): void {
 					break;
 			}
 		});
+
+		// ── Viewport content-anchor wiring ────────────────────────────────
+		//
+		// Hard guarantee: no content change may ever yank the user's scroll
+		// position to the top. The scrollback filter above strips pi's
+		// \x1b[3J, but other events can still move the viewport under the
+		// user — a stray ED3 variant, a resize-trim clamp (fit() reflows and
+		// can reduce ydisp to 0 when the buffer is near its limit), or
+		// xterm's overflow content-following once the scrollback fills
+		// (every recycled line decrements ydisp). While the user is scrolled
+		// up, keep an xterm marker on the top-of-viewport line and restore
+		// it after writes/resizes. User scrolls (wheel / scrollbar drag /
+		// find navigation) re-anchor the marker and briefly suppress
+		// restoration so their input is never fought. Ordinary scrolls —
+		// including xterm's own content-following and the guard's own
+		// restores — never re-anchor, so a bug-yank always shows up as
+		// drift and is restored.
+		const viewportEl = container.querySelector(".xterm-viewport");
+		// Re-anchor while a scrollbar drag is in progress (the drag moves the
+		// viewport without wheel events).
+		viewportEl?.addEventListener("scroll", viewportAnchor.viewportScrolled, {
+			passive: true,
+		});
+		viewportEl?.addEventListener("wheel", viewportAnchor.noteUserScroll, {
+			passive: true,
+		});
+		viewportEl?.addEventListener("mousedown", viewportAnchor.beginDrag, {
+			passive: true,
+		});
+		// Release can happen anywhere (native scrollbar drags capture the
+		// pointer; mouseleave fires mid-drag), so listen on the window.
+		window.addEventListener("mouseup", viewportAnchor.endDrag);
+		window.addEventListener("pointerup", viewportAnchor.endDrag);
+		term.onWriteParsed(viewportAnchor.keepAnchored);
+		term.onResize(viewportAnchor.keepAnchored);
 
 		// Resize handling: observe the container AND the body — webview layout
 		// changes (editor resize, sidebar toggles, tab switch) must re-fit.

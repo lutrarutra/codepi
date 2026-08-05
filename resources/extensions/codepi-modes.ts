@@ -44,8 +44,6 @@ export const READ_ONLY_TOOL_BASELINE: readonly string[] = [
 	"grep",
 	"find",
 	"ls",
-	"list_dir",
-	"find_files",
 	"get_diagnostics",
 	"web_search",
 	"fetch_content",
@@ -54,6 +52,11 @@ export const READ_ONLY_TOOL_BASELINE: readonly string[] = [
 	// call get_editor_context for live state).
 	"get_editor_context",
 	"get_git_diff",
+	// codepi-task: list is a pure read; run is available read-only ONLY for
+	// tasks marked readOnly: true in .pi/tasks.json (enforced by the
+	// codepi-task extension itself via the codepi-modes:mode branch entries).
+	"codepi-task-run",
+	"codepi-task-list",
 ];
 
 /**
@@ -169,8 +172,8 @@ You are in **Ask (read-only) mode**.
 - Shell commands (\`bash\`), the \`edit\`/\`write\` tools, and third-party extension
   tools are DISABLED — you cannot modify or create files, and you cannot
   delegate work that would do so.
-- Only read-only tools are available: read, grep, find, ls, list_dir,
-  find_files, get_diagnostics — plus anything the user
+- Only read-only tools are available: read, head, grep, find, ls,
+  get_diagnostics — plus anything the user
   whitelists in \`codepi.modes.ask.allowedTools\` (settings.json).
 - Do not attempt to change files, and never suggest that you will.
 - You cannot switch modes — /codepi-ask, /codepi-plan, and /codepi-implement

@@ -640,13 +640,13 @@ describe("codepi-modes: ask allowlist settings", () => {
 			"grep",
 			"find",
 			"ls",
-			"list_dir",
-			"find_files",
 			"get_diagnostics",
 			"web_search",
 			"fetch_content",
 			"get_editor_context",
 			"get_git_diff",
+			"codepi-task-run",
+			"codepi-task-list",
 		]);
 		expect(DEFAULT_ASK_ALLOWED_TOOLS).toEqual(READ_ONLY_TOOL_BASELINE);
 	});
