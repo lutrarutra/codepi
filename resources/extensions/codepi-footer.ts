@@ -92,7 +92,8 @@ export default function (pi: ExtensionAPI) {
 						theme.fg("error", "↓") + theme.fg("text", fmt(output));
 					const reasoningStr =
 						reasoning > 0
-							? theme.fg("accent", "R") + theme.fg("text", fmt(reasoning))
+							? theme.fg("accent", "\u{EE9C}") +
+								theme.fg("text", " " + fmt(reasoning))
 							: "";
 					const costStr = theme.fg("warning", "$" + cost.toFixed(3));
 					const speedStr =
@@ -199,23 +200,47 @@ export default function (pi: ExtensionAPI) {
 					const MARGIN = 1;
 					const innerWidth = Math.max(1, width - MARGIN * 2);
 
-					// Pad left side so right side is right-aligned
-					const leftContent = left + midSep;
-					const padNeeded = Math.max(
-						1,
-						innerWidth - visibleWidth(leftContent) - visibleWidth(right),
-					);
-					const pad = " ".repeat(padNeeded);
+					// Render one footer row: 1-cell margin on each side. Truncates
+					// with "..." only when a single row alone overflows the window
+					// (very narrow terminals — last resort).
+					const makeRow = (content: string, rightAlign: boolean) => {
+						const row =
+							visibleWidth(content) <= innerWidth
+								? content
+								: truncateToWidth(content, innerWidth);
+						const lead = rightAlign
+							? " ".repeat(Math.max(0, innerWidth - visibleWidth(row)))
+							: "";
+						return (
+							" ".repeat(MARGIN) +
+							lead +
+							row +
+							" ".repeat(
+								Math.max(0, width - MARGIN - visibleWidth(lead + row)),
+							)
+						);
+					};
 
-					const content = truncateToWidth(
-						leftContent + pad + right,
-						innerWidth,
-					);
-					return [
-						" ".repeat(MARGIN) +
-							content +
-							" ".repeat(Math.max(0, width - MARGIN - visibleWidth(content))),
-					];
+					// Single line when everything fits (current layout, right side
+					// right-aligned via padding). Otherwise split into two rows:
+					// left above, right below — the right side is never collapsed.
+					const leftContent = left + midSep;
+					if (
+						right &&
+						visibleWidth(leftContent) + visibleWidth(right) <= innerWidth
+					) {
+						const padNeeded = Math.max(
+							1,
+							innerWidth - visibleWidth(leftContent) - visibleWidth(right),
+						);
+						return [makeRow(leftContent + " ".repeat(padNeeded) + right, false)];
+					}
+					if (!right) {
+						// Right-less footer (defensive; today's right side always has
+						// at least the model + thinking level): single truncated row.
+						return [makeRow(left, false)];
+					}
+					return [makeRow(left, false), makeRow(right, true)];
 				},
 			};
 		});
