@@ -201,4 +201,32 @@ describe("createViewportAnchor (real xterm 6)", () => {
 		expect(b.viewportY).toBe(anchored);
 		anchor.dispose();
 	});
+
+	// Documents the xterm contract the guard relies on: while the buffer
+	// service's isUserScrolling flag is set (which is exactly what the user's
+	// wheel/drag scroll sets), streamed content leaves the viewport alone;
+	// the yank-to-bottom (ydisp = ybase on every content scroll) only fires
+	// when the flag is lost. terminal.ts sets scrollOnUserInput: false so a
+	// keystroke (IME composition, arrows, typing) never silently drops the
+	// flag — that yank is the "jerks itself back down" the guard was built
+	// against.
+	it("xterm yank primitive: content scroll snaps to bottom only when the user-scroll flag is lost", async () => {
+		const term = new Terminal({ scrollback: 1000, rows: 10, cols: 40 });
+		await buildHistory(term);
+		const b = term.buffer.active;
+		const core = (term as unknown as { _core: any })._core;
+		term.scrollLines(-20);
+		const scrolled = b.viewportY;
+		expect(core._bufferService.isUserScrolling).toBe(true); // wheel path set it
+		term.write("still streaming\n".repeat(5));
+		await drain(term);
+		expect(b.viewportY).toBe(scrolled); // flag held: no yank
+		expect(b.baseY).toBeGreaterThan(scrolled);
+		// Lose the flag (as a keystroke-driven scrollToBottom would) and the
+		// very next content scroll snaps the viewport to the bottom.
+		core._bufferService.isUserScrolling = false;
+		term.write("more\n".repeat(2));
+		await drain(term);
+		expect(b.viewportY).toBe(b.baseY);
+	});
 });

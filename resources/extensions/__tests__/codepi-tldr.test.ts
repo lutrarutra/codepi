@@ -45,6 +45,7 @@ function createCtx(
 			setCompactMode: vi.fn(),
 			isCompactMode: vi.fn(() => undefined),
 			setWorkingVisible: vi.fn(),
+			isIdle: vi.fn(() => true),
 			notify: vi.fn(),
 			...uiOverrides,
 		},
@@ -272,16 +273,28 @@ describe("working-loader gating in TL;DR mode", () => {
 		const { agentStart, toggle } = load();
 		const ctx = createCtx([]);
 		await agentStart({}, ctx);
+		ctx.ui.isIdle = vi.fn(() => false);
 		ctx.ui.isCompactMode = vi.fn(() => true);
 		await toggle("", ctx);
 		expect(ctx.ui.setWorkingVisible).toHaveBeenLastCalledWith(true);
 	});
 
-	it("toggle to OFF restores the loader mid-session", async () => {
-		const { toggle } = load();
+	it("toggle to OFF restores the loader during an active session", async () => {
+		const { agentStart, toggle } = load();
 		const ctx = createCtx([]);
+		await agentStart({}, ctx);
 		ctx.ui.isCompactMode = vi.fn(() => true);
 		await toggle("", ctx);
 		expect(ctx.ui.setWorkingVisible).toHaveBeenCalledWith(true);
+	});
+
+	it("toggle to OFF after agent_end does not resurrect the loader", async () => {
+		const { agentStart, agentEnd, toggle } = load();
+		const ctx = createCtx([]);
+		await agentStart({}, ctx);
+		await agentEnd({}, ctx);
+		ctx.ui.isCompactMode = vi.fn(() => true);
+		await toggle("", ctx);
+		expect(ctx.ui.setWorkingVisible).toHaveBeenLastCalledWith(false);
 	});
 });

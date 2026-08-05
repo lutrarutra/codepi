@@ -137,9 +137,11 @@ export default function (pi: ExtensionAPI) {
 			ctx.ui.setCompactMode(next);
 			// Toggling ON mid-turn: pi has no compact summary row for the
 			// in-flight turn, so hiding the loader would leave no spinner at
-			// all. Keep it spinning; agent_end/agent_start re-assert the
-			// compact (hidden) state.
-			ctx.ui.setWorkingVisible(!next || turnActive);
+			// all. Keep it spinning only while the turn is active. In particular,
+			// toggling TL;DR off after a completed turn must not resurrect pi's
+			// default working spinner.
+			const idle = ctx.isIdle?.() ?? !turnActive;
+			ctx.ui.setWorkingVisible(next ? turnActive : !idle);
 			pi.appendEntry(MODE_ENTRY_TYPE, {
 				enabled: next,
 				timestamp: Date.now(),

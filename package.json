@@ -6,7 +6,7 @@
     "type": "git",
     "url": "https://github.com/lutrarutra/codepi.git"
   },
-  "version": "0.2.0",
+  "version": "0.3.0",
   "publisher": "lutrarutra",
   "license": "MIT",
   "engines": {
@@ -97,7 +97,7 @@
     "commands": [
       {
         "command": "codepi.openPanel",
-        "title": "CodePi: Open Chat"
+        "title": "CodePi: Start new session"
       },
       {
         "command": "codepi.openSession",
@@ -191,11 +191,13 @@
       {
         "command": "-workbench.action.files.newUntitledFile",
         "key": "ctrl+n",
+        "mac": "cmd+n",
         "when": "codepi.webviewFocused"
       },
       {
         "command": "codepi.newSession",
         "key": "ctrl+n",
+        "mac": "cmd+n",
         "when": "codepi.webviewFocused"
       }
     ]

@@ -239,6 +239,11 @@ function hideLoading(): void {
 			cursorBlink: true,
 			convertEol: false,
 			scrollback: 10000,
+			// xterm 6 defaults this to true: any keydown while scrolled up
+			// (e.g. IME composition, arrow keys) calls scrollToBottom and
+			// yanks the user out of the history they're reading. The TUI is a
+			// chat, not a shell — typing must never move the viewport.
+			scrollOnUserInput: false,
 			allowProposedApi: true,
 			fontFamily: FONT_FAMILY,
 			fontSize: FONT_SIZE,
@@ -494,18 +499,30 @@ function hideLoading(): void {
 		// including xterm's own content-following and the guard's own
 		// restores — never re-anchor, so a bug-yank always shows up as
 		// drift and is restored.
-		const viewportEl = container.querySelector(".xterm-viewport");
+		//
+		// xterm 6 scrolls through its custom `.xterm-scrollable-element`
+		// (smooth custom scrollbar), NOT the legacy `.xterm-viewport` div —
+		// wheel/mousedown land on the scrollable element and there are no
+		// native DOM scroll events at all (the buffer moves via xterm's own
+		// onScroll). Attach the user-input listeners where the events
+		// actually happen; onScroll stands in for the DOM scroll event.
+		const scrollSurface =
+			container.querySelector(".xterm-scrollable-element") ??
+			container.querySelector(".xterm-viewport");
+		// Re-anchor on wheel (trackpad/mouse) — every notch is user intent.
+		scrollSurface?.addEventListener("wheel", viewportAnchor.noteUserScroll, {
+			passive: true,
+		});
 		// Re-anchor while a scrollbar drag is in progress (the drag moves the
 		// viewport without wheel events).
-		viewportEl?.addEventListener("scroll", viewportAnchor.viewportScrolled, {
+		scrollSurface?.addEventListener("mousedown", viewportAnchor.beginDrag, {
 			passive: true,
 		});
-		viewportEl?.addEventListener("wheel", viewportAnchor.noteUserScroll, {
-			passive: true,
-		});
-		viewportEl?.addEventListener("mousedown", viewportAnchor.beginDrag, {
-			passive: true,
-		});
+		// The buffer is what actually scrolls in xterm 6; while a drag is in
+		// progress every scroll event re-anchors so the anchor follows it.
+		// Outside a drag this is a no-op, so programmatic moves (xterm's own
+		// content-following, the guard's restores) never move the anchor.
+		term.onScroll(viewportAnchor.viewportScrolled);
 		// Release can happen anywhere (native scrollbar drags capture the
 		// pointer; mouseleave fires mid-drag), so listen on the window.
 		window.addEventListener("mouseup", viewportAnchor.endDrag);

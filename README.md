@@ -1,195 +1,133 @@
-# CodePi - customizable coding agent agent inside customizable coding editor
+# CodePi
 
-VSCode extension that integrates [pi.dev](https://pi.dev) — the customizable coding
-agent — into VS Code. CodePi embeds pi's agent runtime directly in the editor:
-you get pi's models, sessions, skills, tools, and extension system, wrapped in
-deep VS Code integration — editor context, inline edit review, the Problems
-panel, terminal-backed bash, and a Settings dashboard.
+A VS Code extension that embeds the [pi coding agent](https://pi.dev) in an editor-native chat panel.
 
-## Features
+> **Third-party notice:** CodePi is an independent extension. It is not affiliated with, endorsed by, sponsored by, or maintained by pi.dev or the pi project.
 
-### The agent, in your editor
+## What CodePi adds to pi
 
-- **Embedded pi runtime** — no separate CLI needed. CodePi bundles the pi SDK
-  and reads your canonical pi resources (`~/.pi/agent`): models, auth,
-  skills, prompt templates, packages, and custom extensions.
-- **Full TUI chat panel** — streaming responses, thinking levels, tool calls,
-  markdown with syntax-highlighted code blocks, and a built-in terminal pane.
-- **Multi-provider models** — any model configured in `models.json`
-  (OpenAI, Anthropic, OpenRouter, Gemini, local models, …); switch models
-  right from the chat footer.
-- **Sessions** — a persistent session list in the sidebar (new / rename /
-  delete / reopen), per-session state, model and mode remembered across
-  reloads. Sessions are stored under VS Code's extension global storage —
-  separate from the pi CLI's session dir, so local and Remote-SSH sessions
-  never cross machines.
-- **Skills, prompts, and extensions** — pi's whole ecosystem is available:
-  install packages from the Settings dashboard, load skills, and register
-  your own tools/commands/events through pi's extension API.
+### VS Code-native agent experience
 
-### Deep VS Code context (`codepi-context`)
+- Embedded pi runtime with streaming chat, tool calls, thinking levels, markdown, syntax highlighting, and a terminal-backed TUI.
+- Persistent sessions in a VS Code sidebar: create, reopen, rename, delete, refresh, and restore sessions after reloads.
+- Sessions and runtime state stored in VS Code extension storage; pi resources remain available from `~/.pi/agent`.
+- VS Code webview terminal with configurable font family and size. Fira Code Nerd Font is bundled by default.
+- Sessions work in local and Remote-SSH windows without sharing session files between machines.
 
-- **Session-start `<editor_context>` snapshot** injected into the system
-  prompt: active file + cursor, every selection with its file and range,
-  all open editors, recent file switches, git branch and changed files with
-  `+N/−M` line counts, the SCM commit box, open terminals, and the active
-  debug session.
-- **Live per-turn updates** — a compact `<live_editor_context>` block is
-  injected whenever your active file or selections change, so a fresh
-  highlight is visible without a tool call.
-- **On-demand tools** — `get_editor_context` (refresh the snapshot live,
-  with `includeSelection` / `includeDiff` / `maxFiles`) and `get_git_diff`
-  (full unified diffs vs HEAD for changed files).
-- **Resilient collection** — open editors are read from the VS Code tab
-  model, with a fallback to open text documents while the window is still
-  restoring, so the snapshot is never spuriously empty.
+### Editor context
 
-### Edit review — Copilot-style inline diffs
+The agent receives a session-start `<editor_context>` snapshot and can refresh it live with:
 
-- When the agent calls `write`/`edit`, the change is **applied and saved
-  immediately**, then tracked for review:
-  - Green/red **editor decorations** on added/removed lines.
-  - A **review bar** at the top of each changed file
-    (Accept All · Reject All · Open Diff), plus per-snippet
-    **Accept / Reject pills** and CodeLens actions.
-  - A notification queue asking you to accept or decline **file by file**,
-    and a **status-bar counter** that jumps to the next pending file.
-  - In the chat: an **Edit Review bar** and per-edit **EditCards**.
-  - **Open Diff** opens a side-by-side view of original vs. proposed.
-  - If you edit the file yourself while a proposal is pending, it is marked
-    **stale** and never overwritten.
+- Active file, language, cursor, selections, and selection text.
+- Open editors, recently visited files, dirty state, workspace folders, trust state, and open terminals.
+- Git repositories, branches, changed files, line counts, and the SCM commit box.
+- Active debug session.
+- `get_editor_context` for a live combined snapshot.
+- `get_git_diff` for unified diffs, including untracked files.
+- Live context updates when the active file or selection changes.
 
-### File-change tracking (`filechanges`)
+### Workspace tools
 
-- CodePi remembers what the agent created/edited (baseline + diff per file).
-- `/filechanges` — interactive modification log with per-file diff viewer.
-- `/filechanges-accept` — keep current files, resolve all pending snippet
-  reviews, and clear the log (`/filechanges-accept force` skips the
-  confirmation).
-- `/filechanges-decline` — revert files to their original contents and clear
-  the log.
-- The tracker stays in sync with the editor review proposals, so
-  decorations and the review bar clear in step.
+CodePi provides VS Code-aware tools for:
 
-### Agent modes (`codepi-modes`)
+- `read` — read text files and images.
+- `head` — preview the first lines of a file.
+- `write` — create or overwrite files.
+- `edit` — apply targeted replacements.
+- `ls` — list directory contents.
+- `find` — find files using VS Code's file index and globs.
+- `grep` — search file contents with regex, case sensitivity, and include/exclude globs.
+- `get_diagnostics` — read Problems-panel diagnostics from language servers and problem matchers.
 
-- **Implement** (default) — full tool access.
-- **Plan** — planning only: explore, ask clarifying questions, write the plan
-  to `docs/plans/`, track with todos; never modifies source code.
-- **Ask** — read-only: only an allowlisted set of tools runs (read, grep,
-  find, diagnostics, web research, …); anything else is blocked with a clear
-  reason. The allowlist is editable in Settings
-  (`codepi.modes.ask.allowedTools`).
-- Switch with `/codepi-ask`, `/codepi-plan`, `/codepi-implement`. Modes are
-  user-only commands; from Plan mode, switching to Implement asks for your
-  confirmation. The active mode shows as a badge in the chat footer and
-  persists across session reloads.
+### Edit review
 
-### bash through the VS Code terminal (`codepi-bash`)
+Agent edits are written to disk immediately and tracked for review:
 
-- Commands run in a hidden VS Code terminal with **shell integration** — the
-  same shell environment you'd type into — and the terminal is disposed on
-  timeout/abort.
-- **Approval modes** per session: `ask` (default) or `allow`, toggled in the
-  footer or with `/codepi-bash-ask` / `/codepi-bash-allow`. In `ask` mode
-  every command gets a dialog: **Yes / No / Revise / Approve & auto-approve
-  all**.
-- Disable `codepi-bash` in Settings to fall back to pi's stock bash tool.
+- Added/removed line decorations and a review bar in the editor.
+- Per-hunk, per-file, and accept-all/reject-all actions.
+- CodeLens actions, diff views, edit cards in chat, and a pending-edits status bar.
+- Changes made manually while a proposal is pending are marked stale instead of being overwritten.
+- `/filechanges` provides a session-level change log; accept or decline changes with `/filechanges-accept` and `/filechanges-decline`.
+- Editor review state and the file-change tracker stay synchronized.
 
-### Diagnostics & verification
+### Agent modes
 
-- **`get_diagnostics`** reads the VS Code Problems panel (errors, warnings,
-  info, hints from language servers and problem matchers), grouped by file.
-  A path-scoped check opens the file invisibly and waits for the language
-  server to settle — so the answer right after an edit is trustworthy.
-- **Auto-verify** after every editing turn: `codepi.autoVerify` is
-  `nextTurn` (quiet context on your next prompt) by default, `followUp`
-  (the agent keeps working to fix problems), or `off`.
+Switch with `/codepi-ask`, `/codepi-plan`, and `/codepi-implement`:
 
-### Search
+- **Ask** — read-only mode; editing, shell commands, and non-whitelisted tools are blocked.
+- **Plan** — planning mode; explore the project and write Markdown plans without changing source code.
+- **Implement** — full tool access.
 
-- **`grep`** — CodePi's replacement for pi's stock `grep`: search file
-  contents with optional regex (`isRegExp`), case-sensitive matching
-  (`isCaseSensitive`), include/exclude globs (`**/*.ts`), path scoping, and a
-  result cap — backed by ripgrep (`@vscode/ripgrep-universal`, with a
-  fallback to the system `rg`).
-- **`find`** — CodePi's replacement for pi's stock `find`: locate files
-  and directories by name/glob over VS Code's file index
-  (`**/*.ts`, `src/**/*.css`), with sensible default excludes (node_modules,
-  .git, dist, build, …).
+Ask-mode tools are configurable with `codepi.modes.ask.allowedTools`.
 
-### Settings dashboard
+### VS Code terminal bash
 
-- A compact webview in the sidebar that reports pi package status, toggles
-  CodePi's **bundled resources** (`custom-footer`, `filechanges`,
-  `codepi-modes`, `codepi-bash`, `codepi-context`, and the `nebula-pulse`
-  theme), and opens the real `settings.json`, `models.json`, and `auth.json`
-  in VS Code.
-- Terminal font control for chat panels (`codepi.fontFamily` /
-  `codepi.fontSize`), an "Ask mode tools" field, and the bundled-theme
-  toggle. Bundled preferences live under the `codepi` namespace in
-  `settings.json`; a missing preference means enabled, an explicit `false`
-  disables.
+The bundled `codepi-bash` extension replaces pi's stock bash tool with execution through a hidden VS Code terminal:
 
-### Extensible to the core
+- `ask` mode with approval, denial, revision, or auto-approve options.
+- `allow` mode for automatic execution.
+- `disabled` mode to block shell commands.
+- Shell integration, timeouts, output truncation, and temp-file spillover for large output.
+- Toggle with `/codepi-bash-ask`, `/codepi-bash-allow`, and `/codepi-bash-disable`.
+- `codepi-task-run` uses the same terminal backend for saved project tasks.
 
-- Everything CodePi ships is itself a **pi extension** — plain `.ts` files
-  under `resources/extensions/` that register tools, commands, and event
-  handlers through pi's extension API. Add your own alongside them.
-- Custom **footer**, custom **theme** (the bundled `nebula-pulse` theme is
-  applied in memory unless you've chosen one explicitly), skills, prompt
-  templates — all composable.
+### Reusable project tasks
 
-## TODO Features
+Define build, test, lint, package, and other commands in `.pi/tasks.json`:
 
-- Calm mode
-  - collapse the coding agent's streaming thoughts and tool calls into a single line. Only show output when the coding agent is done.
-- Better git integration
-- Feedback for changes
-  - Allow the user to provide feedback on the coding agent's suggestions and changes, snippet-by-snippet or file-by-file.
+- `codepi-task-create`, `codepi-task-edit`, `codepi-task-delete`
+- `codepi-task-run`, `codepi-task-list`
+- `before-implement`, `after-implement`, and `anytime` task timing.
+- Read-only tasks can run in Ask mode.
+- Task changes require user confirmation and task output uses the VS Code terminal backend.
+
+### TL;DR mode and footer
+
+- TL;DR mode collapses streaming thoughts and tool activity into a compact summary row while preserving the final response.
+- Toggle with `/codepi-toggle-tldr`; enabled by default and persisted per session.
+- Custom footer with token usage, reasoning tokens, cost, context usage, tokens/sec, model, thinking level, mode, bash approval state, and Git branch.
+- Bundled `nebula-pulse` theme and Nerd Font icons.
+
+### Verification and workflow automation
+
+- Automatic post-edit diagnostics via `codepi.autoVerify`: `nextTurn`, `followUp`, or `off`.
+- `nextTurn` quietly adds problems to the next prompt; `followUp` asks pi to fix them immediately.
+- A `codepi` command in VS Code's integrated terminal opens a new CodePi session. It is scoped to VS Code terminals and can be disabled with `codepi.terminalShortcut: false`.
+
+### Settings and extension management
+
+The CodePi sidebar includes:
+
+- Sessions, Settings, and Extensions views.
+- Bundled-resource toggles for `codepi-footer`, `codepi-diff`, `codepi-modes`, `codepi-bash`, `codepi-context`, `codepi-task`, and `nebula-pulse`.
+- Links to pi's `settings.json`, `models.json`, and `auth.json`.
+- A live inventory of loaded core, bundled, project, user, and package extensions, commands, tools, handlers, flags, shortcuts, and message renderers.
+- Configuration for terminal font, terminal size, TL;DR mode, auto-verify, terminal shortcut, and Ask-mode tools.
+
+CodePi also loads pi's normal resources and extension ecosystem: configured models and providers, authentication, skills, prompt templates, themes, packages, and custom extensions.
 
 ## Requirements
 
 - VS Code 1.93 or newer.
+- A pi configuration in `~/.pi/agent`, or the resources needed by your configured provider.
 
-## Dev Setup
-
-```bash
-npm install          # root deps (backend)
-npm --prefix webview-ui install   # webview deps (frontend)
-```
-
-## Build
+## Development
 
 ```bash
-npm run build      # build both webview + extension into dist/
+npm install
+npm --prefix webview-ui install
+npm run build       # build the webview and extension
+npm test            # run tests
+make verify         # type-check, test, and smoke-test
+make vsix           # build a VSIX package
 ```
 
-Or watch during development:
+For watch mode:
 
 ```bash
-npm run watch        # watches both webview and extension concurrently
+npm run watch
 ```
 
-### Build & package with Make
+## License
 
-A `Makefile` wraps the common workflows:
-
-```bash
-make build           # full production build (webview + extension)
-make watch           # watch mode (same as npm run watch)
-make verify          # type-check + unit tests + smoke test
-make vsix            # package codepi-<version>.vsix (runs the prepublish build)
-make install         # install the built .vsix into VS Code
-make clean           # remove build outputs and .vsix files
-make help            # list all rules
-```
-
-### Dependencies
-
-- [pi.dev](https://pi.dev) — the customizable coding agent.
-- [@vscode/ripgrep-universal](https://www.npmjs.com/package/@vscode/ripgrep-universal) — ripgrep for Node.js, used for `grep` and `find`.
-- [@vscode/webview-ui-toolkit](https://www.npmjs.com/package/@vscode/webview-ui-toolkit) — toolkit for building VS Code webviews.
-- [custom footer, filechanges extension, @abhinand5](https://github.com/abhinand5/pi-setup)
-  - `codepi-footer` based on @abhinand5's custom footer
-  - `codepi-diff` based on @abhinand5's filechanges extension
+MIT

@@ -115,10 +115,10 @@ index 0000000..22533b6
 +}
 diff --git a/node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/compact-summary.js b/node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/compact-summary.js
 new file mode 100644
-index 0000000..0b478f4
+index 0000000..c13092d
 --- /dev/null
 +++ b/node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/compact-summary.js
-@@ -0,0 +1,416 @@
+@@ -0,0 +1,421 @@
 +/**
 + * Compact mode: per-turn transcript summaries for the interactive mode.
 + *
@@ -127,7 +127,7 @@ index 0000000..0b478f4
 + * This module holds the pure grouping/aggregation logic (unit-testable) and
 + * the CompactTurnSummary UI component.
 + */
-+import { Container, Text } from "@earendil-works/pi-tui";
++import { Container, Text, TruncatedText } from "@earendil-works/pi-tui";
 +import { theme } from "./theme/theme.js";
 +
 +// ============================================================================
@@ -322,7 +322,7 @@ index 0000000..0b478f4
 +
 +/**
 + * Per-turn summary row shown in compact mode:
-+ *   ⠋ ✓11 ✗1 tools · ↑12.3k ↓4.5k 🧠1.2k · $0.42 · 32s · model
++ *   ⠋ ✓11 ✗1 tools · ↑12.3k ↓4.5k 󰟶 1.2k · $0.42 · 32s · model
 + *   latest thought / tool call line (text-muted)
 + *
 + * Live turns animate the spinner and elapsed time; finished turns render a
@@ -345,7 +345,11 @@ index 0000000..0b478f4
 +        this.finished = false;
 +        this.spinnerFrame = 0;
 +        this.spinnerInterval = undefined;
-+        this.statsLine = new Text("", 1, 0);
++        // The stats row must remain one terminal line. Text wraps long model
++        // names and token summaries, which can leave a stale-looking second
++        // summary row during differential redraws. TruncatedText clips it
++        // instead; the activity row remains independently renderable.
++        this.statsLine = new TruncatedText("", 0, 0);
 +        this.activityLine = new Text("", 2, 0);
 +        this.addChild(this.statsLine);
 +        this.addChild(this.activityLine);
@@ -512,7 +516,7 @@ index 0000000..0b478f4
 +        if (this.usage.output > 0)
 +            tokens.push(safeThemeFg("error", "↓") + safeThemeFg("text", formatTokenCount(this.usage.output)));
 +        if (this.usage.reasoning > 0)
-+            tokens.push(safeThemeFg("accent", "🧠") + safeThemeFg("text", formatTokenCount(this.usage.reasoning)));
++            tokens.push(safeThemeFg("accent", "\uDB81\uDDF6") + safeThemeFg("text", " " + formatTokenCount(this.usage.reasoning)));
 +        if (tokens.length > 0)
 +            parts.push(tokens.join(" "));
 +        if (this.usage.cost > 0)
@@ -528,7 +532,8 @@ index 0000000..0b478f4
 +
 +    updateStatsLine() {
 +        const text = this.getStatsText();
-+        this.statsLine.setText(text ? ` ${text}` : "");
++        this.statsLine = new TruncatedText(text ? ` ${text}` : "", 0, 0);
++        this.children[0] = this.statsLine;
 +        this.activityLine.setText(this.latestActivity ? safeThemeFg("muted", this.latestActivity.text) : "");
 +        if (this.ui) {
 +            this.ui.requestRender();
@@ -560,7 +565,7 @@ index 8eeeedd..c755209 100644
      private handleOpenExternalEditor;
      clearEditor(): void;
 diff --git a/node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/interactive-mode.js b/node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/interactive-mode.js
-index 462e240..74e993c 100644
+index 462e240..94ad315 100644
 --- a/node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/interactive-mode.js
 +++ b/node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/interactive-mode.js
 @@ -37,6 +37,7 @@ import { checkForNewPiVersion } from "../../utils/version-check.js";
@@ -585,7 +590,7 @@ index 462e240..74e993c 100644
  class ExpandableText extends Text {
      getCollapsedText;
      getExpandedText;
-@@ -204,6 +212,11 @@ export class InteractiveMode {
+@@ -204,6 +212,15 @@ export class InteractiveMode {
      streamingMessage = undefined;
      // Tool execution tracking: toolCallId -> component
      pendingTools = new Map();
@@ -594,10 +599,14 @@ index 462e240..74e993c 100644
 +    compactSummary = undefined;
 +    compactCandidateComponent = undefined;
 +    compactLastStopReason = undefined;
++    // A mode toggle during a live turn is applied after the turn has settled.
++    // Rebuilding immediately can clear the still-streaming final response
++    // before message_end has been persisted.
++    compactModeRebuildPending = false;
      // Tool output expansion state
      toolOutputExpanded = false;
      // Thinking block visibility state
-@@ -273,7 +286,7 @@ export class InteractiveMode {
+@@ -273,7 +290,7 @@ export class InteractiveMode {
              await this.rebindCurrentSession({ renderBeforeBind: true });
          });
          this.version = VERSION;
@@ -606,7 +615,7 @@ index 462e240..74e993c 100644
          this.ui.setClearOnShrink(this.settingsManager.getClearOnShrink());
          this.headerContainer = new Container();
          this.loadedResourcesContainer = new Container();
-@@ -1722,6 +1735,8 @@ export class InteractiveMode {
+@@ -1722,6 +1739,8 @@ export class InteractiveMode {
              },
              getToolsExpanded: () => this.toolOutputExpanded,
              setToolsExpanded: (expanded) => this.setToolsExpanded(expanded),
@@ -615,7 +624,7 @@ index 462e240..74e993c 100644
          };
      }
      /**
-@@ -1733,6 +1748,10 @@ export class InteractiveMode {
+@@ -1733,6 +1752,10 @@ export class InteractiveMode {
                  resolve(undefined);
                  return;
              }
@@ -626,7 +635,7 @@ index 462e240..74e993c 100644
              const onAbort = () => {
                  this.hideExtensionSelector();
                  resolve(undefined);
-@@ -1757,6 +1776,8 @@ export class InteractiveMode {
+@@ -1757,6 +1780,8 @@ export class InteractiveMode {
       * Hide the extension selector.
       */
      hideExtensionSelector() {
@@ -635,7 +644,7 @@ index 462e240..74e993c 100644
          this.extensionSelector?.dispose();
          this.editorContainer.clear();
          this.editorContainer.addChild(this.editor);
-@@ -1784,6 +1805,8 @@ export class InteractiveMode {
+@@ -1784,6 +1809,8 @@ export class InteractiveMode {
                  resolve(undefined);
                  return;
              }
@@ -644,7 +653,7 @@ index 462e240..74e993c 100644
              const onAbort = () => {
                  this.hideExtensionInput();
                  resolve(undefined);
-@@ -1808,6 +1831,8 @@ export class InteractiveMode {
+@@ -1808,6 +1835,8 @@ export class InteractiveMode {
       * Hide the extension input.
       */
      hideExtensionInput() {
@@ -653,7 +662,7 @@ index 462e240..74e993c 100644
          this.extensionInput?.dispose();
          this.editorContainer.clear();
          this.editorContainer.addChild(this.editor);
-@@ -2342,23 +2367,47 @@ export class InteractiveMode {
+@@ -2342,23 +2371,47 @@ export class InteractiveMode {
                  else if (event.message.role === "user") {
                      this.addMessageToChat(event.message);
                      this.updatePendingMessagesDisplay();
@@ -706,7 +715,7 @@ index 462e240..74e993c 100644
                                  const component = new ToolExecutionComponent(content.name, content.id, content.arguments, {
                                      showImages: this.settingsManager.getShowImages(),
                                      imageWidthCells: this.settingsManager.getImageWidthCells(),
-@@ -2375,6 +2424,17 @@ export class InteractiveMode {
+@@ -2375,6 +2428,17 @@ export class InteractiveMode {
                              }
                          }
                      }
@@ -724,7 +733,7 @@ index 462e240..74e993c 100644
                      this.ui.requestRender();
                  }
                  break;
-@@ -2392,7 +2452,26 @@ export class InteractiveMode {
+@@ -2392,7 +2456,26 @@ export class InteractiveMode {
                                  : "Operation aborted";
                          this.streamingMessage.errorMessage = errorMessage;
                      }
@@ -752,7 +761,7 @@ index 462e240..74e993c 100644
                      if (this.streamingMessage.stopReason === "aborted" || this.streamingMessage.stopReason === "error") {
                          if (!errorMessage) {
                              errorMessage = this.streamingMessage.errorMessage || "Error";
-@@ -2422,6 +2501,11 @@ export class InteractiveMode {
+@@ -2422,6 +2505,11 @@ export class InteractiveMode {
                  // The bash execution callback handles TUI output rendering.
                  break;
              case "tool_execution_start": {
@@ -764,7 +773,7 @@ index 462e240..74e993c 100644
                  let component = this.pendingTools.get(event.toolCallId);
                  if (!component) {
                      component = new ToolExecutionComponent(event.toolName, event.toolCallId, event.args, {
-@@ -2437,6 +2521,11 @@ export class InteractiveMode {
+@@ -2437,6 +2525,11 @@ export class InteractiveMode {
                  break;
              }
              case "tool_execution_update": {
@@ -776,7 +785,7 @@ index 462e240..74e993c 100644
                  const component = this.pendingTools.get(event.toolCallId);
                  if (component) {
                      component.updateResult({ ...event.partialResult, isError: false }, true);
-@@ -2445,6 +2534,11 @@ export class InteractiveMode {
+@@ -2445,6 +2538,11 @@ export class InteractiveMode {
                  break;
              }
              case "tool_execution_end": {
@@ -788,7 +797,7 @@ index 462e240..74e993c 100644
                  const component = this.pendingTools.get(event.toolCallId);
                  if (component) {
                      component.updateResult({ ...event.result, isError: event.isError });
-@@ -2464,6 +2558,10 @@ export class InteractiveMode {
+@@ -2464,6 +2562,14 @@ export class InteractiveMode {
                      this.streamingMessage = undefined;
                  }
                  this.pendingTools.clear();
@@ -796,10 +805,14 @@ index 462e240..74e993c 100644
 +                    this.compactSummary?.setFinished(this.compactLastStopReason === "aborted");
 +                    this.compactSummary = undefined;
 +                }
++                if (this.compactModeRebuildPending) {
++                    this.compactModeRebuildPending = false;
++                    this.rebuildChatFromMessages();
++                }
                  this.ui.requestRender();
                  break;
              case "agent_settled":
-@@ -2696,6 +2794,10 @@ export class InteractiveMode {
+@@ -2696,6 +2802,10 @@ export class InteractiveMode {
      }
      renderSessionItems(items, options = {}) {
          this.pendingTools.clear();
@@ -810,7 +823,7 @@ index 462e240..74e993c 100644
          const renderedPendingTools = new Map();
          // Cache-miss notices are not persisted; re-derive them from the full entry
          // list and re-inject them after the assistant messages that paid for them.
-@@ -3129,6 +3231,81 @@ export class InteractiveMode {
+@@ -3129,6 +3239,90 @@ export class InteractiveMode {
          }
          this.showStatus(`Tool output: ${expanded ? "expanded" : "collapsed"}`);
      }
@@ -819,13 +832,22 @@ index 462e240..74e993c 100644
 +     * summary row plus the final response. Toggling re-renders the transcript.
 +     */
 +    setCompactMode(compact) {
-+        if (this.compactMode === compact)
++        if (this.compactMode === compact && !this.compactModeRebuildPending)
 +            return;
 +        this.compactMode = compact;
++        // Do not rebuild while a response is still streaming. The current
++        // streaming component may contain the final response before the
++        // session has persisted it; clearing the chat here can put that
++        // response behind, or remove it with, the collapsed transcript.
++        if (this.session.isStreaming) {
++            this.compactModeRebuildPending = true;
++            return;
++        }
 +        // Before the initial render there is nothing to re-render; the initial
 +        // render (renderInitialMessages) picks up the mode directly.
 +        if (!this.isInitialized || this.chatContainer.children.length === 0)
 +            return;
++        this.compactModeRebuildPending = false;
 +        this.rebuildChatFromMessages();
 +    }
 +    /**

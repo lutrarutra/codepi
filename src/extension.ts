@@ -6,6 +6,10 @@ import { createVscodeTools } from "./tools/index";
 import { disposeDiagnosticsCache } from "./tools/diagnostics";
 import { installAutoVerify } from "./auto-verify";
 import {
+	installCodepiTerminalShortcut,
+	readTerminalShortcutEnabled,
+} from "./codepi-terminal-shortcut";
+import {
 	createSessionActivityTracker,
 	readBashApprovalMode,
 } from "./session-activity";
@@ -275,6 +279,31 @@ export async function activate(context: vscode.ExtensionContext) {
 	} catch {
 		/* settings unreadable — recent list stays empty */
 	}
+
+	// `codepi` session launcher: typing `codepi` in an integrated terminal
+	// opens a NEW CodePi session in this window (codepi.newSession) via a
+	// generated shim + PATH injection at shell-integration-ready time. Gated by
+	// the `codepi.terminalShortcut` agent setting (default true).
+	context.subscriptions.push(
+		installCodepiTerminalShortcut({
+			appRoot: vscode.env.appRoot,
+			globalStorageUri: context.globalStorageUri,
+			isEnabled: () => {
+				try {
+					return readTerminalShortcutEnabled(
+						readJsonFile(getSettingsPath()) ?? {},
+					);
+			} catch {
+				return true;
+			}
+		},
+			readShell: () => vscode.env.shell,
+			onDidChangeTerminalShellIntegration: (listener) =>
+				vscode.window.onDidChangeTerminalShellIntegration(listener),
+			getOpenTerminals: () => vscode.window.terminals,
+			sendText: (terminal, text) => terminal.sendText(text, true),
+		}),
+	);
 
 	// pi's InteractiveMode ends every quit path (/quit, Ctrl+C/Ctrl+D, signals)
 	// with process.exit(). VS Code's extension host already neutralizes
@@ -1296,8 +1325,9 @@ async function setupSessionPanel(
 	);
 
 	// Track whether a CodePi TUI tab is the active editor so VS Code
-	// keybindings (Ctrl+N → new session) only apply when focused. Also track
-	// WHICH panel is focused so new sessions open in its editor group.
+	// keybindings (⌘N/Ctrl+N → new session, platform-correct) only apply when
+	// focused. Also track WHICH panel is focused so new sessions open in its
+	// editor group.
 	panel.onDidChangeViewState(
 		(e: vscode.WebviewPanelOnDidChangeViewStateEvent) => {
 			const focused =

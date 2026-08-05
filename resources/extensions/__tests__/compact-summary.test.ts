@@ -160,7 +160,7 @@ describe("CompactTurnSummary stats line", () => {
 			stats: {
 				input: 372_000,
 				output: 4_100,
-				reasoning: 0,
+				reasoning: 1_200,
 				cacheRead: 0,
 				cacheWrite: 0,
 				cost: 0.05,
@@ -189,6 +189,23 @@ describe("CompactTurnSummary stats line", () => {
 		expect(text).toContain("↓4.1k");
 		expect(text).toContain("$0.05");
 		expect(text).toContain(" tools");
+	});
+
+	it("renders thinking tokens as the font thought-bubble glyph plus a spaced count", () => {
+		const text = finishedSummary().getStatsText();
+		// md-thought-bubble (U+F07F6, surrogate pair \uDB81\uDDF6) from the
+		// bundled Fira Code Nerd Font — a monochrome 1-cell glyph (unlike the
+		// wide 🧠 emoji) so it cannot bleed into the token count; a space
+		// keeps them clearly apart.
+		expect(text).toContain("\uDB81\uDDF6 1.2k");
+		expect(text).not.toContain("🧠");
+	});
+
+	it("keeps the stats summary on one terminal row when space is narrow", () => {
+		const summary = finishedSummary();
+		expect(summary.render(60)).toHaveLength(1);
+		expect(summary.render(30)).toHaveLength(1);
+		expect(summary.render(30)[0]).not.toContain("\n");
 	});
 
 	it("counts each tool call once despite repeated streaming updates", () => {
