@@ -37,6 +37,8 @@ After building `left` and `right` exactly as today:
 
 If a single row alone exceeds the window (very narrow terminal), that row is truncated with `...` — last resort only. In split mode the right side is otherwise **never** collapsed; its content is always preserved.
 
+If the right side is empty (no mode/model/level/branch parts), the footer never splits: a right-less footer falls back to single-row truncation exactly as today (no empty second row).
+
 ## Non-goals
 
 - No hysteresis: resizing exactly at the boundary flips between 1 and 2 rows. Accepted — matches the built-in footer's simplicity.
