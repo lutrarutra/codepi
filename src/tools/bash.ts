@@ -371,7 +371,7 @@ function byteLength(text: string): number {
  * shared with codepi-context). createRequire is a second-chance fallback:
  * node's CJS Module._load IS intercepted for "vscode" in the host.
  */
-export async function getVscode(): Promise<any | undefined> {
+export async function getVscode(): Promise<typeof import("vscode") | undefined> {
 	const g = globalThis as Record<string, any>;
 	if (g[VSCODE_BRIDGE_KEY]?.vscode) return g[VSCODE_BRIDGE_KEY].vscode;
 	try {
@@ -389,7 +389,10 @@ export async function getVscode(): Promise<any | undefined> {
 }
 
 /** Create the hidden, transient terminal all commands run in. */
-function createHiddenTerminal(vscode: any, cwd: string): any {
+function createHiddenTerminal(
+	vscode: typeof import("vscode"),
+	cwd: string,
+): import("vscode").Terminal {
 	return vscode.window.createTerminal({
 		name: "CodePi bash",
 		cwd,
@@ -485,7 +488,7 @@ export function createVscodeBashOperations(): BashOperations {
  * coding-agent bash tool.
  */
 async function runWithOutputCapture(
-	terminal: any,
+	terminal: import("vscode").Terminal,
 	command: string,
 	options: {
 		onData: (data: Buffer) => void;
@@ -633,10 +636,7 @@ function getTextOutput(result: {
 
 function rebuildBashResultRenderComponent(
 	component: BashResultRenderComponent,
-	result: {
-		content: Array<{ type: string; text?: string }>;
-		details?: { truncation?: TruncationResult; fullOutputPath?: string };
-	},
+	result: AgentToolResult<unknown>,
 	options: ToolRenderResultOptions,
 	theme: Theme,
 	startedAt: number | undefined,
@@ -646,8 +646,11 @@ function rebuildBashResultRenderComponent(
 	component.clear();
 
 	let output = getTextOutput(result).trim();
-	const truncation = result.details?.truncation;
-	const fullOutputPath = result.details?.fullOutputPath;
+	const details = result.details as
+		| { truncation?: TruncationResult; fullOutputPath?: string }
+		| undefined;
+	const truncation = details?.truncation;
+	const fullOutputPath = details?.fullOutputPath;
 	if (
 		!options.isPartial &&
 		truncation?.truncated &&
@@ -1038,7 +1041,7 @@ export function createCodepiBashToolDefinition(
 				new BashResultRenderComponent();
 			rebuildBashResultRenderComponent(
 				component,
-				result as any,
+				result,
 				options,
 				theme,
 				state.startedAt,

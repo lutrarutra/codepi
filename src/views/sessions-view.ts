@@ -5,11 +5,12 @@ import type {
 	SessionsMessage,
 	SessionsReply,
 } from "../shared/sessions-protocol";
+import type { SessionInfo } from "@earendil-works/pi-coding-agent";
 
 // ── Lazy pi SDK import ───────────────────────────────────────
 
-let _pi: any;
-async function getPi(): Promise<any> {
+let _pi: typeof import("@earendil-works/pi-coding-agent") | undefined;
+async function getPi(): Promise<typeof import("@earendil-works/pi-coding-agent")> {
 	if (!_pi) {
 		_pi = await import("@earendil-works/pi-coding-agent");
 	}
@@ -182,9 +183,12 @@ export class SessionsViewProvider implements vscode.WebviewViewProvider {
 		try {
 			const pi = await getPi();
 			const cwd = getWorkspaceRoot();
-			const all: any[] = await pi.SessionManager.list(cwd, this.sessionDir);
+			const all: SessionInfo[] = await pi.SessionManager.list(
+				cwd,
+				this.sessionDir,
+			);
 			this.sessions = all
-				.map((s: any): SessionEntry => {
+				.map((s: SessionInfo): SessionEntry => {
 					const modified =
 						s.modified instanceof Date ? s.modified : new Date(s.modified);
 					return {

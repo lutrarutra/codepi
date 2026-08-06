@@ -17,6 +17,105 @@
  */
 import { readFile } from "node:fs/promises";
 import { basename, isAbsolute, join, relative, resolve } from "node:path";
+// Type-only: erased at runtime — the module never imports vscode for real.
+import type { Range as VscodeRange } from "vscode";
+
+// ── Structural vscode/git types ─────────────────────────────
+//
+// The collector never imports `vscode` at runtime (it is passed in: the real
+// module from the host, the bridged value in pi-land, or a mock in tests).
+// These interfaces describe exactly the surface the collector touches, so
+// callers and tests are checked structurally without a runtime import.
+
+export interface VscodeUriLike {
+	fsPath?: string;
+	scheme?: string;
+}
+
+export interface VscodeSelectionLike {
+	isEmpty: boolean;
+	start: { line: number; character: number };
+	end: { line: number; character: number };
+	active?: { line: number; character: number };
+}
+
+export interface VscodeTextEditorLike {
+	document?: {
+		uri?: VscodeUriLike;
+		languageId?: string;
+		lineCount?: number;
+		isDirty?: boolean;
+		getText?: (range?: VscodeRange) => string;
+	};
+	selection?: VscodeSelectionLike;
+}
+
+export interface VscodeTabLike {
+	input?: unknown;
+	isDirty?: boolean;
+}
+
+export interface GitChangeLike {
+	uri?: VscodeUriLike;
+	status?: number;
+}
+
+export interface GitRepositoryLike {
+	rootUri?: VscodeUriLike;
+	state?: {
+		HEAD?: {
+			name?: string;
+			upstream?: { name?: string };
+			ahead?: number;
+			behind?: number;
+		};
+		workingTreeChanges?: GitChangeLike[];
+		indexChanges?: GitChangeLike[];
+		untrackedChanges?: GitChangeLike[];
+	};
+	diffWithHEADShortStats?: (
+		path: string,
+	) => Promise<{ insertions?: number; deletions?: number }>;
+	diffWithHEAD?: (path: string) => Promise<unknown>;
+}
+
+export interface GitApiLike {
+	getRepository?: (uri: VscodeUriLike | undefined) => GitRepositoryLike | null;
+	repositories: GitRepositoryLike[];
+}
+
+/**
+ * Structural subset of the `vscode` module the collector uses. Every member
+ * is optional so partial mocks (and degraded hosts) type-check.
+ */
+export interface VscodeLike {
+	window?: {
+		activeTextEditor?: VscodeTextEditorLike | undefined;
+		visibleTextEditors?: readonly VscodeTextEditorLike[];
+		terminals?: ReadonlyArray<{ name?: string }>;
+		tabs?: readonly VscodeTabLike[];
+		tabGroups?: {
+			activeTabGroup?: { activeTab?: { input?: unknown } };
+		};
+		onDidChangeActiveTextEditor?: (
+			listener: (editor: VscodeTextEditorLike | undefined) => unknown,
+		) => unknown;
+	};
+	workspace?: {
+		workspaceFolders?: ReadonlyArray<{ uri?: VscodeUriLike }>;
+		isTrusted?: boolean;
+		name?: string;
+		textDocuments?: ReadonlyArray<{ uri?: VscodeUriLike; isDirty?: boolean }>;
+	};
+	extensions?: {
+		getExtension?: (
+			id: string,
+		) => { exports?: { getAPI?: (version: number) => GitApiLike } } | undefined;
+	};
+	scm?: { inputBox?: { value?: string } };
+	debug?: { activeDebugSession?: { name?: string; type?: string } | null };
+	Uri?: { file: (fsPath: string) => VscodeUriLike };
+}
 
 // ── Limits ──────────────────────────────────────────────────
 
@@ -140,11 +239,11 @@ const recentFiles: Array<{ path: string; ts: number }> = [];
 let tracking = false;
 
 /** Subscribe to active-editor switches to build the "recent" list. Idempotent. */
-export function trackContextEvents(vscode: any): void {
+export function trackContextEvents(vscode: VscodeLike | undefined): void {
 	if (tracking || !vscode?.window?.onDidChangeActiveTextEditor) return;
 	tracking = true;
 	try {
-		vscode.window.onDidChangeActiveTextEditor((editor: any) => {
+		vscode.window.onDidChangeActiveTextEditor((editor) => {
 			const path = editor?.document?.uri?.fsPath;
 			if (typeof path !== "string" || path.length === 0) return;
 			const ts = Date.now();
@@ -228,7 +327,7 @@ async function countLines(absPath: string): Promise<number | undefined> {
 }
 
 async function gitStatsFor(
-	repo: any,
+	repo: GitRepositoryLike,
 	root: string,
 	relPath: string,
 ): Promise<{ insertions: number; deletions: number } | undefined> {
@@ -238,7 +337,7 @@ async function gitStatsFor(
 		return { insertions: hit.insertions, deletions: hit.deletions };
 	}
 	try {
-		const stats = await repo.diffWithHEADShortStats(relPath);
+		const stats = await repo.diffWithHEADShortStats?.(relPath);
 		const insertions = stats?.insertions ?? 0;
 		const deletions = stats?.deletions ?? 0;
 		// A real change always has at least one +/- line; 0/0 means the shortstat
@@ -253,10 +352,13 @@ async function gitStatsFor(
 }
 
 /** Pick the repository whose root contains `cwd` (longest match). */
-function pickRepo(repositories: any[] | undefined, cwd: string): any | undefined {
+function pickRepo(
+	repositories: GitRepositoryLike[] | undefined,
+	cwd: string,
+): GitRepositoryLike | undefined {
 	if (!Array.isArray(repositories)) return undefined;
 	const resolved = resolve(cwd);
-	let best: any | undefined;
+	let best: GitRepositoryLike | undefined;
 	let bestLength = -1;
 	for (const repo of repositories) {
 		const root = repo?.rootUri?.fsPath;
@@ -272,16 +374,20 @@ function pickRepo(repositories: any[] | undefined, cwd: string): any | undefined
 }
 
 interface ResolvedGit {
-	repo: any;
+	repo: GitRepositoryLike;
 	root: string;
 }
 
-async function resolveGit(vscode: any, cwd: string): Promise<ResolvedGit | undefined> {
+async function resolveGit(
+	vscode: VscodeLike | undefined,
+	cwd: string,
+): Promise<ResolvedGit | undefined> {
 	const gitExtension = vscode?.extensions?.getExtension?.("vscode.git");
 	const api = gitExtension?.exports?.getAPI?.(1);
 	if (!api) return undefined;
 	const repo =
-		api.getRepository?.(vscode.Uri.file(cwd)) ?? pickRepo(api.repositories, cwd);
+		api.getRepository?.(vscode?.Uri?.file(cwd)) ?? pickRepo(api.repositories, cwd);
+	if (!repo) return undefined;
 	const root = repo?.rootUri?.fsPath;
 	if (typeof root !== "string") return undefined;
 	return { repo, root };
@@ -289,19 +395,23 @@ async function resolveGit(vscode: any, cwd: string): Promise<ResolvedGit | undef
 
 /** List changed files (working tree + index + untracked), deduped by path. */
 async function listRepoChanges(
-	repo: any,
+	repo: GitRepositoryLike,
 	root: string,
 	maxFiles: number,
 	includeStats: boolean,
 ): Promise<ChangeInfo[]> {
 	const state = repo?.state ?? {};
 	const entries: Array<{
-		uri: any;
+		uri: VscodeUriLike | undefined;
 		status: number | undefined;
 		staged: boolean;
 		untracked: boolean;
 	}> = [];
-	const push = (list: any[] | undefined, staged: boolean, untracked: boolean) => {
+	const push = (
+		list: GitChangeLike[] | undefined,
+		staged: boolean,
+		untracked: boolean,
+	) => {
 		if (!Array.isArray(list)) return;
 		for (const c of list) {
 			entries.push({ uri: c?.uri, status: c?.status, staged, untracked });
@@ -358,7 +468,7 @@ async function listRepoChanges(
 }
 
 async function collectGit(
-	vscode: any,
+	vscode: VscodeLike | undefined,
 	cwd: string,
 	maxFiles: number,
 	includeStats: boolean,
@@ -368,7 +478,8 @@ async function collectGit(
 	if (!gitExtension || !api) {
 		return { available: false, repos: [], reason: "vscode.git unavailable" };
 	}
-	const repo = api.getRepository?.(vscode.Uri.file(cwd)) ?? pickRepo(api.repositories, cwd);
+	const repo =
+		api.getRepository?.(vscode?.Uri?.file(cwd)) ?? pickRepo(api.repositories, cwd);
 	if (!repo) {
 		return { available: false, repos: [], reason: "not a git repository" };
 	}
@@ -409,7 +520,7 @@ type SelectionInfo = {
  * editor (multi-line, or a multi-char drag). The active editor's selection is
  * always surfaced regardless.
  */
-function isDeliberateSelection(sel: any): boolean {
+function isDeliberateSelection(sel: VscodeSelectionLike | undefined): boolean {
 	if (!sel || sel.isEmpty) return false;
 	return (
 		sel.end.line !== sel.start.line ||
@@ -425,18 +536,21 @@ function isDeliberateSelection(sel: any): boolean {
  * undefined then, but visible editors still expose `.selection`).
  */
 function collectSelections(
-	vscode: any,
+	vscode: VscodeLike | undefined,
 	includeSelection: boolean,
 ): SelectionInfo[] {
 	const result: SelectionInfo[] = [];
 	const seen = new Set<string>();
 	const activeEditor = vscode?.window?.activeTextEditor;
-	const visible: any[] = vscode?.window?.visibleTextEditors ?? [];
+	const visible = vscode?.window?.visibleTextEditors ?? [];
 	const editors = [activeEditor, ...visible].filter(
-		(editor): editor is any => !!editor?.document?.uri?.fsPath,
+		(editor): editor is VscodeTextEditorLike =>
+			!!editor?.document?.uri?.fsPath,
 	);
 	for (const editor of editors) {
-		const path = editor.document.uri.fsPath;
+		const document = editor.document;
+		const path = document?.uri?.fsPath;
+		if (!document || typeof path !== "string") continue;
 		const sel = editor.selection;
 		if (editor !== activeEditor && !isDeliberateSelection(sel)) continue;
 		if (!sel || sel.isEmpty) continue;
@@ -445,7 +559,7 @@ function collectSelections(
 		const startLine = sel.start.line + 1;
 		const endLine = sel.end.line + 1;
 		let text: string | undefined;
-		const fullText = editor.document.getText(sel);
+		const fullText = document.getText?.(sel as VscodeRange);
 		const limit = includeSelection
 			? SELECTION_TEXT_FORCED_MAX
 			: SELECTION_TEXT_MAX;
@@ -471,18 +585,23 @@ function collectSelections(
  * The primary editor for the `active:` line: the active one, else the first
  * visible editor that holds a selection (panel-focused case).
  */
-function pickPrimaryEditor(vscode: any, selections: SelectionInfo[]): any | undefined {
+function pickPrimaryEditor(
+	vscode: VscodeLike | undefined,
+	selections: SelectionInfo[],
+): VscodeTextEditorLike | undefined {
 	const active = vscode?.window?.activeTextEditor;
 	if (active?.document?.uri?.fsPath) return active;
 	if (selections.length === 0) return undefined;
 	const path = selections[0].file;
-	const visible: any[] = vscode?.window?.visibleTextEditors ?? [];
-	return visible.find((editor: any) => editor?.document?.uri?.fsPath === path);
+	const visible = vscode?.window?.visibleTextEditors ?? [];
+	return visible.find(
+		(editor) => editor?.document?.uri?.fsPath === path,
+	);
 }
 
 /** Collect the current editor/workspace/git context. Never throws. */
 export async function collectEditorContext(
-	vscode: any,
+	vscode: VscodeLike | undefined,
 	cwd: string,
 	options: EditorContextOptions = {},
 ): Promise<EditorContext> {
@@ -499,7 +618,7 @@ export async function collectEditorContext(
 		const workspaceFolders = vscode?.workspace?.workspaceFolders;
 		if (Array.isArray(workspaceFolders)) {
 			folders = workspaceFolders
-				.map((f: any) => f?.uri?.fsPath)
+				.map((f) => f?.uri?.fsPath)
 				.filter((p: unknown): p is string => typeof p === "string");
 		}
 		trusted = !!vscode?.workspace?.isTrusted;
@@ -543,12 +662,16 @@ export async function collectEditorContext(
 	// workspace's open text documents so the list is never spuriously empty.
 	let openEditors: EditorContext["openEditors"] = [];
 	try {
-		const tabs: any[] = vscode?.window?.tabs ?? [];
+		const tabs = vscode?.window?.tabs ?? [];
 		if (Array.isArray(tabs) && tabs.length > 0) {
-			const activeInput = vscode?.window?.tabGroups?.activeTabGroup?.activeTab?.input;
+			const activeInput =
+				vscode?.window?.tabGroups?.activeTabGroup?.activeTab?.input;
 			for (const tab of tabs) {
 				const input = tab?.input;
-				const uri = input?.uri;
+				const uri =
+					input !== null && typeof input === "object"
+						? (input as { uri?: VscodeUriLike }).uri
+						: undefined;
 				if (typeof uri?.fsPath !== "string") continue;
 				const active = input === activeInput;
 				openEditors.push({
@@ -560,7 +683,7 @@ export async function collectEditorContext(
 		}
 		if (openEditors.length === 0) {
 			const activePath = vscode?.window?.activeTextEditor?.document?.uri?.fsPath;
-			const docs: any[] = vscode?.workspace?.textDocuments ?? [];
+			const docs = vscode?.workspace?.textDocuments ?? [];
 			if (Array.isArray(docs)) {
 				for (const doc of docs) {
 					const uri = doc?.uri;
@@ -607,7 +730,7 @@ export async function collectEditorContext(
 	let terminals: string[] = [];
 	try {
 		terminals = (vscode?.window?.terminals ?? [])
-			.map((t: any) => t?.name)
+			.map((t) => t?.name)
 			.filter((n: unknown): n is string => typeof n === "string");
 	} catch (err) {
 		errors.push(`terminals: ${errorMessage(err)}`);
@@ -617,7 +740,9 @@ export async function collectEditorContext(
 	let debug: EditorContext["debug"];
 	try {
 		const session = vscode?.debug?.activeDebugSession;
-		debug = session ? { name: session.name, type: session.type } : null;
+		debug = session
+			? { name: session.name ?? "", type: session.type ?? "" }
+			: null;
 	} catch (err) {
 		debug = null;
 		errors.push(`debug: ${errorMessage(err)}`);
@@ -814,7 +939,7 @@ function truncateDiffLines(text: string, maxLines: number): string {
 
 /** Unified diffs (vs HEAD) for the changed files; untracked files inlined. */
 export async function collectGitDiffs(
-	vscode: any,
+	vscode: VscodeLike | undefined,
 	cwd: string,
 	options: { path?: string; maxFiles?: number; maxDiffLines?: number } = {},
 ): Promise<string> {
@@ -856,7 +981,7 @@ export async function collectGitDiffs(
 			}
 		} else {
 			try {
-				const raw = await repo.diffWithHEAD(change.path);
+				const raw = await repo.diffWithHEAD?.(change.path);
 				content =
 					typeof raw === "string"
 						? raw
@@ -886,7 +1011,7 @@ export async function collectGitDiffs(
  * (unknown state must never block session creation).
  */
 export function waitForEditorRestore(
-	vscode: any,
+	vscode: VscodeLike | undefined,
 	timeoutMs = RESTORE_WAIT_MS,
 	pollMs = 75,
 ): Promise<void> {
@@ -898,8 +1023,9 @@ export function waitForEditorRestore(
 			return (
 				Array.isArray(docs) &&
 				docs.some(
-					(d: any) =>
-						d?.uri?.scheme === "file" && typeof d?.uri?.fsPath === "string",
+					(d) =>
+						d?.uri?.scheme === "file" &&
+						typeof d?.uri?.fsPath === "string",
 				)
 			);
 		} catch {
@@ -924,7 +1050,7 @@ export function waitForEditorRestore(
  * undefined (never throws) when collection fails or the API is unavailable.
  */
 export async function renderSystemPromptSnapshot(
-	vscode: any,
+	vscode: VscodeLike | undefined,
 	cwd: string,
 	options?: EditorContextOptions & { waitForRestore?: boolean },
 ): Promise<string | undefined> {

@@ -85,7 +85,6 @@ export class ExtensionsViewProvider implements vscode.WebviewViewProvider {
 	}
 
 	private async build(): Promise<ExtensionsSnapshot> {
-		const sdk = await getSdk();
 		const cwd = this.getCwd();
 		const agentDir = this.agentDir;
 		const extensionDir = vscode.Uri.joinPath(
@@ -99,17 +98,18 @@ export class ExtensionsViewProvider implements vscode.WebviewViewProvider {
 			extensionResourcesDir: extensionDir,
 			readSettings: () => readJsonFile(getSettingsPath()) ?? {},
 		});
-		// Core SDK tools via the root-exported factories (the SDK's own
-		// createCodingToolDefinitions is not re-exported from the root).
+		// The base tool set is provided by CodePi itself via baseToolsOverride
+		// (the SDK's own stock factories never register in CodePi sessions), so
+		// list the tools that actually run instead of the SDK's built-ins.
+		// Bash is a separate host implementation, not part of getVscodeTools().
 		const coreTools = [
-			sdk.createReadToolDefinition(cwd),
-			sdk.createBashToolDefinition(cwd),
-			sdk.createEditToolDefinition(cwd),
-			sdk.createWriteToolDefinition(cwd),
-			sdk.createGrepToolDefinition(cwd),
-			sdk.createFindToolDefinition(cwd),
-			sdk.createLsToolDefinition(cwd),
 			...getVscodeTools(),
+			{
+				name: "bash",
+				label: "Bash",
+				description:
+					"Execute bash commands in a VS Code terminal with output truncation (CodePi host implementation).",
+			},
 		];
 		return buildSnapshot({
 			bundledDir: extensionDir,

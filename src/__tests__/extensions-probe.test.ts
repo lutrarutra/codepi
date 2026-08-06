@@ -22,23 +22,27 @@ export default function (pi: ExtensionAPI): void {
 `;
 
 describe("probeExtensions", () => {
-	it("loads a fixture extension from the agent dir with its command and tool", async () => {
-		const dir = join(
-			tmpdir(),
-			"codepi-probe-test-" + process.pid + "-" + Date.now(),
-		);
-		const extDir = join(dir, "extensions");
-		mkdirSync(extDir, { recursive: true });
-		writeFileSync(join(extDir, "fake-ext.ts"), FAKE_EXT);
-		try {
-			const result = await probeExtensions({
-				cwd: dir,
-				agentDir: dir,
-				extensionResourcesDir: join(dir, "bundled"),
-				readSettings: () => ({}),
-			});
-			const ext = result.extensions.find((e) =>
-				(e.resolvedPath ?? e.path ?? "").endsWith("fake-ext.ts"),
+	it(
+		"loads a fixture extension from the agent dir with its command and tool",
+		async () => {
+			// jiti-compiles the fixture extension + loads the SDK: generous
+			// timeout — flakes under load at the default 5s.
+			const dir = join(
+				tmpdir(),
+				"codepi-probe-test-" + process.pid + "-" + Date.now(),
+			);
+			const extDir = join(dir, "extensions");
+			mkdirSync(extDir, { recursive: true });
+			writeFileSync(join(extDir, "fake-ext.ts"), FAKE_EXT);
+			try {
+				const result = await probeExtensions({
+					cwd: dir,
+					agentDir: dir,
+					extensionResourcesDir: join(dir, "bundled"),
+					readSettings: () => ({}),
+				});
+				const ext = result.extensions.find((e) =>
+					(e.resolvedPath ?? e.path ?? "").endsWith("fake-ext.ts"),
 			);
 			expect(ext).toBeDefined();
 			const commands = ext?.commands ? [...ext.commands.keys()] : [];

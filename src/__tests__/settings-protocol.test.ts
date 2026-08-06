@@ -42,11 +42,17 @@ describe("settings dashboard protocol", () => {
 		);
 	});
 
-	it("collects package status from a fake agent without installing packages", async () => {
-		const agentDir = join(
-			tmpdir(),
-			`codepi-package-status-${Date.now()}-${Math.random().toString(36).slice(2)}`,
-		);
+	it(
+		"collects package status from a fake agent without installing packages",
+		async () => {
+			// Runs pi's package-status path (subprocess + npm registry
+			// lookups): generous timeout — flakes under load at the default 5s.
+			const agentDir = join(
+				tmpdir(),
+				`codepi-package-status-${Date.now()}-${Math.random()
+					.toString(36)
+					.slice(2)}`,
+			);
 		const cwd = join(agentDir, "workspace");
 		mkdirSync(join(agentDir, "npm", "node_modules", "installed"), {
 			recursive: true,

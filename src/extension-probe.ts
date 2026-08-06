@@ -7,6 +7,10 @@ import {
 	buildPiResourceLoaderOptions,
 	filterConflictingExtensions,
 } from "./pi-runtime-config";
+import type {
+	Extension,
+	LoadExtensionsResult,
+} from "@earendil-works/pi-coding-agent";
 import type { LoadedExtensionRich } from "./extension-snapshot";
 
 let sdkPromise:
@@ -64,20 +68,18 @@ export async function probeExtensions(
 			bundledThemePaths: bundledThemes,
 		}),
 		settingsManager,
-		extensionsOverride: (base: any) => {
+		extensionsOverride: (base: LoadExtensionsResult) => {
 			// Same "bundled copy wins" conflict filtering the runtime factory
 			// applies (extension.ts), so the probe mirrors a real session.
 			const { extensions, droppedPaths } = filterConflictingExtensions(
-				base.extensions ?? [],
+				base.extensions,
 				bundledExtensions,
 			);
 			const dropped = new Set(droppedPaths);
 			return {
 				...base,
 				extensions,
-				errors: (base.errors ?? []).filter(
-					(error: any) => !dropped.has(error?.path),
-				),
+				errors: base.errors.filter((error) => !dropped.has(error.path)),
 			};
 		},
 	});
@@ -102,10 +104,10 @@ export async function probeExtensions(
 		prompts = [];
 	}
 	return {
-		extensions: (result.extensions ?? []) as LoadedExtensionRich[],
-		loadErrors: (result.errors ?? []).map((e: any) => ({
-			path: e.path ?? "?",
-			error: e.error ?? String(e),
+		extensions: result.extensions as LoadedExtensionRich[],
+		loadErrors: result.errors.map((e) => ({
+			path: e.path,
+			error: e.error,
 		})),
 		skills,
 		prompts,

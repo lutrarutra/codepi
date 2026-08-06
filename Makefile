@@ -92,8 +92,13 @@ release: verify package ## Verify everything, then produce the .vsix
 
 ## ── Install ─────────────────────────────────────────────────
 
-# install: vsix ## Install the built .vsix from dist/ into VS Code (force-replaces)
-# 	@code --install-extension "dist/codepi-$$(node -p "require('./package.json').version").vsix" --force
+# install: uninstalls any older version first (stale side-by-side installs
+# can shadow the new build — VS Code resolves one version per extension id),
+# then installs the freshly built .vsix from dist/.
+install: vsix ## Build and install the .vsix into VS Code (replaces older installs)
+	@code --uninstall-extension lutrarutra.codepi >/dev/null 2>&1 || true
+	@code --install-extension "dist/codepi-$$(node -p "require('./package.json').version").vsix" --force
+	@echo "Installed: lutrarutra.codepi $$(node -p "require('./package.json').version") — reload your VS Code window"
 
 uninstall: ## Uninstall CodePi from VS Code
 	code --uninstall-extension lutrarutra.codepi

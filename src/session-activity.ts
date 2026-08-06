@@ -33,7 +33,9 @@ export type ActivityEvent = {
 	type: string;
 	toolCallId?: string;
 	toolName?: string;
-	message?: { errorMessage?: string };
+	// `unknown`: the real events carry the full AgentMessage union here; the
+	// tracker only reads errorMessage, narrowed below.
+	message?: unknown;
 	/** Which extension UI surface opened/closed ("select" | "input"). */
 	ui?: string;
 };
@@ -140,9 +142,14 @@ export function createSessionActivityTracker(options: {
 						: "working",
 				);
 				break;
-			case "turn_end":
-				set(event.message?.errorMessage ? "error" : "working");
+			case "turn_end": {
+				const errorMessage =
+					event.message !== null && typeof event.message === "object"
+						? (event.message as { errorMessage?: string }).errorMessage
+						: undefined;
+				set(errorMessage ? "error" : "working");
 				break;
+			}
 			case "agent_end":
 				turnActive = false;
 				pendingExtensionUiCount = 0;

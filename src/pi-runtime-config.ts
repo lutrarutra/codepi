@@ -134,10 +134,10 @@ function registrationNames(ext: LoadedExtensionLike): string[] {
  * name also registered by a bundled extension is removed, and the caller
  * should drop its loader diagnostics along with it.
  */
-export function filterConflictingExtensions(
-	extensions: LoadedExtensionLike[],
+export function filterConflictingExtensions<T extends LoadedExtensionLike>(
+	extensions: T[],
 	bundledPaths: Iterable<string>,
-): { extensions: LoadedExtensionLike[]; droppedPaths: string[] } {
+): { extensions: T[]; droppedPaths: string[] } {
 	const bundled = new Set(bundledPaths);
 	const isBundled = (ext: LoadedExtensionLike) =>
 		bundled.has(ext.resolvedPath ?? ext.path ?? "");
@@ -148,7 +148,7 @@ export function filterConflictingExtensions(
 		for (const name of registrationNames(ext)) bundledNames.add(name);
 	}
 
-	const kept: LoadedExtensionLike[] = [];
+	const kept: T[] = [];
 	const droppedPaths: string[] = [];
 	for (const ext of extensions) {
 		if (isBundled(ext)) {

@@ -21,6 +21,8 @@ import {
 	OPEN_EDITORS_MAX,
 	RESTORE_WAIT_MS,
 	SELECTION_TEXT_MAX,
+	type GitRepositoryLike,
+	type VscodeLike,
 } from "../context-snapshot";
 
 // ── Helpers ─────────────────────────────────────────────────
@@ -37,10 +39,10 @@ afterEach(() => {
 	for (const dir of tempDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
-interface MockRepo {
-	root: string;
+interface MockRepo extends GitRepositoryLike {
+	root?: string;
 	branch?: string;
-	upstream?: string;
+	upstream?: { name: string };
 	ahead?: number;
 	behind?: number;
 	workingTreeChanges?: any[];
@@ -50,8 +52,8 @@ interface MockRepo {
 	shortStats?: Map<string, { insertions: number; deletions: number }>;
 }
 
-function makeRepo(root: string, overrides: Partial<MockRepo> = {}): any {
-	const repo: any = {
+function makeRepo(root: string, overrides: Partial<MockRepo> = {}): MockRepo {
+	const repo: MockRepo = {
 		rootUri: { fsPath: root },
 		state: {
 			HEAD: {
@@ -67,9 +69,13 @@ function makeRepo(root: string, overrides: Partial<MockRepo> = {}): any {
 		diffs: overrides.diffs ?? new Map(),
 		shortStats: overrides.shortStats ?? new Map(),
 		diffWithHEAD: async (path: string) =>
-			repo.diffs.get(path) ?? `(no diff for ${path})`,
+			repo.diffs?.get(path) ?? `(no diff for ${path})`,
 		diffWithHEADShortStats: async (path: string) =>
-			repo.shortStats.get(path) ?? { files: 0, insertions: 0, deletions: 0 },
+			repo.shortStats?.get(path) ?? {
+				files: 0,
+				insertions: 0,
+				deletions: 0,
+			},
 	};
 	return repo;
 }
@@ -87,7 +93,7 @@ function makeMockVscode(options: {
 	scmInput?: string;
 	debug?: { name: string; type: string } | null;
 	activeTextEditorHandler?: (listener: (editor: any) => void) => void;
-} = {}) {
+} = {}): VscodeLike {
 	const {
 		folders = [],
 		trusted = true,
@@ -374,7 +380,7 @@ describe("formatContextSnapshot", () => {
 	it("renders git branch, divergence, changed files with ±stats", async () => {
 		const repo = makeRepo("/p", {
 			branch: "feat/context",
-			upstream: "origin/feat/context",
+			upstream: { name: "origin/feat/context" },
 			ahead: 2,
 			workingTreeChanges: [{ uri: { fsPath: "/p/src/a.ts" }, status: 5 }],
 			indexChanges: [{ uri: { fsPath: "/p/src/b.ts" }, status: 1 }],

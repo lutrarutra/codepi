@@ -7,6 +7,7 @@ import {
 	splitVscodeTools,
 	wrapVscodeBaseTools,
 	wrapToolDefinition,
+	type VscodeTool,
 } from "./tools/index";
 import { createCodepiBashToolDefinition } from "./tools/bash";
 import { getBashBridge } from "../resources/extensions/bash-bridge";
@@ -30,8 +31,16 @@ import {
 import type { EditProposalSummary } from "./review/types";
 import type {
 	AgentSessionRuntime,
+	CreateAgentSessionRuntimeFactory,
 	InteractiveMode,
+	LoadExtensionsResult,
+	SessionEntry,
+	SessionInfo,
+	SessionManager,
+	SessionMessageEntry,
+	ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
+import type { Extension as SdkExtension } from "@earendil-works/pi-coding-agent";
 import { stripPiFromTitle, WebviewPty } from "./tui/webview-pty";
 import {
 	classifyAsUrl,
@@ -86,7 +95,7 @@ interface SessionState {
 	pty: WebviewPty;
 	runtime: AgentSessionRuntime;
 	tui: InteractiveMode;
-	sessionManager: any; // SessionManager from PI SDK
+	sessionManager: SessionManager;
 	isBackendReady: boolean;
 	isBusy: boolean;
 	sessionId: string;
@@ -172,8 +181,8 @@ function updateReviewStatusBar(): void {
 }
 
 // Lazy import — pi SDK is ESM-only, must use dynamic import from CJS bundle
-let _pi: any;
-async function getPi(): Promise<any> {
+let _pi: typeof import("@earendil-works/pi-coding-agent") | undefined;
+async function getPi(): Promise<typeof import("@earendil-works/pi-coding-agent")> {
 	if (!_pi) {
 		_pi = await import("@earendil-works/pi-coding-agent");
 	}
@@ -722,7 +731,7 @@ export async function activate(context: vscode.ExtensionContext) {
  */
 async function pollFileChangesSync(state: SessionState): Promise<void> {
 	if (!state.sessionManager) return;
-	let branch: any[];
+	let branch: SessionEntry[];
 	try {
 		branch = state.sessionManager.getBranch();
 	} catch {
@@ -865,17 +874,17 @@ async function getSessionsFromProvider(): Promise<
 	try {
 		const pi = await getPi();
 		const workspaceRoot = getWorkspaceRoot();
-		const all: any[] = await pi.SessionManager.list(
+		const all: SessionInfo[] = await pi.SessionManager.list(
 			workspaceRoot,
 			getCodePiSessionDirForRuntime(),
 		);
 		return all
-			.map((s: any) => ({
+			.map((s: SessionInfo) => ({
 				firstMessage: s.firstMessage || "(empty)",
 				messageCount: s.messageCount ?? 0,
 				path: s.path,
 			}))
-			.sort((a: any, b: any) => b.messageCount - a.messageCount);
+			.sort((a, b) => b.messageCount - a.messageCount);
 	} catch {
 		return [];
 	}
@@ -891,16 +900,16 @@ async function findSessionPathById(
 ): Promise<string | undefined> {
 	try {
 		const pi = await getPi();
-		const byCwd: any[] = await pi.SessionManager.list(
+		const byCwd: SessionInfo[] = await pi.SessionManager.list(
 			getWorkspaceRoot(),
 			getCodePiSessionDirForRuntime(),
 		);
-		const hit = byCwd.find((s: any) => s.id === sessionId);
+		const hit = byCwd.find((s: SessionInfo) => s.id === sessionId);
 		if (hit) return hit.path;
-		const all: any[] = await pi.SessionManager.listAll(
+		const all: SessionInfo[] = await pi.SessionManager.listAll(
 			getCodePiSessionDirForRuntime(),
 		);
-		return all.find((s: any) => s.id === sessionId)?.path;
+		return all.find((s: SessionInfo) => s.id === sessionId)?.path;
 	} catch {
 		return undefined;
 	}
@@ -1060,15 +1069,18 @@ async function openTerminalFile(
 }
 
 /** Tab title for a session: the session name, else the first user message. */
-function computeSessionTitle(sessionManager: any): string {
+function computeSessionTitle(sessionManager: SessionManager): string {
 	const entries = sessionManager.getEntries();
 	const sessionName = sessionManager.getSessionName?.();
-	const firstUserEntry = entries?.find(
-		(e: any) => e.type === "message" && e.message?.role === "user",
-	);
-	const titleText = stripPiFromTitle(
-		sessionName || firstUserEntry?.message?.content?.[0]?.text || "PI",
-	);
+	const userMessage = entries
+		.filter((e): e is SessionMessageEntry => e.type === "message")
+		.map((e) => e.message)
+		.find((m) => m.role === "user");
+	const content = userMessage?.content;
+	const firstText = Array.isArray(content)
+		? content.find((c) => c.type === "text")?.text
+		: undefined;
+	const titleText = stripPiFromTitle(sessionName || firstText || "PI");
 	return titleText.length > 50 ? titleText.slice(0, 50) + "…" : titleText;
 }
 
@@ -1077,7 +1089,7 @@ function computeSessionTitle(sessionManager: any): string {
  * the in-process InteractiveMode inside it.
  */
 async function startTuiSession(
-	sessionManager: any,
+	sessionManager: SessionManager,
 	sessionId: string,
 	sessionPath: string,
 ): Promise<void> {
@@ -1115,7 +1127,7 @@ async function startTuiSession(
  */
 async function setupSessionPanel(
 	panel: vscode.WebviewPanel,
-	sessionManager: any,
+	sessionManager: SessionManager,
 	sessionId: string,
 	sessionPath: string,
 ): Promise<void> {
@@ -1465,7 +1477,7 @@ async function startTuiBackend(state: SessionState): Promise<void> {
 	// Build all resource paths inside the runtime factory. The SDK may invoke this
 	// factory for more than one new session; each session must see current settings
 	// and bundled-resource toggles rather than activation-time snapshots.
-	const createRuntime: any = async (opts: any) => {
+	const createRuntime: CreateAgentSessionRuntimeFactory = async (opts) => {
 		const settingsManager = pi.SettingsManager.create(opts.cwd, agentDir);
 		const resourcePaths = buildCurrentPiRuntimeResourcePaths(
 			extensionDir?.fsPath ?? "",
@@ -1515,56 +1527,69 @@ async function startTuiBackend(state: SessionState): Promise<void> {
 			bundledExtensionPaths: bundledExtensions,
 			bundledThemePaths: bundledThemes,
 		});
-		const loader = new pi.DefaultResourceLoader({
-			...loaderOptions,
+		// cwd-bound runtime services (resource loader + model runtime + settings
+		// manager). The session is created FROM these so extension-registered
+		// providers reach the session's model runtime and `runtime.services` is
+		// populated — pi's InteractiveMode reads `runtimeHost.services.agentDir`
+		// for project-trust handling.
+		const services = await pi.createAgentSessionServices({
+			cwd: opts.cwd,
+			agentDir,
 			settingsManager,
-			appendSystemPromptOverride: (base: string[]) =>
-				contextSnapshot ? [...base, contextSnapshot] : base,
-			extensionsOverride: (base: any) => {
-				// A user can have the same feature installed as a standalone
-				// extension (e.g. a 3rd-party codepi-diff) while CodePi also
-				// bundles its own copy. Both then register the same
-				// commands/tools, which pi disambiguates by suffixing
-				// (`/filechanges-accept:1` / `:2`) — duplicate entries in the
-				// command palette. CodePi's bundled copy wins: drop any
-				// non-bundled extension that registers a command or tool name
-				// also provided by a bundled extension, and clear the loader's
-				// conflict diagnostics for the dropped extension.
-				const { extensions, droppedPaths } = filterConflictingExtensions(
-					base.extensions ?? [],
-					bundledExtensions,
-				);
-				for (const extPath of droppedPaths) {
-					console.warn(
-						`[CodePi] dropping extension ${extPath}: it registers commands/tools also provided by a CodePi bundled extension (bundled copy wins).`,
-					);
-				}
-				const dropped = new Set(droppedPaths);
-				return {
-					...base,
-					extensions,
-					errors: (base.errors ?? []).filter(
-						(error: any) => !dropped.has(error?.path),
-					),
-				};
+			resourceLoaderOptions: {
+				noExtensions: loaderOptions.noExtensions,
+				additionalExtensionPaths: loaderOptions.additionalExtensionPaths,
+				additionalThemePaths: loaderOptions.additionalThemePaths,
+				appendSystemPromptOverride: (base: string[]) =>
+					contextSnapshot ? [...base, contextSnapshot] : base,
+				extensionsOverride: (base: LoadExtensionsResult) => {
+					// A user can have the same feature installed as a standalone
+					// extension (e.g. a 3rd-party codepi-diff) while CodePi also
+					// bundles its own copy. Both then register the same
+					// commands/tools, which pi disambiguates by suffixing
+					// (`/filechanges-accept:1` / `:2`) — duplicate entries in the
+					// command palette. CodePi's bundled copy wins: drop any
+					// non-bundled extension that registers a command or tool name
+					// also provided by a bundled extension, and clear the loader's
+					// conflict diagnostics for the dropped extension.
+					const { extensions, droppedPaths } =
+						filterConflictingExtensions(
+							base.extensions,
+							bundledExtensions,
+						);
+					for (const extPath of droppedPaths) {
+						console.warn(
+							`[CodePi] dropping extension ${extPath}: it registers commands/tools also provided by a CodePi bundled extension (bundled copy wins).`,
+						);
+					}
+					const dropped = new Set(droppedPaths);
+					return {
+						...base,
+						extensions,
+						errors: base.errors.filter(
+							(error) => !dropped.has(error.path),
+						),
+					};
+				},
 			},
 		});
-		await loader.reload();
+		const loader = services.resourceLoader;
 		// Host-side fallback tools for codepi-context (registered via
 		// customTools, the same channel as CodePi's workspace tools). Populated
 		// only when the bundled extension did not load in this environment.
 		let hostContextTools: ReturnType<typeof createHostContextTools> | undefined;
 		if (isContextExtensionEnabled(settings)) {
 			const extensionResult = loader.getExtensions();
-			const contextLoaded = extensionResult.extensions.some((extension: any) =>
-				(extension.resolvedPath ?? extension.path)?.endsWith(
-					"codepi-context.ts",
-				),
+			const contextLoaded = extensionResult.extensions.some(
+				(extension: SdkExtension) =>
+					(extension.resolvedPath ?? extension.path).endsWith(
+						"codepi-context.ts",
+					),
 			);
 			if (!contextLoaded) {
 				console.warn(
 					"[CodePi] codepi-context extension did not load in this environment — registering get_editor_context/get_git_diff via the host fallback instead. Loaded extensions:",
-					extensionResult.extensions.map((e: any) =>
+						extensionResult.extensions.map((e: SdkExtension) =>
 						(e.resolvedPath ?? e.path).split(/[\\/]/).slice(-2).join("/"),
 					),
 					"Loader errors:",
@@ -1599,14 +1624,17 @@ async function startTuiBackend(state: SessionState): Promise<void> {
 					: () => "auto",
 			}),
 		);
-		const customTools = [...customToolDefs];
+		const customTools: Array<VscodeTool | ToolDefinition> = [
+			...customToolDefs,
+		];
 		if (hostContextTools) {
-			(customTools as Array<unknown>).push(...hostContextTools);
+			customTools.push(...hostContextTools);
 		}
 
 		const result = await pi.createAgentSession({
+			modelRuntime: services.modelRuntime,
 			resourceLoader: loader,
-			settingsManager,
+			settingsManager: services.settingsManager,
 			cwd: opts.cwd,
 			agentDir,
 			// pi's built-in tool set (read/bash/edit/write/grep/find/ls) is
@@ -1626,7 +1654,7 @@ async function startTuiBackend(state: SessionState): Promise<void> {
 				readJsonFile(getSettingsPath()) ?? {},
 			).bundledThemePaths.some((p) => fs.existsSync(p)),
 		);
-		return result;
+		return { ...result, services, diagnostics: services.diagnostics };
 	};
 
 	const runtime = await pi.createAgentSessionRuntime(createRuntime, {
