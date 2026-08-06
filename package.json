@@ -217,8 +217,8 @@
     "postinstall": "patch-package"
   },
   "dependencies": {
-    "@earendil-works/pi-coding-agent": "^0.83.0",
-    "@earendil-works/pi-tui": "0.83.0",
+    "@earendil-works/pi-coding-agent": "^0.84.0",
+    "@earendil-works/pi-tui": "0.84.0",
     "@lydell/node-pty": "^1.2.0-beta.14",
     "@vscode/ripgrep-universal": "^1.18.0",
     "get-east-asian-width": "1.6.0",
