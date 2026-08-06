@@ -57,9 +57,9 @@ import {
 	cleanTerminalOutput,
 	createVscodeBashOperations,
 	joinCommands,
-	readModeFromBranch,
 	resolveCwd,
-} from "./codepi-bash";
+} from "../../src/tools/bash";
+import { readModeFromBranch } from "./codepi-bash";
 
 // ── Constants ────────────────────────────────────────────────
 

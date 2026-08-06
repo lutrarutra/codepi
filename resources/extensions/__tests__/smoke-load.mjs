@@ -119,19 +119,14 @@ await loadExtension("../codepi-modes.ts", "codepi-modes", {
 });
 
 await loadExtension("../codepi-bash.ts", "codepi-bash", {
-	commands: ["codepi-bash-ask", "codepi-bash-allow"],
+	commands: ["codepi-bash-ask", "codepi-bash-allow", "codepi-bash-disable"],
 	events: ["session_start"],
-	tools: ["bash"],
+	tools: [],
 });
 
 await loadExtension("../codepi-context.ts", "codepi-context", {
 	events: ["session_start", "before_agent_start"],
 	tools: ["get_editor_context", "get_git_diff"],
-});
-
-await loadExtension("../codepi-tldr.ts", "codepi-tldr", {
-	commands: ["codepi-toggle-tldr"],
-	events: ["session_start"],
 });
 
 await loadExtension("../codepi-task.ts", "codepi-task", {

@@ -36,6 +36,7 @@ const ctx = await esbuild.context({
 	external: [
 		"vscode",
 		"@earendil-works/pi-coding-agent",
+		"@earendil-works/pi-tui",
 		"@vscode/ripgrep-universal",
 	],
 	format: "cjs",

@@ -2,7 +2,14 @@ import * as vscode from "vscode";
 import * as path from "node:path";
 import * as os from "node:os";
 import * as fs from "node:fs";
-import { createVscodeTools } from "./tools/index";
+import {
+	createVscodeTools,
+	splitVscodeTools,
+	wrapVscodeBaseTools,
+	wrapToolDefinition,
+} from "./tools/index";
+import { createCodepiBashToolDefinition } from "./tools/bash";
+import { getBashBridge } from "../resources/extensions/bash-bridge";
 import { disposeDiagnosticsCache } from "./tools/diagnostics";
 import { installAutoVerify } from "./auto-verify";
 import {
@@ -49,7 +56,6 @@ import {
 	readJsonFile,
 	readTerminalPrefs,
 	seedAskModeAllowedToolsIfMissing,
-	seedTldrModeIfMissing,
 	setAgentDir,
 	isBashExtensionEnabled,
 	isContextExtensionEnabled,
@@ -361,14 +367,6 @@ export async function activate(context: vscode.ExtensionContext) {
 	// codepi-modes extension falls back to the same defaults at runtime).
 	try {
 		seedAskModeAllowedToolsIfMissing(getSettingsPath());
-	} catch {
-		/* malformed settings — leave unseeded, extension fallback applies */
-	}
-
-	// Seed codepi.tldrMode with the default (enabled) when missing, so the
-	// settings dashboard shows the effective value and new sessions respect it.
-	try {
-		seedTldrModeIfMissing(getSettingsPath());
 	} catch {
 		/* malformed settings — leave unseeded, extension fallback applies */
 	}
@@ -1576,18 +1574,34 @@ async function startTuiBackend(state: SessionState): Promise<void> {
 			}
 		}
 		applyImplicitBundledTheme(settingsManager, bundledThemeEnabled);
-		// CodePi's workspace tools, plus pi's STOCK bash tool when the codepi-bash
-		// bundled extension is disabled in Settings (spawn-based, no approval
-		// layer — the user explicitly opted out). When codepi-bash is enabled the
-		// extension itself registers `bash` (VS Code terminal + approval modes).
-		const customTools = createVscodeTools(state.review);
+		// CodePi's workspace tools split into two channels:
+		// - read/edit/write/ls/find/grep REPLACE pi's built-in base tool set via
+		//   baseToolsOverride (active by default, subject to tools/excludeTools
+		//   semantics), alongside `bash` from src/tools/bash.ts.
+		// - head/get_diagnostics (no built-in equivalents) stay custom tools.
+		const vscodeTools = createVscodeTools(state.review);
+		const { base: baseToolDefs, custom: customToolDefs } =
+			splitVscodeTools(vscodeTools);
+		const baseTools = wrapVscodeBaseTools(baseToolDefs);
+		const sessionId = opts.sessionManager.getSessionId();
+		// Bash always comes from the host via baseToolsOverride. When the
+		// codepi-bash bundled extension is enabled it owns the ask/auto/disabled
+		// switch and the approval dialog (per-session bridge); when it is
+		// disabled the user explicitly opted out of the approval layer, so bash
+		// runs unguarded (matching the previous stock-bash fallback semantics).
+		const bashApprovalEnabled = isBashExtensionEnabled(settings);
+		baseTools.bash = wrapToolDefinition(
+			createCodepiBashToolDefinition({
+				sessionId,
+				cwd: opts.cwd,
+				getMode: bashApprovalEnabled
+					? () => getBashBridge(sessionId)?.getMode() ?? "ask"
+					: () => "auto",
+			}),
+		);
+		const customTools = [...customToolDefs];
 		if (hostContextTools) {
 			(customTools as Array<unknown>).push(...hostContextTools);
-		}
-		if (!isBashExtensionEnabled(settings)) {
-			(customTools as Array<unknown>).push(
-				pi.createBashToolDefinition(opts.cwd),
-			);
 		}
 
 		const result = await pi.createAgentSession({
@@ -1595,14 +1609,12 @@ async function startTuiBackend(state: SessionState): Promise<void> {
 			settingsManager,
 			cwd: opts.cwd,
 			agentDir,
-			noTools: "builtin",
-			// Replace pi's built-in tool set entirely (read/bash/edit/write/grep/
-			// find/ls) with nothing — every tool the agent gets comes from
-			// customTools (read, head, write, edit, find, ls, grep,
-			// get_diagnostics) or from bundled extensions (codepi-bash's bash,
-			// codepi-diff, codepi-tldr, codepi-context). No pi built-in can ever
-			// leak into the registry, so codepi-bash is the ONLY bash available.
-			baseToolsOverride: {},
+			// pi's built-in tool set (read/bash/edit/write/grep/find/ls) is
+			// replaced entirely by CodePi's own tools: the base registry holds
+			// only our VS Code-aware tools, and with the sdk patch the default
+			// active set is exactly the override keys. No pi built-in can ever
+			// leak into the registry.
+			baseToolsOverride: baseTools,
 			customTools,
 			sessionManager: opts.sessionManager,
 			sessionStartEvent: { type: "session_start", reason: "startup" },

@@ -1,4 +1,4 @@
-import { describe, expect, it, beforeEach, afterEach } from "vitest";
+import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -26,7 +26,7 @@ function createMockPi() {
 // Passthrough theme: color/bold markers are dropped, text content survives.
 const mockTheme = { fg: (_c: string, s: string) => s, bold: (s: string) => s };
 
-function makeCtx(cwd: string) {
+function makeCtx(cwd: string, branch: any[] = []) {
 	const statuses: Array<[string, string | undefined]> = [];
 	const widgets: Array<[string, string[] | undefined]> = [];
 	const ctx = {
@@ -39,7 +39,7 @@ function makeCtx(cwd: string) {
 			setWidget: (key: string, content: string[] | undefined) =>
 				widgets.push([key, content]),
 		},
-		sessionManager: { getBranch: () => [] },
+		sessionManager: { getBranch: () => branch },
 	};
 	return { ctx, statuses, widgets };
 }
@@ -217,6 +217,101 @@ describe("codepi-diff: cwd scoping", () => {
 		const bIdx = lines.findIndex((l) => l.startsWith("Δ b.ts"));
 		expect(aIdx).toBeGreaterThanOrEqual(0);
 		expect(bIdx).toBeGreaterThan(aIdx);
+	});
+
+	it("keeps cumulative line counts when a later write emits a fresh review marker", async () => {
+		vi.useFakeTimers();
+		try {
+			const mock = createMockPi();
+			codepiDiff(mock.api as any);
+			const branch: any[] = [];
+			const { ctx, widgets } = makeCtx(dir, branch);
+			const sessionStart = mock.handlers.get("session_start")![0];
+			await sessionStart({ type: "session_start" }, ctx);
+
+			const file = join(dir, "a.ts");
+			writeFileSync(file, "old\nbase\n");
+			const call = mock.handlers.get("tool_call")![0];
+			const result = mock.handlers.get("tool_result")![0];
+
+			await call(
+				{
+					type: "tool_call",
+					toolName: "write",
+					toolCallId: "first",
+					input: { path: "a.ts" },
+				},
+				ctx,
+			);
+			writeFileSync(file, "base\none\ntwo\nthree\nfour\nfive\n");
+			await result(
+				{
+					type: "tool_result",
+					toolName: "write",
+					toolCallId: "first",
+					isError: false,
+				},
+				ctx,
+			);
+			branch.push({
+				id: "review-1",
+				type: "custom",
+				customType: "codepi:review_resolved",
+				data: {
+					path: "a.ts",
+					status: "pending",
+					pendingHunks: 1,
+					pendingAdded: 5,
+					pendingRemoved: 1,
+				},
+			});
+			await vi.advanceTimersByTimeAsync(1000);
+			expect(widgets.at(-1)?.[1]?.find((line) => line.startsWith("Δ a.ts"))).toContain(
+				"(+5/-1)",
+			);
+
+			await call(
+				{
+					type: "tool_call",
+					toolName: "write",
+					toolCallId: "second",
+					input: { path: "a.ts" },
+				},
+				ctx,
+			);
+			writeFileSync(file, "base\none\ntwo\nthree\nfour\nfive\nsix\n");
+			await result(
+				{
+					type: "tool_result",
+					toolName: "write",
+					toolCallId: "second",
+					isError: false,
+				},
+				ctx,
+			);
+			branch.push({
+				id: "review-2",
+				type: "custom",
+				customType: "codepi:review_resolved",
+				data: {
+					path: "a.ts",
+					status: "pending",
+					pendingHunks: 1,
+					pendingAdded: 1,
+					pendingRemoved: 0,
+				},
+			});
+			await vi.advanceTimersByTimeAsync(1000);
+
+			const line = widgets.at(-1)?.[1]?.find((item) => item.startsWith("Δ a.ts"));
+			expect(line).toContain("(+6/-1)");
+			expect(line).not.toContain("(+1)");
+
+			const shutdown = mock.handlers.get("session_shutdown")![0];
+			await shutdown({ type: "session_shutdown" }, ctx);
+		} finally {
+			vi.useRealTimers();
+		}
 	});
 
 	describe("diff stat formatting", () => {

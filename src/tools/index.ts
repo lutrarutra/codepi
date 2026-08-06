@@ -9,6 +9,9 @@ import {
 import { ReviewManager } from "../review/review-manager";
 import type { EditProposal } from "../review/types";
 import { applyEditsToContent } from "../review/edit-apply";
+import type { Tool } from "../../node_modules/@earendil-works/pi-coding-agent/dist/core/tools/index.js";
+export { wrapToolDefinition } from "./wrap-tool";
+import { wrapToolDefinition } from "./wrap-tool";
 
 /**
  * VS Code workspace tool definitions.
@@ -938,6 +941,41 @@ export function createVscodeTools(review: ReviewManager): VscodeTool[] {
 		grepTool,
 		getDiagnosticsTool,
 	];
+}
+
+/**
+ * Tool names that replace pi's built-in base tool set (injected via
+ * `baseToolsOverride`). Everything else stays a custom tool.
+ */
+const BASE_TOOL_NAMES = new Set(["read", "edit", "write", "ls", "find", "grep"]);
+
+/** Split the VS Code tools into base-tool replacements and custom tools. */
+export function splitVscodeTools(tools: VscodeTool[]): {
+	base: VscodeTool[];
+	custom: VscodeTool[];
+} {
+	return {
+		base: tools.filter((tool) => BASE_TOOL_NAMES.has(tool.name)),
+		custom: tools.filter((tool) => !BASE_TOOL_NAMES.has(tool.name)),
+	};
+}
+
+// ── baseToolsOverride wrapping ────────────────────────────────
+
+/** Wrap the base VS Code tools into the baseToolsOverride map. */
+export function wrapVscodeBaseTools(tools: VscodeTool[]): Record<string, Tool> {
+	const result: Record<string, Tool> = {};
+	for (const tool of tools) {
+		result[tool.name] = wrapToolDefinition({
+			name: tool.name,
+			label: tool.label,
+			description: tool.description,
+			parameters: tool.parameters,
+			execute: (toolCallId, params) =>
+				tool.execute(toolCallId, params as Record<string, unknown>),
+		});
+	}
+	return result;
 }
 
 /**

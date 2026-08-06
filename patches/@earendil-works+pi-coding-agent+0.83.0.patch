@@ -1,18 +1,3 @@
-diff --git a/node_modules/@earendil-works/pi-coding-agent/dist/core/extensions/types.d.ts b/node_modules/@earendil-works/pi-coding-agent/dist/core/extensions/types.d.ts
-index 1a06f40..bd914a0 100644
---- a/node_modules/@earendil-works/pi-coding-agent/dist/core/extensions/types.d.ts
-+++ b/node_modules/@earendil-works/pi-coding-agent/dist/core/extensions/types.d.ts
-@@ -189,6 +189,10 @@ export interface ExtensionUIContext {
-     getToolsExpanded(): boolean;
-     /** Set tool output expansion state. */
-     setToolsExpanded(expanded: boolean): void;
-+    /** Enable or disable compact mode (per-turn transcript summaries). */
-+    setCompactMode(compact: boolean): void;
-+    /** Get the current compact mode state. */
-+    isCompactMode(): boolean;
- }
- export interface ContextUsage {
-     /** Estimated context tokens, or null if unknown (e.g. right after compaction, before next LLM response). */
 diff --git a/node_modules/@earendil-works/pi-coding-agent/dist/core/sdk.d.ts b/node_modules/@earendil-works/pi-coding-agent/dist/core/sdk.d.ts
 index 7778619..f5a6077 100644
 --- a/node_modules/@earendil-works/pi-coding-agent/dist/core/sdk.d.ts
@@ -42,10 +27,21 @@ index 7778619..f5a6077 100644
      customTools?: ToolDefinition[];
      /** Resource loader. When omitted, DefaultResourceLoader is used. */
 diff --git a/node_modules/@earendil-works/pi-coding-agent/dist/core/sdk.js b/node_modules/@earendil-works/pi-coding-agent/dist/core/sdk.js
-index 2e8e67c..b0ac8e2 100644
+index 2e8e67c..43d7e34 100644
 --- a/node_modules/@earendil-works/pi-coding-agent/dist/core/sdk.js
 +++ b/node_modules/@earendil-works/pi-coding-agent/dist/core/sdk.js
-@@ -254,6 +254,7 @@ export async function createAgentSession(options = {}) {
+@@ -129,7 +129,9 @@ export async function createAgentSession(options = {}) {
+     else {
+         thinkingLevel = clampThinkingLevel(model, thinkingLevel);
+     }
+-    const defaultActiveToolNames = ["read", "bash", "edit", "write"];
++    const defaultActiveToolNames = options.baseToolsOverride
++        ? Object.keys(options.baseToolsOverride)
++        : ["read", "bash", "edit", "write"];
+     const allowedToolNames = options.tools ?? (options.noTools === "all" ? [] : undefined);
+     const excludedToolNames = options.excludeTools;
+     const excludedToolNameSet = excludedToolNames ? new Set(excludedToolNames) : undefined;
+@@ -254,6 +256,7 @@ export async function createAgentSession(options = {}) {
          initialActiveToolNames,
          allowedToolNames,
          excludedToolNames,
@@ -53,616 +49,32 @@ index 2e8e67c..b0ac8e2 100644
          extensionRunnerRef,
          sessionStartEvent: options.sessionStartEvent,
      });
-diff --git a/node_modules/@earendil-works/pi-coding-agent/dist/core/settings-manager.js b/node_modules/@earendil-works/pi-coding-agent/dist/core/settings-manager.js
-index 4021796..328b1c6 100644
---- a/node_modules/@earendil-works/pi-coding-agent/dist/core/settings-manager.js
-+++ b/node_modules/@earendil-works/pi-coding-agent/dist/core/settings-manager.js
-@@ -864,7 +864,7 @@ export class SettingsManager {
-         this.save();
-     }
-     getEditorPaddingX() {
--        return this.settings.editorPaddingX ?? 0;
-+        return this.settings.editorPaddingX ?? 1;
-     }
-     setEditorPaddingX(padding) {
-         this.globalSettings.editorPaddingX = Math.max(0, Math.min(3, Math.floor(padding)));
-diff --git a/node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/compact-summary.d.ts b/node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/compact-summary.d.ts
-new file mode 100644
-index 0000000..2276f1e
---- /dev/null
-+++ b/node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/compact-summary.d.ts
-@@ -0,0 +1,62 @@
-+/**
-+ * Compact mode: per-turn transcript summaries for the interactive mode.
-+ */
-+import type { Container } from "@earendil-works/pi-tui";
-+import type { AssistantMessage, Message, ToolResultMessage, UserMessage } from "@earendil-works/pi-ai";
-+export interface CompactTurnSegment {
-+    kind: "turn";
-+    userMessage?: UserMessage;
-+    /** Collapsed assistant/toolResult messages of the turn. */
-+    entries: Message[];
-+    /** Last assistant message of the turn without tool calls, if any. */
-+    finalResponse?: AssistantMessage;
-+}
-+export interface CompactMessageSegment {
-+    kind: "message";
-+    message: Message;
-+}
-+export type CompactSegment = CompactTurnSegment | CompactMessageSegment;
-+export interface CompactTurnStats {
-+    input: number;
-+    output: number;
-+    reasoning: number;
-+    cacheRead: number;
-+    cacheWrite: number;
-+    cost: number;
-+    toolCalls: number;
-+    toolFailures: number;
-+    model: string | undefined;
-+    latest: { kind: "thought" | "tool" | "output" | "aborted"; text: string } | undefined;
-+}
-+export interface CompactTurnSummaryOptions {
-+    stats?: CompactTurnStats;
-+    finished?: boolean;
-+    startTime?: number;
-+    endTime?: number;
-+}
-+export declare function formatTokenCount(count: number): string;
-+export declare function formatCompactDuration(ms: number): string;
-+export declare function summarizeToolCall(name: string, args: unknown): string;
-+export declare function groupTurnsForCompact(messages: Message[]): CompactSegment[];
-+export declare function aggregateCompactTurn(entries: Message[]): CompactTurnStats;
-+export declare const ACTIVITY_REFRESH_INTERVAL_MS = 1500;
-+export interface ActivityLineOptions {
-+    live: boolean;
-+    text?: string;
-+    spinnerFrame?: number;
-+}
-+export declare function formatActivityLine(options: ActivityLineOptions): string;
-+export declare class CompactTurnSummary extends Container {
-+    constructor(ui: { requestRender(): void }, initial?: CompactTurnSummaryOptions);
-+    startTurn(): void;
-+    setModel(model: string | undefined): void;
-+    addThinkingDelta(delta: string): void;
-+    noteToolCall(name: string, args: unknown, id?: string): void;
-+    notePartialResult(partial: unknown): void;
-+    toolEnded(name: string, isError: boolean): void;
-+    addUsage(usage: { input?: number; output?: number; reasoning?: number; cacheRead?: number; cacheWrite?: number; cost?: { total?: number } }): void;
-+    setFinished(aborted?: boolean): void;
-+    applyStats(stats: CompactTurnStats): void;
-+    getActivityText(): string;
-+    dispose(): void;
-+}
-diff --git a/node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/compact-summary.js b/node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/compact-summary.js
-new file mode 100644
-index 0000000..52ae523
---- /dev/null
-+++ b/node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/compact-summary.js
-@@ -0,0 +1,521 @@
-+/**
-+ * Compact mode: per-turn transcript summaries for the interactive mode.
-+ *
-+ * When compact mode is enabled, each turn renders as a single summary row
-+ * (spinner, token/tool counts, cost, elapsed, model) plus the final response.
-+ * This module holds the pure grouping/aggregation logic (unit-testable) and
-+ * the CompactTurnSummary UI component.
-+ */
-+import { Container, Text, TruncatedText } from "@earendil-works/pi-tui";
-+import { theme } from "./theme/theme.js";
-+
-+// ============================================================================
-+// Pure helpers
-+// ============================================================================
-+
-+/** Format token counts for compact display (same style as the footer). */
-+export function formatTokenCount(count) {
-+    if (count < 1000)
-+        return count.toString();
-+    if (count < 10000)
-+        return `${(count / 1000).toFixed(1)}k`;
-+    if (count < 1000000)
-+        return `${Math.round(count / 1000)}k`;
-+    if (count < 10000000)
-+        return `${(count / 1000000).toFixed(1)}M`;
-+    return `${Math.round(count / 1000000)}M`;
-+}
-+
-+/** Format a duration in milliseconds as "32s", "1m05s", "2h03m". */
-+export function formatCompactDuration(ms) {
-+    const totalSeconds = Math.max(0, Math.round(ms / 1000));
-+    if (totalSeconds < 60)
-+        return `${totalSeconds}s`;
-+    const minutes = Math.floor(totalSeconds / 60);
-+    const seconds = totalSeconds % 60;
-+    if (minutes < 60)
-+        return seconds > 0 ? `${minutes}m${String(seconds).padStart(2, "0")}s` : `${minutes}m`;
-+    const hours = Math.floor(minutes / 60);
-+    const remMinutes = minutes % 60;
-+    return remMinutes > 0 ? `${hours}h${String(remMinutes).padStart(2, "0")}m` : `${hours}h`;
-+}
-+
-+const ACTIVITY_ARG_KEYS = [
-+    "pattern",
-+    "command",
-+    "path",
-+    "file",
-+    "dir",
-+    "glob",
-+    "query",
-+    "url",
-+    "name",
-+    "title",
-+    "message",
-+    "id",
-+];
-+
-+/** One-line description of a tool call for the muted "latest activity" line. */
-+export function summarizeToolCall(name, args) {
-+    let arg = "";
-+    if (args && typeof args === "object") {
-+        for (const key of ACTIVITY_ARG_KEYS) {
-+            const value = args[key];
-+            if (typeof value === "string" && value.trim()) {
-+                arg = value.trim();
-+                break;
-+            }
-+        }
-+    }
-+    return truncateActivity(arg ? `${name} ${arg}` : name);
-+}
-+
-+function truncateActivity(text) {
-+    const single = String(text).replace(/[\r\n\t]+/g, " ").trim();
-+    return single.length > 120 ? `${single.slice(0, 117)}…` : single;
-+}
-+
-+function firstLineOf(text) {
-+    return truncateActivity(String(text).split("\n")[0]);
-+}
-+
-+/**
-+ * Pure builder for the activity row content (unstyled).
-+ *
-+ * Live turns: spinner + the displayed activity text (sampled by the
-+ * component — tool name while a tool runs, otherwise the newest thought),
-+ * or the bare spinner before anything was sampled. Finished turns: the
-+ * activity as plain static text (no spinner).
-+ */
-+export function formatActivityLine({ live, text, spinnerFrame }) {
-+    if (!live)
-+        return text ?? "";
-+    const spinner = SPINNER_FRAMES[spinnerFrame] ?? "";
-+    return text ? `${spinner} ${text}` : spinner;
-+}
-+
-+/**
-+ * Group a context message list into segments for compact rendering.
-+ *
-+ * Returns an ordered list of segments preserving original order:
-+ * - { kind: "message", message } for messages rendered as-is (user, custom,
-+ *   compactionSummary, branchSummary, bashExecution, unknown roles)
-+ * - { kind: "turn", userMessage, entries, finalResponse } where entries are the
-+ *   collapsed assistant/toolResult messages and finalResponse is the last
-+ *   assistant message of the turn that contains no tool calls (undefined when
-+ *   the turn never produced a text response).
-+ */
-+export function groupTurnsForCompact(messages) {
-+    const segments = [];
-+    let turn = undefined;
-+    const closeTurn = () => {
-+        if (turn) {
-+            segments.push(turn);
-+            turn = undefined;
-+        }
-+    };
-+    for (const message of messages) {
-+        const role = message.role;
-+        if (role === "assistant" || role === "toolResult") {
-+            if (!turn) {
-+                turn = { kind: "turn", userMessage: undefined, entries: [], finalResponse: undefined };
-+            }
-+            turn.entries.push(message);
-+            if (role === "assistant") {
-+                const hasToolCalls = message.content.some((c) => c.type === "toolCall");
-+                // The final response is the last assistant message without tool
-+                // calls; a subsequent tool-calling message supersedes it.
-+                turn.finalResponse = hasToolCalls ? undefined : message;
-+            }
-+            continue;
-+        }
-+        closeTurn();
-+        if (role === "user") {
-+            turn = { kind: "turn", userMessage: message, entries: [], finalResponse: undefined };
-+        }
-+        else {
-+            segments.push({ kind: "message", message });
-+        }
-+    }
-+    closeTurn();
-+    return segments;
-+}
-+
-+/**
-+ * Aggregate the collapsed messages of a turn into summary statistics.
-+ * @param entries Assistant/toolResult messages belonging to the turn.
-+ */
-+export function aggregateCompactTurn(entries) {
-+    let input = 0;
-+    let output = 0;
-+    let reasoning = 0;
-+    let cacheRead = 0;
-+    let cacheWrite = 0;
-+    let cost = 0;
-+    let toolCalls = 0;
-+    let toolFailures = 0;
-+    let model = undefined;
-+    let latest = undefined;
-+    for (const message of entries) {
-+        if (message.role === "assistant") {
-+            const usage = message.usage;
-+            if (usage) {
-+                input += usage.input || 0;
-+                output += usage.output || 0;
-+                reasoning += usage.reasoning || 0;
-+                cacheRead += usage.cacheRead || 0;
-+                cacheWrite += usage.cacheWrite || 0;
-+                cost += usage.cost?.total || 0;
-+            }
-+            model = message.responseModel ?? message.model;
-+            for (const content of message.content) {
-+                if (content.type === "toolCall") {
-+                    toolCalls++;
-+                    latest = { kind: "tool", text: summarizeToolCall(content.name, content.arguments) };
-+                }
-+                else if (content.type === "thinking" && typeof content.thinking === "string" && content.thinking.trim()) {
-+                    latest = { kind: "thought", text: firstLineOf(content.thinking) };
-+                }
-+            }
-+        }
-+        else if (message.role === "toolResult" && message.isError) {
-+            toolFailures++;
-+        }
-+    }
-+    return {
-+        input,
-+        output,
-+        reasoning,
-+        cacheRead,
-+        cacheWrite,
-+        cost,
-+        toolCalls,
-+        toolFailures,
-+        model,
-+        latest,
-+    };
-+}
-+
-+// ============================================================================
-+// CompactTurnSummary component
-+// ============================================================================
-+
-+/** Fg-color helper that degrades gracefully when the theme is not yet
-+ * initialized (e.g. component constructed during tests or early startup). */
-+function safeThemeFg(color, text) {
-+    try {
-+        return theme.fg(color, text);
-+    }
-+    catch {
-+        return text;
-+    }
-+}
-+
-+const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
-+const SPINNER_INTERVAL_MS = 80;
-+
-+/**
-+ * Activity text refreshes at most this often (1.5s): the newest thought / tool
-+ * call at check time is shown, then held until the window elapses. The
-+ * spinner itself keeps ticking at SPINNER_INTERVAL_MS.
-+ */
-+export const ACTIVITY_REFRESH_INTERVAL_MS = 1500;
-+
-+/**
-+ * Per-turn summary row shown in compact mode:
-+ *   ✓11 ✗1 tools · ↑ 12.3k ↓ 4.5k 󰟶 1.2k · $0.42 · 32s · model   (stats row)
-+ *   ⠋ bash / ⠋ current thought… / ⠋                       (activity row, muted)
-+ *
-+ * Live turns animate the spinner and elapsed time. The stats row is a stable
-+ * record; the activity row shows the current state — the running tool call
-+ * (spinner + name + parameters, one line) while a tool executes, or the
-+ * first line of the current thought while reasoning — sampled at most once
-+ * per second, always showing the newest activity at check time. Finished
-+ * turns render a static record. The component stays in the transcript after
-+ * finishing.
-+ */
-+export class CompactTurnSummary extends Container {
-+    constructor(ui, initial = {}) {
-+        super();
-+        this.ui = ui;
-+        this.usage = { input: 0, output: 0, reasoning: 0, cacheRead: 0, cacheWrite: 0, cost: 0 };
-+        this.toolsOk = 0;
-+        this.toolsFail = 0;
-+        this.toolsRunning = 0;
-+        this.seenToolIds = new Set();
-+        this.latestActivity = undefined;
-+        this.model = undefined;
-+        this.thinkingBuffer = "";
-+        this.runningTool = undefined;
-+        this.pendingThought = undefined;
-+        this.lastDisplayAt = 0;
-+        this.startedAt = initial.startTime;
-+        this.endedAt = initial.endTime;
-+        this.finished = false;
-+        this.spinnerFrame = 0;
-+        this.spinnerInterval = undefined;
-+        // The stats row must remain one terminal line. Text wraps long model
-+        // names and token summaries, which can leave a stale-looking second
-+        // summary row during differential redraws. TruncatedText clips it
-+        // instead; the activity row remains independently renderable.
-+        this.statsLine = new TruncatedText("", 0, 0);
-+        this.activityLine = new Text("", 2, 0);
-+        this.addChild(this.statsLine);
-+        this.addChild(this.activityLine);
-+        if (initial.stats) {
-+            this.applyStats(initial.stats);
-+        }
-+        if (initial.finished) {
-+            this.finished = true;
-+        }
-+        this.updateStatsLine();
-+    }
-+
-+    /** Begin a live turn: reset counters and start spinner/elapsed. */
-+    startTurn() {
-+        this.finished = false;
-+        this.startedAt = Date.now();
-+        this.endedAt = undefined;
-+        this.spinnerFrame = 0;
-+        this.toolsOk = 0;
-+        this.toolsFail = 0;
-+        this.toolsRunning = 0;
-+        this.seenToolIds = new Set();
-+        this.runningTool = undefined;
-+        this.pendingThought = undefined;
-+        this.lastDisplayAt = 0;
-+        this.startSpinner();
-+    }
-+
-+    setModel(model) {
-+        if (model && model !== this.model) {
-+            this.model = model;
-+            this.updateStatsLine();
-+        }
-+    }
-+
-+    /** Feed a thinking_delta while the model is reasoning (1.5s-sampled display). */
-+    addThinkingDelta(delta) {
-+        if (!delta)
-+            return;
-+        this.thinkingBuffer = `${this.thinkingBuffer}${delta}`.slice(-600);
-+        // Sampled: the newest first line is shown immediately when no thought
-+        // is displayed yet, then refreshed at most once per second (from the
-+        // spinner tick) — word-by-word deltas don't flash by unreadably.
-+        this.pendingThought = { kind: "thought", text: firstLineOf(this.thinkingBuffer) };
-+        this.maybeUpdateActivity();
-+    }
-+
-+    /**
-+     * Refresh the live activity line from the newest state.
-+     *
-+     * Policy (1.5s sampling): a change of activity kind (thought ↔ tool) shows
-+     * immediately; refreshed text of the same activity (a streaming thought,
-+     * or a newer tool call while another runs) is sampled at most once per
-+     * ACTIVITY_REFRESH_INTERVAL_MS, showing the newest content at check
-+     * time. If nothing new arrived since the last display (e.g. a tool that
-+     * is taking a while), nothing is updated. `force` bypasses the window
-+     * (turn ending).
-+     */
-+    maybeUpdateActivity(force = false) {
-+        const now = Date.now();
-+        // The running tool wins over any interleaved thought; otherwise the
-+        // newest thought line.
-+        const next = this.runningTool
-+            ? { kind: "tool", text: this.runningTool.text }
-+            : this.pendingThought;
-+        if (!next)
-+            return;
-+        const current = this.latestActivity;
-+        if (current && current.kind === next.kind && current.text === next.text)
-+            return;
-+        const sameActivity = current && current.kind === next.kind;
-+        if (sameActivity && !force && now - this.lastDisplayAt < ACTIVITY_REFRESH_INTERVAL_MS)
-+            return;
-+        this.latestActivity = next;
-+        this.lastDisplayAt = now;
-+        if (next.kind === "thought")
-+            this.pendingThought = undefined;
-+        this.updateStatsLine();
-+    }
-+
-+    /**
-+     * A tool call was emitted (may still be running).
-+     *
-+     * `id` is the tool call id (content block id / execution toolCallId). The
-+     * streaming layer re-emits the whole message on every delta, so the same
-+     * call is reported many times; only the first sighting increments the
-+     * running counter, later ones just refresh the activity line.
-+     */
-+    noteToolCall(name, args, id) {
-+        if (!id || !this.seenToolIds.has(id)) {
-+            if (id)
-+                this.seenToolIds.add(id);
-+            this.toolsRunning++;
-+        }
-+        // Live indicator: spinner + tool name + primary parameter, clipped to
-+        // one line by the row's TruncatedText ("..."). Streaming output
-+        // never appears.
-+        this.runningTool = { name, text: summarizeToolCall(name, args) };
-+        this.maybeUpdateActivity();
-+        this.updateStatsLine();
-+    }
-+
-+    /**
-+     * Partial streaming output from a running tool — intentionally ignored:
-+     * the activity row only ever shows the latest tool call or thought, and
-+     * while a tool runs it shows spinner + tool name.
-+     */
-+    notePartialResult(_partial) {
-+        // no-op: tool output stays collapsed in TL;DR mode.
-+    }
-+
-+    /** A tool finished executing. */
-+    toolEnded(_name, isError) {
-+        this.toolsRunning = Math.max(0, this.toolsRunning - 1);
-+        if (isError) {
-+            this.toolsFail++;
-+        }
-+        else {
-+            this.toolsOk++;
-+        }
-+        if (this.toolsRunning === 0) {
-+            // Last tool done: drop the tool indicator — any thought that
-+            // streamed in during the run takes over immediately (activity
-+            // kind change).
-+            this.runningTool = undefined;
-+        }
-+        this.maybeUpdateActivity();
-+        this.updateStatsLine();
-+    }
-+
-+    /** Accumulate token usage from an assistant message. */
-+    addUsage(usage) {
-+        if (!usage)
-+            return;
-+        this.usage.input += usage.input || 0;
-+        this.usage.output += usage.output || 0;
-+        this.usage.reasoning += usage.reasoning || 0;
-+        this.usage.cacheRead += usage.cacheRead || 0;
-+        this.usage.cacheWrite += usage.cacheWrite || 0;
-+        this.usage.cost += usage.cost?.total || 0;
-+        this.updateStatsLine();
-+    }
-+
-+    /** Stop the spinner and freeze the summary as a static record. */
-+    setFinished(aborted) {
-+        if (this.finished)
-+            return;
-+        this.finished = true;
-+        this.endedAt = Date.now();
-+        this.stopSpinner();
-+        this.maybeUpdateActivity(true);
-+        if (aborted && !this.latestActivity) {
-+            this.latestActivity = { kind: "aborted", text: "aborted" };
-+        }
-+        this.updateStatsLine();
-+    }
-+
-+    applyStats(stats) {
-+        this.usage = {
-+            input: stats.input || 0,
-+            output: stats.output || 0,
-+            reasoning: stats.reasoning || 0,
-+            cacheRead: stats.cacheRead || 0,
-+            cacheWrite: stats.cacheWrite || 0,
-+            cost: stats.cost || 0,
-+        };
-+        this.toolsOk = Math.max(0, (stats.toolCalls || 0) - (stats.toolFailures || 0));
-+        this.toolsFail = stats.toolFailures || 0;
-+        this.model = stats.model;
-+        this.latestActivity = stats.latest;
-+        if (stats.latest?.kind === "thought") {
-+            this.thinkingBuffer = stats.latest.text;
-+        }
-+    }
-+
-+    dispose() {
-+        this.stopSpinner();
-+    }
-+
-+    startSpinner() {
-+        this.stopSpinner();
-+        this.spinnerInterval = setInterval(() => {
-+            this.spinnerFrame = (this.spinnerFrame + 1) % SPINNER_FRAMES.length;
-+            this.maybeUpdateActivity();
-+            this.updateStatsLine();
-+        }, SPINNER_INTERVAL_MS);
-+    }
-+
-+    stopSpinner() {
-+        if (this.spinnerInterval) {
-+            clearInterval(this.spinnerInterval);
-+            this.spinnerInterval = undefined;
-+        }
-+    }
-+
-+    getStatsText() {
-+        const parts = [];
-+        if (this.toolsOk > 0 || this.toolsFail > 0 || this.toolsRunning > 0) {
-+            const toolParts = [];
-+            if (this.toolsOk > 0)
-+                toolParts.push(safeThemeFg("success", `✓${this.toolsOk}`));
-+            if (this.toolsFail > 0)
-+                toolParts.push(safeThemeFg("error", `✗${this.toolsFail}`));
-+            if (!this.finished && this.toolsRunning > 0)
-+                toolParts.push(safeThemeFg("accent", `…${this.toolsRunning}`));
-+            parts.push(`${toolParts.join(" ")}${safeThemeFg("dim", " tools")}`);
-+        }
-+        const tokens = [];
-+        if (this.usage.input > 0)
-+            tokens.push(safeThemeFg("success", "↑") + safeThemeFg("text", " " + formatTokenCount(this.usage.input)));
-+        if (this.usage.output > 0)
-+            tokens.push(safeThemeFg("error", "↓") + safeThemeFg("text", " " + formatTokenCount(this.usage.output)));
-+        if (this.usage.reasoning > 0)
-+            tokens.push(safeThemeFg("accent", "\u{EE9C}") + safeThemeFg("text", " " + formatTokenCount(this.usage.reasoning)));
-+        if (tokens.length > 0)
-+            parts.push(tokens.join(" "));
-+        if (this.usage.cost > 0)
-+            parts.push(safeThemeFg("warning", `$${this.usage.cost.toFixed(2)}`));
-+        if (this.startedAt) {
-+            const end = this.endedAt ?? Date.now();
-+            parts.push(formatCompactDuration(end - this.startedAt));
-+        }
-+        if (this.model)
-+            parts.push(safeThemeFg("accent", this.model));
-+        return parts.join(safeThemeFg("dim", " · "));
-+    }
-+
-+    updateStatsLine() {
-+        const text = this.getStatsText();
-+        this.statsLine = new TruncatedText(text ? ` ${text}` : "", 0, 0);
-+        this.children[0] = this.statsLine;
-+        const activity = this.getActivityText();
-+        // TruncatedText guarantees a single terminal row (clips with "...");
-+        // an empty activity collapses to no row at all (plain Text).
-+        this.activityLine = activity
-+            ? new TruncatedText(activity, 2, 0)
-+            : new Text("", 2, 0);
-+        this.children[1] = this.activityLine;
-+        if (this.ui) {
-+            this.ui.requestRender();
-+        }
-+    }
-+
-+    /** Styled activity row content: accent spinner + muted sampled text. */
-+    getActivityText() {
-+        const raw = formatActivityLine({
-+            live: !this.finished,
-+            text: this.latestActivity?.text,
-+            spinnerFrame: this.spinnerFrame,
-+        });
-+        if (!raw)
-+            return "";
-+        if (this.finished)
-+            return safeThemeFg("muted", raw);
-+        const sep = raw.indexOf(" ");
-+        if (sep === -1)
-+            return safeThemeFg("accent", raw);
-+        return safeThemeFg("accent", raw.slice(0, sep)) + safeThemeFg("muted", raw.slice(sep));
-+    }
-+}
+diff --git a/node_modules/@earendil-works/pi-coding-agent/dist/core/tools/tool-definition-wrapper.js b/node_modules/@earendil-works/pi-coding-agent/dist/core/tools/tool-definition-wrapper.js
+index e05fec9..f8b2738 100644
+--- a/node_modules/@earendil-works/pi-coding-agent/dist/core/tools/tool-definition-wrapper.js
++++ b/node_modules/@earendil-works/pi-coding-agent/dist/core/tools/tool-definition-wrapper.js
+@@ -20,6 +20,8 @@ export function wrapToolDefinitions(definitions, ctxFactory) {
+  *
+  * This keeps AgentSession's internal registry definition-first even when a caller
+  * provides plain AgentTool overrides that do not include prompt metadata or renderers.
++ * Prompt metadata and renderers ARE forwarded when the AgentTool carries them, so
++ * baseToolsOverride tools can stay first-class (built-in parity).
+  */
+ export function createToolDefinitionFromAgentTool(tool) {
+     return {
+@@ -30,6 +32,10 @@ export function createToolDefinitionFromAgentTool(tool) {
+         constrainedSampling: tool.constrainedSampling,
+         prepareArguments: tool.prepareArguments,
+         executionMode: tool.executionMode,
++        promptSnippet: tool.promptSnippet,
++        promptGuidelines: tool.promptGuidelines,
++        renderCall: tool.renderCall,
++        renderResult: tool.renderResult,
+         execute: async (toolCallId, params, signal, onUpdate) => tool.execute(toolCallId, params, signal, onUpdate),
+     };
+ }
 diff --git a/node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/interactive-mode.d.ts b/node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/interactive-mode.d.ts
-index 8eeeedd..c755209 100644
+index 8eeeedd..53579f0 100644
 --- a/node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/interactive-mode.d.ts
 +++ b/node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/interactive-mode.d.ts
 @@ -25,6 +25,8 @@ export interface InteractiveModeOptions {
@@ -674,60 +86,11 @@ index 8eeeedd..c755209 100644
  }
  export declare class InteractiveMode {
      private runtimeHost;
-@@ -303,6 +305,10 @@ export declare class InteractiveMode {
-     private cycleModel;
-     private toggleToolOutputExpansion;
-     private setToolsExpanded;
-+    /** Enable or disable compact mode (per-turn transcript summaries). */
-+    setCompactMode(compact: boolean): void;
-+    /** Get the current compact mode state. */
-+    isCompactMode(): boolean;
-     private toggleThinkingBlockVisibility;
-     private handleOpenExternalEditor;
-     clearEditor(): void;
 diff --git a/node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/interactive-mode.js b/node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/interactive-mode.js
-index 462e240..94ad315 100644
+index 462e240..ec527c7 100644
 --- a/node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/interactive-mode.js
 +++ b/node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/interactive-mode.js
-@@ -37,6 +37,7 @@ import { checkForNewPiVersion } from "../../utils/version-check.js";
- import { ArminComponent } from "./components/armin.js";
- import { AssistantMessageComponent } from "./components/assistant-message.js";
- import { BashExecutionComponent } from "./components/bash-execution.js";
-+import { CompactTurnSummary, aggregateCompactTurn, groupTurnsForCompact } from "./compact-summary.js";
- import { BorderedLoader } from "./components/bordered-loader.js";
- import { BranchSummaryMessageComponent } from "./components/branch-summary-message.js";
- import { CompactionSummaryMessageComponent } from "./components/compaction-summary-message.js";
-@@ -71,6 +72,13 @@ import { InteractiveThemeController } from "./theme/theme-controller.js";
- function isExpandable(obj) {
-     return typeof obj === "object" && obj !== null && "setExpanded" in obj && typeof obj.setExpanded === "function";
- }
-+/** In compact mode, thinking blocks are collapsed into the turn summary, so
-+ * the rendered final response must not include them (no "Thinking..." label). */
-+function withoutThinking(message) {
-+    if (!message || !message.content || !message.content.some((c) => c.type === "thinking"))
-+        return message;
-+    return { ...message, content: message.content.filter((c) => c.type !== "thinking") };
-+}
- class ExpandableText extends Text {
-     getCollapsedText;
-     getExpandedText;
-@@ -204,6 +212,15 @@ export class InteractiveMode {
-     streamingMessage = undefined;
-     // Tool execution tracking: toolCallId -> component
-     pendingTools = new Map();
-+    // Compact mode: per-turn summaries instead of the full transcript
-+    compactMode = false;
-+    compactSummary = undefined;
-+    compactCandidateComponent = undefined;
-+    compactLastStopReason = undefined;
-+    // A mode toggle during a live turn is applied after the turn has settled.
-+    // Rebuilding immediately can clear the still-streaming final response
-+    // before message_end has been persisted.
-+    compactModeRebuildPending = false;
-     // Tool output expansion state
-     toolOutputExpanded = false;
-     // Thinking block visibility state
-@@ -273,7 +290,7 @@ export class InteractiveMode {
+@@ -273,7 +273,7 @@ export class InteractiveMode {
              await this.rebindCurrentSession({ renderBeforeBind: true });
          });
          this.version = VERSION;
@@ -736,16 +99,7 @@ index 462e240..94ad315 100644
          this.ui.setClearOnShrink(this.settingsManager.getClearOnShrink());
          this.headerContainer = new Container();
          this.loadedResourcesContainer = new Container();
-@@ -1722,6 +1739,8 @@ export class InteractiveMode {
-             },
-             getToolsExpanded: () => this.toolOutputExpanded,
-             setToolsExpanded: (expanded) => this.setToolsExpanded(expanded),
-+            setCompactMode: (compact) => this.setCompactMode(Boolean(compact)),
-+            isCompactMode: () => this.compactMode,
-         };
-     }
-     /**
-@@ -1733,6 +1752,10 @@ export class InteractiveMode {
+@@ -1733,6 +1733,10 @@ export class InteractiveMode {
                  resolve(undefined);
                  return;
              }
@@ -756,7 +110,7 @@ index 462e240..94ad315 100644
              const onAbort = () => {
                  this.hideExtensionSelector();
                  resolve(undefined);
-@@ -1757,6 +1780,8 @@ export class InteractiveMode {
+@@ -1757,6 +1761,8 @@ export class InteractiveMode {
       * Hide the extension selector.
       */
      hideExtensionSelector() {
@@ -765,7 +119,7 @@ index 462e240..94ad315 100644
          this.extensionSelector?.dispose();
          this.editorContainer.clear();
          this.editorContainer.addChild(this.editor);
-@@ -1784,6 +1809,8 @@ export class InteractiveMode {
+@@ -1784,6 +1790,8 @@ export class InteractiveMode {
                  resolve(undefined);
                  return;
              }
@@ -774,7 +128,7 @@ index 462e240..94ad315 100644
              const onAbort = () => {
                  this.hideExtensionInput();
                  resolve(undefined);
-@@ -1808,6 +1835,8 @@ export class InteractiveMode {
+@@ -1808,6 +1816,8 @@ export class InteractiveMode {
       * Hide the extension input.
       */
      hideExtensionInput() {
@@ -783,255 +137,123 @@ index 462e240..94ad315 100644
          this.extensionInput?.dispose();
          this.editorContainer.clear();
          this.editorContainer.addChild(this.editor);
-@@ -2342,23 +2371,47 @@ export class InteractiveMode {
-                 else if (event.message.role === "user") {
-                     this.addMessageToChat(event.message);
-                     this.updatePendingMessagesDisplay();
-+                    if (this.compactMode) {
-+                        this.beginCompactTurn();
-+                    }
-                     this.ui.requestRender();
-                 }
-                 else if (event.message.role === "assistant") {
--                    this.streamingComponent = new AssistantMessageComponent(undefined, this.hideThinkingBlock, this.getMarkdownThemeWithSettings(), this.hiddenThinkingLabel, this.outputPad);
-+                    this.streamingComponent = new AssistantMessageComponent(undefined, this.compactMode ? true : this.hideThinkingBlock, this.getMarkdownThemeWithSettings(), this.hiddenThinkingLabel, this.outputPad);
-                     this.streamingMessage = event.message;
--                    this.chatContainer.addChild(this.streamingComponent);
--                    this.streamingComponent.updateContent(this.streamingMessage);
-+                    if (this.compactMode) {
-+                        // Hold the candidate until we know whether it is the
-+                        // final response (text, no tool calls) or intermediate.
-+                        this.compactCandidateComponent = this.streamingComponent;
-+                        this.compactSummary?.setModel(event.message.model);
-+                    }
-+                    else {
-+                        this.chatContainer.addChild(this.streamingComponent);
-+                    }
-+                    this.streamingComponent.updateContent(this.compactMode ? withoutThinking(this.streamingMessage) : this.streamingMessage);
-                     this.ui.requestRender();
-                 }
-                 break;
-             case "message_update":
-                 if (this.streamingComponent && event.message.role === "assistant") {
-                     this.streamingMessage = event.message;
--                    this.streamingComponent.updateContent(this.streamingMessage);
-+                    this.streamingComponent.updateContent(this.compactMode ? withoutThinking(this.streamingMessage) : this.streamingMessage);
-+                    let dismissedCandidate = false;
-                     for (const content of this.streamingMessage.content) {
-                         if (content.type === "toolCall") {
--                            if (!this.pendingTools.has(content.id)) {
-+                            if (this.compactMode) {
-+                                // A tool call means this message is intermediate:
-+                                // collapse it into the turn summary.
-+                                this.compactSummary?.noteToolCall(content.name, content.arguments, content.id);
-+                                if (this.compactCandidateComponent) {
-+                                    if (this.chatContainer.children.includes(this.compactCandidateComponent)) {
-+                                        this.chatContainer.removeChild(this.compactCandidateComponent);
-+                                    }
-+                                    this.compactCandidateComponent = undefined;
-+                                }
-+                                dismissedCandidate = true;
-+                            }
-+                            else if (!this.pendingTools.has(content.id)) {
-                                 const component = new ToolExecutionComponent(content.name, content.id, content.arguments, {
-                                     showImages: this.settingsManager.getShowImages(),
-                                     imageWidthCells: this.settingsManager.getImageWidthCells(),
-@@ -2375,6 +2428,17 @@ export class InteractiveMode {
-                             }
-                         }
-                     }
-+                    if (this.compactMode) {
-+                        const ev = event.assistantMessageEvent;
-+                        if (ev && ev.type === "thinking_delta" && typeof ev.delta === "string") {
-+                            this.compactSummary?.addThinkingDelta(ev.delta);
-+                        }
-+                        if (!dismissedCandidate && this.compactCandidateComponent && !this.chatContainer.children.includes(this.compactCandidateComponent)) {
-+                            // Text is streaming with no tool calls: this looks
-+                            // like the final response - show it live.
-+                            this.chatContainer.addChild(this.compactCandidateComponent);
-+                        }
-+                    }
-                     this.ui.requestRender();
-                 }
-                 break;
-@@ -2392,7 +2456,26 @@ export class InteractiveMode {
-                                 : "Operation aborted";
-                         this.streamingMessage.errorMessage = errorMessage;
-                     }
--                    this.streamingComponent.updateContent(this.streamingMessage);
-+                    this.streamingComponent.updateContent(this.compactMode ? withoutThinking(this.streamingMessage) : this.streamingMessage);
-+                    if (this.compactMode) {
-+                        const compactMessage = event.message;
-+                        this.compactLastStopReason = compactMessage.stopReason;
-+                        if (compactMessage.usage) {
-+                            this.compactSummary?.addUsage(compactMessage.usage);
-+                        }
-+                        if (compactMessage.responseModel) {
-+                            this.compactSummary?.setModel(compactMessage.responseModel);
-+                        }
-+                        this.compactCandidateComponent = undefined;
-+                        if (compactMessage.stopReason !== "aborted" && compactMessage.stopReason !== "error" &&
-+                            compactMessage.content.some((c) => c.type === "text") &&
-+                            !compactMessage.content.some((c) => c.type === "toolCall") &&
-+                            !this.chatContainer.children.includes(this.streamingComponent)) {
-+                            // Final response that never got added to the chat
-+                            // (no text_delta updates observed): add it now.
-+                            this.chatContainer.addChild(this.streamingComponent);
-+                        }
-+                    }
-                     if (this.streamingMessage.stopReason === "aborted" || this.streamingMessage.stopReason === "error") {
-                         if (!errorMessage) {
-                             errorMessage = this.streamingMessage.errorMessage || "Error";
-@@ -2422,6 +2505,11 @@ export class InteractiveMode {
-                 // The bash execution callback handles TUI output rendering.
-                 break;
-             case "tool_execution_start": {
-+                if (this.compactMode) {
-+                    this.compactSummary?.noteToolCall(event.toolName, event.args, event.toolCallId);
-+                    this.ui.requestRender();
-+                    break;
-+                }
-                 let component = this.pendingTools.get(event.toolCallId);
-                 if (!component) {
-                     component = new ToolExecutionComponent(event.toolName, event.toolCallId, event.args, {
-@@ -2437,6 +2525,11 @@ export class InteractiveMode {
-                 break;
-             }
-             case "tool_execution_update": {
-+                if (this.compactMode) {
-+                    this.compactSummary?.notePartialResult(event.partialResult);
-+                    this.ui.requestRender();
-+                    break;
-+                }
-                 const component = this.pendingTools.get(event.toolCallId);
-                 if (component) {
-                     component.updateResult({ ...event.partialResult, isError: false }, true);
-@@ -2445,6 +2538,11 @@ export class InteractiveMode {
-                 break;
-             }
-             case "tool_execution_end": {
-+                if (this.compactMode) {
-+                    this.compactSummary?.toolEnded(event.toolName, event.isError);
-+                    this.ui.requestRender();
-+                    break;
-+                }
-                 const component = this.pendingTools.get(event.toolCallId);
-                 if (component) {
-                     component.updateResult({ ...event.result, isError: event.isError });
-@@ -2464,6 +2562,14 @@ export class InteractiveMode {
-                     this.streamingMessage = undefined;
-                 }
-                 this.pendingTools.clear();
-+                if (this.compactMode) {
-+                    this.compactSummary?.setFinished(this.compactLastStopReason === "aborted");
-+                    this.compactSummary = undefined;
-+                }
-+                if (this.compactModeRebuildPending) {
-+                    this.compactModeRebuildPending = false;
-+                    this.rebuildChatFromMessages();
-+                }
-                 this.ui.requestRender();
-                 break;
-             case "agent_settled":
-@@ -2696,6 +2802,10 @@ export class InteractiveMode {
-     }
-     renderSessionItems(items, options = {}) {
-         this.pendingTools.clear();
-+        if (this.compactMode) {
-+            this.renderSessionItemsCompact(items, options);
-+            return;
-+        }
-         const renderedPendingTools = new Map();
-         // Cache-miss notices are not persisted; re-derive them from the full entry
-         // list and re-inject them after the assistant messages that paid for them.
-@@ -3129,6 +3239,90 @@ export class InteractiveMode {
-         }
-         this.showStatus(`Tool output: ${expanded ? "expanded" : "collapsed"}`);
-     }
-+    /**
-+     * Enable or disable compact mode. When enabled, each turn renders as a
-+     * summary row plus the final response. Toggling re-renders the transcript.
-+     */
-+    setCompactMode(compact) {
-+        if (this.compactMode === compact && !this.compactModeRebuildPending)
-+            return;
-+        this.compactMode = compact;
-+        // Do not rebuild while a response is still streaming. The current
-+        // streaming component may contain the final response before the
-+        // session has persisted it; clearing the chat here can put that
-+        // response behind, or remove it with, the collapsed transcript.
-+        if (this.session.isStreaming) {
-+            this.compactModeRebuildPending = true;
-+            return;
-+        }
-+        // Before the initial render there is nothing to re-render; the initial
-+        // render (renderInitialMessages) picks up the mode directly.
-+        if (!this.isInitialized || this.chatContainer.children.length === 0)
-+            return;
-+        this.compactModeRebuildPending = false;
-+        this.rebuildChatFromMessages();
-+    }
-+    /**
-+     * Start a new compact turn summary. Called when a user message starts a
-+     * turn while compact mode is active.
-+     */
-+    beginCompactTurn() {
-+        if (this.compactSummary) {
-+            // Safety: previous turn never got an agent_end (e.g. steering).
-+            this.compactSummary.setFinished(false);
-+            this.compactSummary = undefined;
-+        }
-+        const summary = new CompactTurnSummary(this.ui);
-+        this.chatContainer.addChild(new Spacer(1));
-+        this.chatContainer.addChild(summary);
-+        this.compactSummary = summary;
-+        summary.startTurn();
-+    }
-+    /**
-+     * Compact rendering of the session items. Turn segments collapse into a
-+     * summary row plus the final response; everything else renders as usual.
-+     */
-+    renderSessionItemsCompact(items, options = {}) {
-+        if (options.updateFooter) {
-+            this.footer.invalidate();
-+            this.updateEditorBorderColor();
-+        }
-+        const messages = [];
-+        for (const item of items) {
-+            if (isCustomSessionEntry(item)) {
-+                this.addCustomEntryToChat(item);
-+                continue;
-+            }
-+            messages.push(item);
-+        }
-+        for (const segment of groupTurnsForCompact(messages)) {
-+            if (segment.kind === "message") {
-+                this.addMessageToChat(segment.message, options);
-+                continue;
-+            }
-+            if (segment.userMessage) {
-+                this.addMessageToChat(segment.userMessage, options);
-+            }
-+            if (segment.entries.length === 0 && !segment.finalResponse) {
-+                continue;
-+            }
-+            const stats = aggregateCompactTurn(segment.entries);
-+            const lastEntry = segment.entries[segment.entries.length - 1];
-+            const summary = new CompactTurnSummary(this.ui, {
-+                stats,
-+                finished: true,
-+                startTime: segment.userMessage?.timestamp,
-+                endTime: segment.finalResponse?.timestamp ?? lastEntry?.timestamp,
-+            });
-+            this.chatContainer.addChild(new Spacer(1));
-+            this.chatContainer.addChild(summary);
-+            if (segment.finalResponse) {
-+                this.chatContainer.addChild(new Spacer(1));
-+                this.addMessageToChat(segment.finalResponse);
-+            }
-+        }
-+        this.ui.requestRender();
-+    }
-     toggleThinkingBlockVisibility() {
-         this.hideThinkingBlock = !this.hideThinkingBlock;
-         this.settingsManager.setHideThinkingBlock(this.hideThinkingBlock);
+diff --git a/node_modules/@earendil-works/pi-coding-agent/package.json.orig b/node_modules/@earendil-works/pi-coding-agent/package.json.orig
+new file mode 100644
+index 0000000..c7d8c8b
+--- /dev/null
++++ b/node_modules/@earendil-works/pi-coding-agent/package.json.orig
+@@ -0,0 +1,101 @@
++{
++	"name": "@earendil-works/pi-coding-agent",
++	"version": "0.83.0",
++	"description": "Coding agent CLI with read, bash, edit, write tools and session management",
++	"type": "module",
++	"piConfig": {
++		"configDir": ".pi"
++	},
++	"bin": {
++		"pi": "dist/cli.js"
++	},
++	"main": "./dist/index.js",
++	"types": "./dist/index.d.ts",
++	"exports": {
++		".": {
++			"types": "./dist/index.d.ts",
++			"import": "./dist/index.js"
++		},
++		"./rpc-entry": {
++			"import": "./dist/rpc-entry.js"
++		}
++	},
++	"files": [
++		"dist",
++		"docs",
++		"examples",
++		"containerization.md",
++		"CHANGELOG.md",
++		"npm-shrinkwrap.json"
++	],
++	"scripts": {
++		"clean": "shx rm -rf dist",
++		"build": "tsgo -p tsconfig.build.json && shx chmod +x dist/cli.js dist/rpc-entry.js && npm run copy-assets",
++		"build:binary": "npm --prefix ../tui run build && npm --prefix ../ai run build && npm --prefix ../agent run build && npm run build && bun build --compile ./dist/bun/cli.js ./src/utils/image-resize-worker.ts --outfile dist/pi && npm run copy-binary-assets",
++		"copy-assets": "shx mkdir -p dist/modes/interactive/theme && shx cp src/modes/interactive/theme/*.json dist/modes/interactive/theme/ && shx mkdir -p dist/modes/interactive/assets && shx cp src/modes/interactive/assets/*.png dist/modes/interactive/assets/ && shx mkdir -p dist/core/export-html/vendor && shx cp src/core/export-html/template.html src/core/export-html/template.css src/core/export-html/template.js dist/core/export-html/ && shx cp src/core/export-html/vendor/*.js dist/core/export-html/vendor/",
++		"copy-binary-assets": "shx cp package.json dist/ && shx cp README.md dist/ && shx cp CHANGELOG.md dist/ && shx mkdir -p dist/theme && shx cp src/modes/interactive/theme/*.json dist/theme/ && shx mkdir -p dist/assets && shx cp src/modes/interactive/assets/*.png dist/assets/ && shx mkdir -p dist/export-html/vendor && shx cp src/core/export-html/template.html dist/export-html/ && shx cp src/core/export-html/vendor/*.js dist/export-html/vendor/ && shx cp -r docs dist/ && shx cp -r examples dist/ && shx cp ../../node_modules/@silvia-odwyer/photon-node/photon_rs_bg.wasm dist/",
++		"test": "vitest --run",
++		"shrinkwrap": "node ../../scripts/generate-coding-agent-shrinkwrap.mjs",
++		"prepublishOnly": "npm run clean && npm run build && npm run shrinkwrap"
++	},
++	"dependencies": {
++		"@earendil-works/pi-agent-core": "^0.83.0",
++		"@earendil-works/pi-ai": "^0.83.0",
++		"@earendil-works/pi-tui": "^0.83.0",
++		"@silvia-odwyer/photon-node": "0.3.4",
++		"chalk": "5.6.2",
++		"cross-spawn": "7.0.6",
++		"diff": "8.0.4",
++		"glob": "13.0.6",
++		"highlight.js": "10.7.3",
++		"hosted-git-info": "9.0.3",
++		"ignore": "7.0.5",
++		"jiti": "2.7.0",
++		"minimatch": "10.2.5",
++		"proper-lockfile": "4.1.2",
++		"semver": "7.8.0",
++		"typebox": "1.3.7",
++		"undici": "8.5.0",
++		"yaml": "2.9.0"
++	},
++	"overrides": {
++		"protobufjs": "7.6.5",
++		"rimraf": "6.1.2",
++		"gaxios": {
++			"rimraf": "6.1.2"
++		}
++	},
++	"optionalDependencies": {
++		"@mariozechner/clipboard": "0.3.9"
++	},
++	"devDependencies": {
++		"@types/cross-spawn": "6.0.6",
++		"@types/diff": "7.0.2",
++		"@types/hosted-git-info": "3.0.5",
++		"@types/ms": "2.1.0",
++		"@types/node": "24.12.4",
++		"@types/proper-lockfile": "4.1.4",
++		"@types/semver": "7.7.1",
++		"shx": "0.4.0",
++		"typescript": "5.9.3",
++		"vitest": "4.1.9"
++	},
++	"keywords": [
++		"coding-agent",
++		"ai",
++		"llm",
++		"cli",
++		"tui",
++		"agent"
++	],
++	"author": "Mario Zechner",
++	"license": "MIT",
++	"repository": {
++		"type": "git",
++		"url": "git+https://github.com/earendil-works/pi.git",
++		"directory": "packages/coding-agent"
++	},
++	"engines": {
++		"node": ">=22.19.0"
++	}
++}
+diff --git a/node_modules/@earendil-works/pi-coding-agent/package.json.rej b/node_modules/@earendil-works/pi-coding-agent/package.json.rej
+new file mode 100644
+index 0000000..d62baf7
+--- /dev/null
++++ b/node_modules/@earendil-works/pi-coding-agent/package.json.rej
+@@ -0,0 +1,7 @@
++@@ -15,4 +15,5 @@
++ 	".": {
++ 		"types": "./dist/index.d.ts",
++-		"import": "./dist/index.js"
+++		"import": "./dist/index.js",
+++		"require": "./dist/index.js"
++ 	},

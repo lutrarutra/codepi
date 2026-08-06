@@ -33,8 +33,6 @@ export interface DashboardData {
 	sessionDir: string;
 	terminalPrefs: TerminalPrefs;
 	autoVerify: AutoVerifyMode;
-	/** TL;DR mode default for new sessions (codepi.tldrMode). */
-	tldrMode: boolean;
 	/** Ask-mode read-only allowlist (effective value, defaults when unset). */
 	askAllowedTools: string[];
 	bundledResources: BundledResourceRow[];

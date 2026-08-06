@@ -238,36 +238,6 @@ const AUTO_VERIFY_LABELS: Record<
 	},
 };
 
-function TldrModeCard({ enabled }: { enabled: boolean }): JSX.Element {
-	return (
-		<section className="settings-card" aria-labelledby="tldr-title">
-			<h2 id="tldr-title">TL;DR Mode</h2>
-			<p className="settings-help">
-				Collapse everything but the agent&rsquo;s final response into a per-turn
-				summary (tokens, tool calls, cost, live activity). Applies to new
-				sessions; toggle per session with <code>/codepi-toggle-tldr</code>.
-			</p>
-			<div className="settings-field-row">
-				<label className="settings-field-label" htmlFor="tldr-mode-toggle">
-					Enabled
-				</label>
-				<input
-					id="tldr-mode-toggle"
-					className="settings-toggle"
-					type="checkbox"
-					checked={enabled}
-					onChange={(event) =>
-						post({
-							command: "settings:setTldrMode",
-							enabled: event.currentTarget.checked,
-						})
-					}
-				/>
-			</div>
-		</section>
-	);
-}
-
 function AutoVerifyCard({ mode }: { mode: AutoVerifyMode }): JSX.Element {
 	return (
 		<section className="settings-card" aria-labelledby="verify-title">
@@ -508,8 +478,6 @@ export function SettingsApp(): JSX.Element {
 			</section>
 
 			<TerminalPrefsCard prefs={data.terminalPrefs} />
-
-			<TldrModeCard enabled={data.tldrMode} />
 
 			<AutoVerifyCard mode={data.autoVerify} />
 

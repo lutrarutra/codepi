@@ -39,8 +39,6 @@ export interface DashboardData {
 	sessionDir: string;
 	terminalPrefs: TerminalPrefs;
 	autoVerify: AutoVerifyMode;
-	/** TL;DR mode default for new sessions (codepi.tldrMode). */
-	tldrMode: boolean;
 	/** Ask-mode read-only allowlist (effective value, defaults when unset). */
 	askAllowedTools: string[];
 	bundledResources: BundledResourceRow[];
@@ -70,7 +68,6 @@ export type SettingsMessage =
 			fontSize: number;
 	  }
 	| { command: "settings:setAutoVerify"; mode: AutoVerifyMode }
-	| { command: "settings:setTldrMode"; enabled: boolean }
 	| { command: "settings:setAskAllowedTools"; tools: string[] }
 	| { command: "settings:openFile"; file: "settings" | "models" | "auth" }
 	| { command: "settings:refresh" }
@@ -86,7 +83,6 @@ export type SettingsReply =
 				| BundledResourceRow["id"]
 				| "terminal"
 				| "autoVerify"
-				| "tldrMode"
 				| "askAllowedTools";
 	  }
 	| {

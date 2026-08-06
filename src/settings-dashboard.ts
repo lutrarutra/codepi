@@ -6,7 +6,6 @@ import {
 	getEnabledBundledResources,
 	readAskModeAllowedTools,
 	readAutoVerifyMode,
-	readTldrMode,
 	readTerminalPrefs,
 } from "./pi-store";
 import type {
@@ -95,7 +94,6 @@ export function buildDashboardData(
 		sessionDir,
 		terminalPrefs: readTerminalPrefs(settings),
 		autoVerify: readAutoVerifyMode(settings),
-		tldrMode: readTldrMode(settings),
 		// Effective allowlist: the settings value when present, else the
 		// seeded defaults (mirrors the extension's runtime fallback).
 		askAllowedTools: [

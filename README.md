@@ -43,9 +43,8 @@ CodePi provides VS Code-aware tools for:
 
 Agent edits are written to disk immediately and tracked for review:
 
-- Added/removed line decorations and a review bar in the editor.
-- Per-hunk, per-file, and accept-all/reject-all actions.
-- CodeLens actions, diff views, edit cards in chat, and a pending-edits status bar.
+- File-level accept/reject CodeLens actions in the editor.
+- Side-by-side diff views, edit cards in chat, and a pending-edits status bar.
 - Changes made manually while a proposal is pending are marked stale instead of being overwritten.
 - `/filechanges` provides a session-level change log; accept or decline changes with `/filechanges-accept` and `/filechanges-decline`.
 - Editor review state and the file-change tracker stay synchronized.
@@ -81,11 +80,7 @@ Define build, test, lint, package, and other commands in `.pi/tasks.json`:
 - Read-only tasks can run in Ask mode.
 - Task changes require user confirmation and task output uses the VS Code terminal backend.
 
-### TL;DR mode and footer
-
-- TL;DR mode collapses streaming thoughts and tool activity into a compact summary row while preserving the final response.
-- Toggle with `/codepi-toggle-tldr`; enabled by default and persisted per session.
-- Custom footer with token usage, reasoning tokens, cost, context usage, tokens/sec, model, thinking level, mode, bash approval state, and Git branch.
+### Footer
 - Bundled `nebula-pulse` theme and Nerd Font icons.
 
 ### Verification and workflow automation
@@ -102,7 +97,7 @@ The CodePi sidebar includes:
 - Bundled-resource toggles for `codepi-footer`, `codepi-diff`, `codepi-modes`, `codepi-bash`, `codepi-context`, `codepi-task`, and `nebula-pulse`.
 - Links to pi's `settings.json`, `models.json`, and `auth.json`.
 - A live inventory of loaded core, bundled, project, user, and package extensions, commands, tools, handlers, flags, shortcuts, and message renderers.
-- Configuration for terminal font, terminal size, TL;DR mode, auto-verify, terminal shortcut, and Ask-mode tools.
+- Configuration for terminal font, terminal size, auto-verify, terminal shortcut, and Ask-mode tools.
 
 CodePi also loads pi's normal resources and extension ecosystem: configured models and providers, authentication, skills, prompt templates, themes, packages, and custom extensions.
 

@@ -10,7 +10,6 @@ import {
 	updateAutoVerifyMode,
 	updateAskModeAllowedTools,
 	updateBundledResourceConfig,
-	updateTldrMode,
 	updateTerminalPrefs,
 	type BundledResourceConfig,
 } from "./pi-store";
@@ -81,9 +80,6 @@ export class SettingsViewProvider implements vscode.WebviewViewProvider {
 					break;
 				case "settings:setAutoVerify":
 					await this.setAutoVerify(msg.mode);
-					break;
-				case "settings:setTldrMode":
-					await this.setTldrMode(msg.enabled);
 					break;
 				case "settings:setAskAllowedTools":
 					await this.setAskAllowedTools(msg.tools);
@@ -161,14 +157,6 @@ export class SettingsViewProvider implements vscode.WebviewViewProvider {
 		updateAutoVerifyMode(settingsPath, mode);
 		this.onConfigSaved();
 		this.post({ command: "settings:saved", ok: true, resource: "autoVerify" });
-		await this.sendData();
-	}
-
-	private async setTldrMode(enabled: boolean): Promise<void> {
-		const settingsPath = getSettingsPathForAgent(this.agentDir);
-		updateTldrMode(settingsPath, Boolean(enabled));
-		this.onConfigSaved();
-		this.post({ command: "settings:saved", ok: true, resource: "tldrMode" });
 		await this.sendData();
 	}
 

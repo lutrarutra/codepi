@@ -124,14 +124,12 @@ function formatAddedRemovedPlain(added: number, removed: number): string {
 }
 
 /**
- * Effective added/removed counts for a file: the REMAINING pending lines
- * (from the host's review markers) when known, else the disk diff.
+ * Counts shown in the tracker are always the cumulative disk diff from the
+ * file's original baseline. Review markers describe lifecycle (whether a
+ * file is still pending), not a replacement diff for the latest write.
  */
-function pendingCountsFor(
-	t: TrackedFile,
-	pending: Map<string, { added: number; removed: number }>,
-): { added: number; removed: number } {
-	return pending.get(t.path) ?? { added: t.added, removed: t.removed };
+function countsFor(t: TrackedFile): { added: number; removed: number } {
+	return { added: t.added, removed: t.removed };
 }
 
 function styleAddedRemovedForList(theme: any, text: string): string {
@@ -184,7 +182,6 @@ function byDisplayPath(a: TrackedFile, b: TrackedFile): number {
 
 function buildWidgetLines(
 	tracked: Map<string, TrackedFile>,
-	pending: Map<string, { added: number; removed: number }>,
 	theme?: any,
 ): string[] | undefined {
 	if (tracked.size === 0) return undefined;
@@ -201,7 +198,7 @@ function buildWidgetLines(
 
 	for (const t of items.slice(0, max)) {
 		const tag = t.kind === "new" ? "+" : "Δ";
-		const { added, removed } = pendingCountsFor(t, pending);
+		const { added, removed } = countsFor(t);
 
 		if (!theme) {
 			const stat = formatAddedRemovedPlain(added, removed);
@@ -301,13 +298,6 @@ export default function (pi: ExtensionAPI) {
 	// In-memory state (reconstructed on session_start from custom entries)
 	const baselines = new Map<string, Baseline>(); // key: relPath
 	const tracked = new Map<string, TrackedFile>(); // key: relPath
-	// Remaining pending added/removed lines per file, from the host's review
-	// markers — drives the counter down to zero as hunks get accepted/declined.
-	const pendingByRelPath = new Map<
-		string,
-		{ added: number; removed: number }
-	>();
-
 	// Per-tool-call snapshot, only committed on successful tool_result
 	const pendingByToolCallId = new Map<string, PendingSnapshot>();
 
@@ -351,10 +341,9 @@ export default function (pi: ExtensionAPI) {
 			}
 		}
 
-		// 2) Consume host markers: each time a review hunk is accepted or
-		//    declined in the editor, the host records the REMAINING pending
-		//    counts. We store them so the widget's line counter counts down
-		//    to zero, at which point the file leaves the change list.
+		// 2) Consume host markers. They tell us when the file-level review is
+		//    fully resolved; they must not replace the cumulative disk diff
+		//    shown in the list when a later write creates a new proposal.
 		const branch = ctx.sessionManager.getBranch();
 		const headId = branch.length > 0 ? branch[branch.length - 1].id : undefined;
 		if (headId !== lastBranchHeadId) {
@@ -370,19 +359,19 @@ export default function (pi: ExtensionAPI) {
 							path?: string;
 							status?: string;
 							pendingHunks?: number;
-							pendingAdded?: number;
-							pendingRemoved?: number;
 					  }
 					| undefined;
 				if (!data?.path) continue;
 				const { relPath } = normalizeToolPath(ctx.cwd, data.path);
 				const pendingHunks = data.pendingHunks ?? 0;
-				if (pendingHunks <= 0) {
+				// A fresh no-op proposal is still pending and must not clear an
+				// earlier cumulative file change. Only a non-pending marker with
+				// zero hunks means the whole file review is resolved.
+				if (pendingHunks <= 0 && data.status !== "pending") {
 					// All hunks resolved (accepted/rejected) — drop the file.
 					if (baselines.has(relPath) || tracked.has(relPath)) {
 						baselines.delete(relPath);
 						tracked.delete(relPath);
-						pendingByRelPath.delete(relPath);
 						pi.appendEntry(ENTRY_UNTRACK, {
 							path: relPath,
 							timestamp: Date.now(),
@@ -390,12 +379,8 @@ export default function (pi: ExtensionAPI) {
 						changed = true;
 					}
 				} else if (tracked.has(relPath)) {
-					// Partial progress — remember the remaining pending lines so
-					// the counter shows them.
-					pendingByRelPath.set(relPath, {
-						added: data.pendingAdded ?? 0,
-						removed: data.pendingRemoved ?? 0,
-					});
+					// The file is still pending. Keep the cumulative disk counts;
+					// a marker for a newer write is not a replacement diff.
 					changed = true;
 				}
 			}
@@ -410,7 +395,7 @@ export default function (pi: ExtensionAPI) {
 		ctx.ui.setStatus("filechanges", formatStatus(tracked, ctx.ui.theme));
 		ctx.ui.setWidget(
 			"filechanges",
-			buildWidgetLines(tracked, pendingByRelPath, ctx.ui.theme),
+			buildWidgetLines(tracked, ctx.ui.theme),
 		);
 	}
 
@@ -497,7 +482,6 @@ export default function (pi: ExtensionAPI) {
 	) {
 		baselines.clear();
 		tracked.clear();
-		pendingByRelPath.clear();
 		pendingByToolCallId.clear();
 		pi.appendEntry(ENTRY_CLEAR, { timestamp: Date.now(), reason });
 		updateUi(ctx);
@@ -617,7 +601,7 @@ export default function (pi: ExtensionAPI) {
 					return;
 				}
 				// Non-interactive: just print a summary to stdout
-				const lines = buildWidgetLines(tracked, pendingByRelPath) ?? [];
+				const lines = buildWidgetLines(tracked) ?? [];
 				console.log(lines.join("\n"));
 				return;
 			}
@@ -652,7 +636,7 @@ export default function (pi: ExtensionAPI) {
 						value: t.path,
 						label: `${t.kind === "new" ? "+" : "Δ"} ${t.displayPath}`,
 						description: (() => {
-							const c = pendingCountsFor(t, pendingByRelPath);
+							const c = countsFor(t);
 							return formatAddedRemovedPlain(c.added, c.removed);
 						})(),
 					})),
@@ -787,7 +771,6 @@ export default function (pi: ExtensionAPI) {
 	async function rebuildFromSession(ctx: any): Promise<void> {
 		baselines.clear();
 		tracked.clear();
-		pendingByRelPath.clear();
 		pendingByToolCallId.clear();
 
 		// Replay custom entries on current branch
@@ -797,7 +780,6 @@ export default function (pi: ExtensionAPI) {
 			if (entry.customType === ENTRY_CLEAR) {
 				baselines.clear();
 				tracked.clear();
-				pendingByRelPath.clear();
 				continue;
 			}
 
@@ -830,27 +812,28 @@ export default function (pi: ExtensionAPI) {
 				const { relPath } = normalizeToolPath(ctx.cwd, data.path);
 				baselines.delete(relPath);
 				tracked.delete(relPath);
-				pendingByRelPath.delete(relPath);
 				continue;
 			}
 
-			// Host markers: remember the remaining pending counts so the widget
-			// counter is correct after a session reload. Zero-pending markers
-			// just mean the file was (or will be) untracked via ENTRY_UNTRACK.
+			// Host markers describe review lifecycle. They may remove a file
+			// once every proposal hunk is resolved, but their line counts must
+			// never replace the cumulative disk diff shown by this extension.
 			if (entry.customType === REVIEW_RESOLVED) {
 				const data = entry.data as any;
 				if (!data?.path) continue;
 				const { relPath } = normalizeToolPath(ctx.cwd, data.path);
 				const pendingHunks =
 					typeof data.pendingHunks === "number" ? data.pendingHunks : 0;
-				if (pendingHunks > 0) {
-					pendingByRelPath.set(relPath, {
-						added:
-							typeof data.pendingAdded === "number" ? data.pendingAdded : 0,
-						removed:
-							typeof data.pendingRemoved === "number" ? data.pendingRemoved : 0,
-					});
+				if (
+					pendingHunks <= 0 &&
+					(data.status === "accepted" ||
+						data.status === "rejected" ||
+						data.status === "stale")
+				) {
+					baselines.delete(relPath);
+					tracked.delete(relPath);
 				}
+				continue;
 			}
 		}
 

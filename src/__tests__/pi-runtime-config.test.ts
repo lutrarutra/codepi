@@ -22,8 +22,6 @@ describe("Pi runtime resource paths", () => {
 			join(extensionResources, "codepi-bash.ts"),
 			join(extensionResources, "codepi-context.ts"),
 			join(extensionResources, "codepi-task.ts"),
-			// codepi-tldr is infrastructure (always loaded, not toggleable)
-			join(extensionResources, "codepi-tldr.ts"),
 		]);
 		expect(paths.bundledThemePaths).toEqual([
 			join(extensionResources, "..", "themes", "nebula-pulse.json"),
@@ -78,7 +76,6 @@ describe("Pi runtime resource paths", () => {
 			join(extensionResources, "codepi-bash.ts"),
 			join(extensionResources, "codepi-context.ts"),
 			join(extensionResources, "codepi-task.ts"),
-			join(extensionResources, "codepi-tldr.ts"),
 		]);
 		expect(paths.bundledThemePaths).toEqual([]);
 	});

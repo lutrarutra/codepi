@@ -50,9 +50,6 @@ export function buildPiRuntimeResourcePaths(
 			),
 		)
 		.map(([, filename]) => join(extensionResourcesDir, filename));
-	// codepi-tldr is infrastructure for the TL;DR Mode setting (not a
-	// user-toggleable bundled resource): always load it.
-	bundledExtensionPaths.push(join(extensionResourcesDir, "codepi-tldr.ts"));
 	const bundledThemePaths = enabledIds.has("nebula-pulse")
 		? [join(extensionResourcesDir, "..", "themes", "nebula-pulse.json")]
 		: [];
