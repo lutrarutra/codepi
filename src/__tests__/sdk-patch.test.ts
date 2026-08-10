@@ -11,7 +11,7 @@ const CORE_DIR = path.resolve(
 	"node_modules/@earendil-works/pi-coding-agent/dist/core",
 );
 
-describe("SDK host-integration patch (0.84.0)", () => {
+describe("SDK host-integration patch (0.84.1)", () => {
 	it("threads options.terminal into createInteractiveTui", () => {
 		const js = fs.readFileSync(
 			path.join(DIST_DIR, "interactive-mode.js"),
@@ -19,9 +19,10 @@ describe("SDK host-integration patch (0.84.0)", () => {
 		);
 		// The `?? new ProcessTerminal()` fallback exists upstream inside
 		// createInteractiveTui since 0.84.0; the patch only threads the option
-		// from InteractiveModeOptions into that call.
+		// from InteractiveModeOptions into that call. 0.84.1 added
+		// `onRightClickPaste` to the same call, so it may sit after terminal.
 		expect(js).toMatch(
-			/createInteractiveTui\(\{[\s\S]*?terminal: options\.terminal,?\n\s*\}\)/,
+			/createInteractiveTui\(\{[\s\S]*?terminal: options\.terminal,?\n\s*(?:onRightClickPaste: this\.onRightClickPaste,\n\s*)?\}\)/,
 		);
 	});
 	it("declares terminal on InteractiveModeOptions", () => {
@@ -29,14 +30,14 @@ describe("SDK host-integration patch (0.84.0)", () => {
 			path.join(DIST_DIR, "interactive-mode.d.ts"),
 			"utf8",
 		);
-		// Upstream 0.84.0 also declares `terminal?:` (on InteractiveTuiOptions),
+		// Upstream also declares `terminal?:` (on InteractiveTuiOptions),
 		// so assert the option sits inside InteractiveModeOptions, next to tuiMode.
 		expect(dts).toMatch(
 			/tuiMode\?: TuiMode;\n {4}\/\*\* Custom terminal[^\n]*\*\/\n {4}terminal\?: import\("@earendil-works\/pi-tui"\)\.Terminal;/,
 		);
 	});
 
-	describe("SDK baseToolsOverride exposure patch (0.84.0)", () => {
+	describe("SDK baseToolsOverride exposure patch (0.84.1)", () => {
 		it("passes baseToolsOverride through createAgentSession", () => {
 			const js = fs.readFileSync(path.join(CORE_DIR, "sdk.js"), "utf8");
 			expect(js).toMatch(/baseToolsOverride: options\.baseToolsOverride/);
@@ -61,7 +62,7 @@ describe("SDK host-integration patch (0.84.0)", () => {
 		});
 	});
 
-	describe("SDK extension-dialog events patch (0.84.0)", () => {
+	describe("SDK extension-dialog events patch (0.84.1)", () => {
 		it("emits extension_ui_start/end for the selector dialog", () => {
 			const js = fs.readFileSync(
 				path.join(DIST_DIR, "interactive-mode.js"),
