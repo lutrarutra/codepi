@@ -1,0 +1,44 @@
+/*
+ * CodePi link affordance gating.
+ *
+ * xterm's Linkifier draws link underlines as an INLINE
+ * `text-decoration: underline` on the cell spans (DOM renderer
+ * `_setCellUnderline` → row factory), and toggles an `xterm-cursor-pointer`
+ * class on the SCREEN element while hovering a link.
+ *
+ * The terminal keeps the normal text (I-beam) cursor like a regular terminal
+ * input surface; the link affordances (pointer cursor + underline) appear
+ * ONLY while `codepi-modifier-held` is on the host (toggled by
+ * `createLinkModifierGate`).
+ *
+ * `!important` is required for the underline because it is an inline style.
+ * The cursor rules out-specify xterm.css's `.xterm { cursor: text }` and
+ * `.xterm .xterm-cursor-pointer { cursor: pointer }`.
+ */
+
+/* Base: text (I-beam) cursor over the whole terminal surface. */
+.codepi-link-host,
+.codepi-link-host .xterm-scrollable-element,
+.codepi-link-host .xterm-screen {
+	cursor: text;
+}
+
+/* Hovering a link without the modifier: still the text cursor, not pointer. */
+.codepi-link-host .xterm-screen.xterm-cursor-pointer {
+	cursor: text;
+}
+
+/* Hover underline hidden unless the activation modifier is held. */
+.codepi-link-host span[style*="text-decoration: underline"] {
+	text-decoration: none !important;
+}
+
+/* Modifier held → pointer cursor over links + visible underline. */
+.codepi-link-host.codepi-modifier-held .xterm-screen.xterm-cursor-pointer {
+	cursor: pointer;
+}
+
+.codepi-link-host.codepi-modifier-held
+	span[style*="text-decoration: underline"] {
+	text-decoration: underline !important;
+}

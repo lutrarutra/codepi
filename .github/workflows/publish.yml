@@ -1,0 +1,90 @@
+name: Publish extension
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-extension
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Build and publish VSIX
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
+
+    steps:
+      - name: Check out tagged commit
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # Node 20 is NOT supported: jsdom 30 requires ^22.22.2 || ^24.15.0 || >=26
+      # and undici 8 (used by jsdom + pi-coding-agent) requires >=22.19.0.
+      # On Node 20, undici's CacheStorage fails at module load with
+      # "webidl.util.markAsUncloneable is not a function" (markAsUncloneable was
+      # added to node:worker_threads in 22.19.0), breaking `make verify`.
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Verify tag points to main
+        if: github.event_name == 'push'
+        run: |
+          git fetch origin main --no-tags
+          git merge-base --is-ancestor "$GITHUB_SHA" origin/main
+
+      - name: Set package version from tag
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          TAG_VERSION: ${{ github.ref_name }}
+        run: npm version "${TAG_VERSION#v}" --no-git-tag-version --allow-same-version
+
+      - name: Install root dependencies
+        run: npm ci
+
+      - name: Install webview dependencies
+        working-directory: webview-ui
+        run: npm ci
+
+      - name: Run verification
+        run: make verify
+
+      - name: Package VSIX
+        run: |
+          VERSION="$(node -p "require('./package.json').version")"
+          # NOTE: never pass --no-dependencies here. dist/extension.js imports
+          # @earendil-works/pi-coding-agent, @earendil-works/pi-tui and
+          # @vscode/ripgrep-universal at runtime (esbuild externals), so
+          # node_modules MUST ship inside the vsix. The 0.4.0 release was
+          # broken by exactly this flag: activation died on the missing
+          # modules and every command reported "command 'codepi.openPanel'
+          # not found".
+          npx --yes @vscode/vsce@3.9.2 package -o "dist/codepi-${VERSION}.vsix"
+
+      - name: Verify runtime dependencies are bundled
+        run: |
+          VERSION="$(node -p "require('./package.json').version")"
+          unzip -l "dist/codepi-${VERSION}.vsix" | grep -q "extension/node_modules/@earendil-works/pi-coding-agent/" || { echo "ERROR: vsix contains no node_modules — extension will fail at activation"; exit 1; }
+
+      - name: Upload VSIX artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: codepi-${{ github.ref_name }}
+          path: dist/*.vsix
+          if-no-files-found: error
+
+      - name: Publish to Visual Studio Marketplace
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+        run: |
+          VERSION="$(node -p "require('./package.json').version")"
+          npx --yes @vscode/vsce@3.9.2 publish --packagePath "dist/codepi-${VERSION}.vsix" -p "$VSCE_PAT"

@@ -1,0 +1,233 @@
+{
+  "name": "code-pi",
+  "displayName": "CodePi - pi.dev agent extension for VSCode",
+  "description": "Pi coding agent for VSCode",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/lutrarutra/codepi.git"
+  },
+  "version": "0.4.4",
+  "publisher": "lutrarutra",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.105.0"
+  },
+  "categories": [
+    "Chat",
+    "Programming Languages"
+  ],
+  "icon": "media/favicon.png",
+  "galleryBanner": {
+    "color": "#09090b",
+    "theme": "dark"
+  },
+  "main": "./dist/extension.js",
+  "activationEvents": [
+    "onStartupFinished",
+    "onWebviewPanel:codepi-tui"
+  ],
+  "contributes": {
+    "configuration": {
+      "title": "CodePi",
+      "properties": {
+        "codepi.piPath": {
+          "type": "string",
+          "default": "",
+          "description": "Path to custom pi SDK or pi binary. Leave empty to use bundled pi."
+        }
+      }
+    },
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "codepi-sessions",
+          "title": "PI",
+          "icon": "./media/pi-icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "codepi-sessions": [
+        {
+          "id": "codepi.sessionsList",
+          "name": "Sessions",
+          "type": "webview",
+          "icon": "$(history)",
+          "when": "codepi.sidebarTab == sessions"
+        },
+        {
+          "id": "codepi.settings",
+          "name": "Settings",
+          "type": "webview",
+          "icon": "$(gear)",
+          "when": "codepi.sidebarTab == settings"
+        },
+        {
+          "id": "codepi.extensions",
+          "name": "Extensions",
+          "type": "webview",
+          "icon": "$(extensions)",
+          "when": "codepi.sidebarTab == extensions"
+        }
+      ]
+    },
+    "icons": {
+      "codepi-logo": {
+        "description": "CodePi (pi) logo",
+        "default": {
+          "fontPath": "./media/codepi-logo.woff",
+          "fontCharacter": ""
+        }
+      }
+    },
+    "colors": [
+      {
+        "id": "codepi.logo",
+        "description": "CodePi logo color (tab handle) — white on dark themes, dark on light themes so it stays visible",
+        "defaults": {
+          "dark": "#ffffff",
+          "light": "#1f1f1f",
+          "highContrast": "#ffffff"
+        }
+      }
+    ],
+    "commands": [
+      {
+        "command": "codepi.openPanel",
+        "title": "CodePi: Start new session"
+      },
+      {
+        "command": "codepi.openSession",
+        "title": "Open Session"
+      },
+      {
+        "command": "codepi.renameSession",
+        "title": "Rename Session"
+      },
+      {
+        "command": "codepi.deleteSession",
+        "title": "Delete Session"
+      },
+      {
+        "command": "codepi.newSession",
+        "title": "New Session",
+        "icon": "$(plus)"
+      },
+      {
+        "command": "codepi.refreshSessions",
+        "title": "Refresh Sessions",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "codepi.acceptHunk",
+        "title": "CodePi: Accept Edit Hunk",
+        "icon": "$(check)"
+      },
+      {
+        "command": "codepi.rejectHunk",
+        "title": "CodePi: Reject Edit Hunk",
+        "icon": "$(close)"
+      },
+      {
+        "command": "codepi.acceptFile",
+        "title": "CodePi: Accept All Edits in File",
+        "icon": "$(check-all)"
+      },
+      {
+        "command": "codepi.rejectFile",
+        "title": "CodePi: Reject All Edits in File",
+        "icon": "$(discard)"
+      },
+      {
+        "command": "codepi.acceptAllEdits",
+        "title": "CodePi: Accept All Edits",
+        "icon": "$(check-all)"
+      },
+      {
+        "command": "codepi.rejectAllEdits",
+        "title": "CodePi: Reject All Edits",
+        "icon": "$(discard)"
+      },
+      {
+        "command": "codepi.openDiff",
+        "title": "CodePi: Open Edit Diff",
+        "icon": "$(diff)"
+      },
+      {
+        "command": "codepi.openSettingsTab",
+        "title": "Open CodePi Settings"
+      },
+      {
+        "command": "codepi.openSessionsTab",
+        "title": "Open CodePi Sessions"
+      },
+      {
+        "command": "codepi.openExtensionsTab",
+        "title": "Open CodePi Extensions"
+      }
+    ],
+    "menus": {
+      "commandPalette": [
+        {
+          "command": "codepi.openExtensionsTab",
+          "when": "false"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "codepi.renameSession",
+          "when": "view == codepi.sessionsList && viewItem == session"
+        },
+        {
+          "command": "codepi.deleteSession",
+          "when": "view == codepi.sessionsList && viewItem == session"
+        }
+      ]
+    },
+    "keybindings": [
+      {
+        "command": "-workbench.action.files.newUntitledFile",
+        "key": "ctrl+n",
+        "mac": "cmd+n",
+        "when": "codepi.webviewFocused"
+      },
+      {
+        "command": "codepi.newSession",
+        "key": "ctrl+n",
+        "mac": "cmd+n",
+        "when": "codepi.webviewFocused"
+      }
+    ]
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run build",
+    "build": "npm run build:webview && npm run build:extension",
+    "build:extension": "npm run check-types && node esbuild.mjs --production",
+    "check-types": "tsc -p ./tsconfig.json --noEmit",
+    "build:webview": "npm --prefix webview-ui run build",
+    "watch": "concurrently -n webview,tsc,ext \"npm:watch:webview\" \"npm:watch:tsc\" \"npm:watch:extension\"",
+    "watch:extension": "node esbuild.mjs --watch",
+    "watch:tsc": "tsc -p ./tsconfig.json --noEmit --watch",
+    "watch:webview": "concurrently -n settings,term \"npm --prefix webview-ui run dev\" \"npm --prefix webview-ui run dev:terminal\"",
+    "test": "vitest run",
+    "lint": "tsc -p ./tsconfig.json --noEmit",
+    "postinstall": "patch-package"
+  },
+  "dependencies": {
+    "@earendil-works/pi-coding-agent": "^0.84.0",
+    "@earendil-works/pi-tui": "0.84.0",
+    "@vscode/ripgrep-universal": "^1.18.0",
+    "get-east-asian-width": "1.6.0",
+    "marked": "18.0.5"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "@types/vscode": "^1.85.0",
+    "concurrently": "^8.2.2",
+    "esbuild": "^0.20.0",
+    "jsdom": "^30.0.1",
+    "patch-package": "^8.0.1",
+    "typescript": "^5.3.0",
+    "vitest": "^3.2.7"
+  }
+}

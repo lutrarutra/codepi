@@ -1,0 +1,152 @@
+diff --git a/node_modules/@earendil-works/pi-coding-agent/dist/core/sdk.d.ts b/node_modules/@earendil-works/pi-coding-agent/dist/core/sdk.d.ts
+index 7778619..f5a6077 100644
+--- a/node_modules/@earendil-works/pi-coding-agent/dist/core/sdk.d.ts
++++ b/node_modules/@earendil-works/pi-coding-agent/dist/core/sdk.d.ts
+@@ -7,6 +7,7 @@ import type { ResourceLoader } from "./resource-loader.ts";
+ import { SessionManager } from "./session-manager.ts";
+ import { SettingsManager } from "./settings-manager.ts";
+ import { createBashTool, createCodingTools, createEditTool, createFindTool, createGrepTool, createLsTool, createReadOnlyTools, createReadTool, createWriteTool, withFileMutationQueue } from "./tools/index.ts";
++import type { Tool } from "./tools/index.ts";
+ export interface CreateAgentSessionOptions {
+     /** Working directory for project-local discovery. Default: process.cwd() */
+     cwd?: string;
+@@ -41,6 +42,15 @@ export interface CreateAgentSessionOptions {
+     tools?: string[];
+     /** Optional denylist of tool names to disable. Applies after `tools` when both are provided. */
+     excludeTools?: string[];
++    /**
++     * Optional override of the base (built-in) tool set.
++     *
++     * When provided, pi's built-in tools (read, bash, edit, write, grep, find, ls)
++     * are REPLACED entirely by the tools in this map (instead of being layered
++     * beneath custom tools). Pass an empty object `{}` to register no built-in
++     * tools at all — only extension/custom tools remain.
++     */
++    baseToolsOverride?: Record<string, Tool>;
+     /** Custom tools to register (in addition to built-in tools). */
+     customTools?: ToolDefinition[];
+     /** Resource loader. When omitted, DefaultResourceLoader is used. */
+diff --git a/node_modules/@earendil-works/pi-coding-agent/dist/core/sdk.js b/node_modules/@earendil-works/pi-coding-agent/dist/core/sdk.js
+index 2e8e67c..43d7e34 100644
+--- a/node_modules/@earendil-works/pi-coding-agent/dist/core/sdk.js
++++ b/node_modules/@earendil-works/pi-coding-agent/dist/core/sdk.js
+@@ -129,7 +129,9 @@ export async function createAgentSession(options = {}) {
+     else {
+         thinkingLevel = clampThinkingLevel(model, thinkingLevel);
+     }
+-    const defaultActiveToolNames = ["read", "bash", "edit", "write"];
++    const defaultActiveToolNames = options.baseToolsOverride
++        ? Object.keys(options.baseToolsOverride)
++        : ["read", "bash", "edit", "write"];
+     const allowedToolNames = options.tools ?? (options.noTools === "all" ? [] : undefined);
+     const excludedToolNames = options.excludeTools;
+     const excludedToolNameSet = excludedToolNames ? new Set(excludedToolNames) : undefined;
+@@ -254,6 +256,7 @@ export async function createAgentSession(options = {}) {
+         initialActiveToolNames,
+         allowedToolNames,
+         excludedToolNames,
++        baseToolsOverride: options.baseToolsOverride,
+         extensionRunnerRef,
+         sessionStartEvent: options.sessionStartEvent,
+     });
+diff --git a/node_modules/@earendil-works/pi-coding-agent/dist/core/tools/tool-definition-wrapper.js b/node_modules/@earendil-works/pi-coding-agent/dist/core/tools/tool-definition-wrapper.js
+index e05fec9..f8b2738 100644
+--- a/node_modules/@earendil-works/pi-coding-agent/dist/core/tools/tool-definition-wrapper.js
++++ b/node_modules/@earendil-works/pi-coding-agent/dist/core/tools/tool-definition-wrapper.js
+@@ -20,6 +20,8 @@ export function wrapToolDefinitions(definitions, ctxFactory) {
+  *
+  * This keeps AgentSession's internal registry definition-first even when a caller
+  * provides plain AgentTool overrides that do not include prompt metadata or renderers.
++ * Prompt metadata and renderers ARE forwarded when the AgentTool carries them, so
++ * baseToolsOverride tools can stay first-class (built-in parity).
+  */
+ export function createToolDefinitionFromAgentTool(tool) {
+     return {
+@@ -30,6 +32,10 @@ export function createToolDefinitionFromAgentTool(tool) {
+         constrainedSampling: tool.constrainedSampling,
+         prepareArguments: tool.prepareArguments,
+         executionMode: tool.executionMode,
++        promptSnippet: tool.promptSnippet,
++        promptGuidelines: tool.promptGuidelines,
++        renderCall: tool.renderCall,
++        renderResult: tool.renderResult,
+         execute: async (toolCallId, params, signal, onUpdate) => tool.execute(toolCallId, params, signal, onUpdate),
+     };
+ }
+diff --git a/node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/interactive-mode.d.ts b/node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/interactive-mode.d.ts
+index e4e75d8..cb835c1 100644
+--- a/node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/interactive-mode.d.ts
++++ b/node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/interactive-mode.d.ts
+@@ -30,6 +30,8 @@ export interface InteractiveModeOptions {
+     verbose?: boolean;
+     /** TUI layout mode. */
+     tuiMode?: TuiMode;
++    /** Custom terminal to render into. Defaults to the process terminal (stdin/stdout). */
++    terminal?: import("@earendil-works/pi-tui").Terminal;
+ }
+ interface InteractiveTuiOptions {
+     tuiMode: TuiMode;
+diff --git a/node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/interactive-mode.js b/node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/interactive-mode.js
+index b7bc54e..5e6331e 100644
+--- a/node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/interactive-mode.js
++++ b/node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/interactive-mode.js
+@@ -326,6 +326,7 @@ export class InteractiveMode {
+             tuiMode,
+             showHardwareCursor: this.settingsManager.getShowHardwareCursor(),
+             logDirectory: getAgentDir(),
++            terminal: options.terminal,
+         });
+         this.ui = createInteractiveTuiReference(() => this.renderer);
+         this.ui.setClearOnShrink(this.settingsManager.getClearOnShrink());
+@@ -1885,6 +1886,10 @@ export class InteractiveMode {
+                 resolve(undefined);
+                 return;
+             }
++            // CodePi patch: surface the dialog on the session event stream so
++            // hosts (tab icon tracker) can show "waiting for user input" while
++            // the agent is blocked on extension UI (e.g. a permission dialog).
++            this.session?._emit?.({ type: "extension_ui_start", ui: "select", title });
+             const onAbort = () => {
+                 this.hideExtensionSelector();
+                 resolve(undefined);
+@@ -1910,6 +1915,8 @@ export class InteractiveMode {
+      * Hide the extension selector.
+      */
+     hideExtensionSelector() {
++        // CodePi patch: dialog closed — mirror the event.
++        this.session?._emit?.({ type: "extension_ui_end", ui: "select" });
+         this.extensionSelector?.dispose();
+         this.editorContainer.clear();
+         this.editorContainer.addChild(this.editor);
+@@ -1937,6 +1944,8 @@ export class InteractiveMode {
+                 resolve(undefined);
+                 return;
+             }
++            // CodePi patch: surface the dialog on the session event stream.
++            this.session?._emit?.({ type: "extension_ui_start", ui: "input", title });
+             const onAbort = () => {
+                 this.hideExtensionInput();
+                 resolve(undefined);
+@@ -1962,6 +1971,8 @@ export class InteractiveMode {
+      * Hide the extension input.
+      */
+     hideExtensionInput() {
++        // CodePi patch: dialog closed — mirror the event.
++        this.session?._emit?.({ type: "extension_ui_end", ui: "input" });
+         this.extensionInput?.dispose();
+         this.editorContainer.clear();
+         this.editorContainer.addChild(this.editor);
+diff --git a/node_modules/@earendil-works/pi-coding-agent/package.json b/node_modules/@earendil-works/pi-coding-agent/package.json
+index 7dd347d..eb75ad2 100644
+--- a/node_modules/@earendil-works/pi-coding-agent/package.json
++++ b/node_modules/@earendil-works/pi-coding-agent/package.json
+@@ -14,7 +14,8 @@
+ 	"exports": {
+ 		".": {
+ 			"types": "./dist/index.d.ts",
+-			"import": "./dist/index.js"
++			"import": "./dist/index.js",
++			"require": "./dist/index.js"
+ 		},
+ 		"./rpc-entry": {
+ 			"import": "./dist/rpc-entry.js"

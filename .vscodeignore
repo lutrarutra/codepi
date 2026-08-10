@@ -1,0 +1,44 @@
+.vscode
+src
+webview-ui/src
+webview-ui/node_modules
+node_modules
+!node_modules/@vscode/ripgrep-universal/**
+!node_modules/@earendil-works/pi-coding-agent/**
+!node_modules/@earendil-works/pi-tui/**
+# pi-tui's runtime dependencies (its dist imports these directly —
+# without them the released extension dies at activation with
+# "Cannot find package 'get-east-asian-width'").
+!node_modules/get-east-asian-width/**
+!node_modules/marked/**
+node_modules/@earendil-works/pi-coding-agent/docs
+node_modules/@earendil-works/pi-coding-agent/examples
+node_modules/@earendil-works/pi-coding-agent/CHANGELOG.md
+node_modules/@earendil-works/pi-coding-agent/README.md
+# patch-package leftovers and stale dev sourcemaps (production bundles
+# have no sourcemap, so any .map in dist/ is stale)
+**/*.orig
+**/*.rej
+**/*.map
+.git
+.gitignore
+tsconfig.json
+esbuild.mjs
+submodules
+.pi-subagents
+# Dev-only files — not needed at runtime (build tooling, design docs,
+# CI config, patch sources, dev scripts)
+Makefile
+vitest.config.ts
+docs
+patches
+scripts
+.github
+.pi
+webview-ui/vite.config.ts
+webview-ui/vite.terminal.config.ts
+webview-ui/tsconfig.json
+webview-ui/package.json
+webview-ui/package-lock.json
+webview-ui/scripts
+webview-ui/*.html

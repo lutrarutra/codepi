@@ -1,0 +1,946 @@
+import type {
+	ExtensionAPI,
+	ExtensionCommandContext,
+} from "@earendil-works/pi-coding-agent";
+import {
+	DynamicBorder,
+	getMarkdownTheme,
+	isEditToolResult,
+	isToolCallEventType,
+	isWriteToolResult,
+} from "@earendil-works/pi-coding-agent";
+import type { SelectItem } from "@earendil-works/pi-tui";
+import {
+	Container,
+	Key,
+	Markdown,
+	SelectList,
+	Text,
+	matchesKey,
+} from "@earendil-works/pi-tui";
+import { readFile, writeFile, rm, mkdir } from "node:fs/promises";
+import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
+
+// Custom session entry types
+// New name: filechanges
+const ENTRY_BASELINE = "filechanges:baseline";
+const ENTRY_CLEAR = "filechanges:clear";
+const ENTRY_UNTRACK = "filechanges:untrack";
+
+// Two-way sync with CodePi's editor review:
+// - Written by the extension HOST when a review proposal becomes fully
+//   resolved (all hunks accepted or rejected in the editor). We consume it
+//   here so accepted files (whose content still differs from the baseline)
+//   leave the change list too.
+const REVIEW_RESOLVED = "codepi:review_resolved";
+// - Written by THIS extension when /filechanges-accept or
+//   /filechanges-decline runs, so the host can resolve the matching review
+//   proposals (clearing editor decorations).
+const RESOLVED = "filechanges:resolved";
+
+type Baseline = {
+	path: string; // normalized path relative to ctx.cwd where possible
+	absPath: string;
+	originalContent: string | null; // null => file did not exist (created)
+	createdAt: number;
+};
+
+type TrackedFile = {
+	path: string;
+	absPath: string;
+	displayPath: string;
+	originalContent: string | null;
+	currentContent: string;
+	diff: string;
+	added: number;
+	removed: number;
+	kind: "new" | "edited";
+	updatedAt: number;
+};
+
+type PendingSnapshot = {
+	path: string;
+	absPath: string;
+	before: string | null;
+};
+
+function stripAtPrefix(p: string): string {
+	return p.startsWith("@") ? p.slice(1) : p;
+}
+
+function normalizeToolPath(
+	cwd: string,
+	raw: string,
+): { absPath: string; relPath: string; inCwd: boolean } {
+	const cleaned = stripAtPrefix(raw);
+	const absPath = resolve(cwd, cleaned);
+	// True when the resolved path stays inside cwd. Out-of-cwd paths (e.g.
+	// /tmp edits) are NOT tracked by this extension — only cwd files are.
+	const rel = relative(cwd, absPath);
+	const inCwd = !isAbsolute(rel) && rel !== ".." && !rel.startsWith(`..${sep}`);
+	// Use relative path for storage/UI when possible. If it escapes cwd, keep the cleaned input.
+	const relPath = inCwd && rel !== "" ? rel : cleaned;
+	return { absPath, relPath, inCwd };
+}
+
+async function readTextOrNull(absPath: string): Promise<string | null> {
+	try {
+		return await readFile(absPath, "utf-8");
+	} catch {
+		return null;
+	}
+}
+
+function countDiffLines(unifiedDiff: string): {
+	added: number;
+	removed: number;
+} {
+	let added = 0;
+	let removed = 0;
+	for (const line of unifiedDiff.split("\n")) {
+		if (
+			line.startsWith("+++ ") ||
+			line.startsWith("--- ") ||
+			line.startsWith("@@")
+		)
+			continue;
+		if (line.startsWith("+")) added++;
+		else if (line.startsWith("-")) removed++;
+	}
+	return { added, removed };
+}
+
+/** Diff-stat parts with zero counts omitted: [+1] / [-2] / [+1,-2] / []. */
+function addedRemovedParts(added: number, removed: number): string[] {
+	const parts: string[] = [];
+	if (added > 0) parts.push(`+${added}`);
+	if (removed > 0) parts.push(`-${removed}`);
+	return parts;
+}
+
+function formatAddedRemovedPlain(added: number, removed: number): string {
+	const parts = addedRemovedParts(added, removed);
+	return parts.length === 0 ? "" : `(${parts.join("/")})`;
+}
+
+/**
+ * Counts shown in the tracker are always the cumulative disk diff from the
+ * file's original baseline. Review markers describe lifecycle (whether a
+ * file is still pending), not a replacement diff for the latest write.
+ */
+function countsFor(t: TrackedFile): { added: number; removed: number } {
+	return { added: t.added, removed: t.removed };
+}
+
+function styleAddedRemovedForList(theme: any, text: string): string {
+	// File rows use diff-stat descriptions built by formatAddedRemovedPlain
+	// ("(+1)", "(+1/-2)", "(-2)"); other rows use normal sentences. Zero
+	// counts are omitted upstream, so every part is a real change.
+	const inner =
+		text.startsWith("(") && text.endsWith(")") ? text.slice(1, -1) : text;
+	const parts = inner.split("/");
+	if (
+		parts.length === 0 ||
+		parts.length > 2 ||
+		parts.some((p) => !/^[+-]\d+$/.test(p))
+	) {
+		return theme.fg("muted", text);
+	}
+	const styled = parts.map((p) =>
+		theme.fg(p.startsWith("+") ? "success" : "error", p),
+	);
+	return (
+		theme.fg("text", "(") +
+		styled.join(theme.fg("text", "/")) +
+		theme.fg("text", ")")
+	);
+}
+
+function formatStatus(
+	tracked: Map<string, TrackedFile>,
+	theme?: any,
+): string | undefined {
+	if (tracked.size === 0) return undefined;
+	let edited = 0;
+	let created = 0;
+	for (const t of tracked.values()) {
+		if (t.kind === "new") created++;
+		else edited++;
+	}
+	if (!theme) {
+		return `Δ ${edited}  + ${created}`;
+	}
+	return theme.fg("muted", `Δ ${edited}  + ${created}`);
+}
+
+/** Stable ordering: alphabetical by display path. The reconcile loop
+ * re-stamps updatedAt every second, so recency order would reshuffle on
+ * every re-render; alphabetical keeps the list identical across renders. */
+function byDisplayPath(a: TrackedFile, b: TrackedFile): number {
+	return a.displayPath.localeCompare(b.displayPath);
+}
+
+function buildWidgetLines(
+	tracked: Map<string, TrackedFile>,
+	theme?: any,
+): string[] | undefined {
+	if (tracked.size === 0) return undefined;
+	// Stable ordering: the reconcile loop re-stamps updatedAt every second, so
+	// recency order would reshuffle on each re-render. Alphabetical keeps the
+	// list identical across renders.
+	const items = [...tracked.values()].sort(byDisplayPath);
+	const max = 8;
+	const lines: string[] = [];
+
+	// Separator between chat history and this widget (widget renders above the editor).
+	//const sep = "─".repeat(60);
+	//lines.push(theme ? theme.fg("borderMuted", sep) : sep);
+
+	for (const t of items.slice(0, max)) {
+		const tag = t.kind === "new" ? "+" : "Δ";
+		const { added, removed } = countsFor(t);
+
+		if (!theme) {
+			const stat = formatAddedRemovedPlain(added, removed);
+			lines.push(`${tag} ${t.displayPath}${stat ? ` ${stat}` : ""}`);
+			continue;
+		}
+
+		const prefix =
+			theme.fg("muted", `${tag} `) + theme.fg("muted", `${t.displayPath} `);
+		const parts = addedRemovedParts(added, removed);
+		const styled = parts.map((p) =>
+			theme.fg(p.startsWith("+") ? "success" : "error", p),
+		);
+		const counts =
+			parts.length === 0
+				? ""
+				: theme.fg("text", "(") +
+					styled.join(theme.fg("text", "/")) +
+					theme.fg("text", ")");
+
+		lines.push(prefix + counts);
+	}
+	if (items.length > max) {
+		lines.push(
+			theme
+				? theme.fg("dim", `…and ${items.length - max} more`)
+				: `…and ${items.length - max} more`,
+		);
+	}
+	return lines;
+}
+
+function diffLines(
+	original: string[],
+	current: string[],
+): Array<{ type: "same" | "add" | "remove"; line: string }> {
+	const rows = original.length;
+	const cols = current.length;
+	const dp: number[][] = Array.from({ length: rows + 1 }, () =>
+		Array(cols + 1).fill(0),
+	);
+	for (let i = rows - 1; i >= 0; i--) {
+		for (let j = cols - 1; j >= 0; j--) {
+			dp[i][j] =
+				original[i] === current[j]
+					? dp[i + 1][j + 1] + 1
+					: Math.max(dp[i + 1][j], dp[i][j + 1]);
+		}
+	}
+
+	const out: Array<{ type: "same" | "add" | "remove"; line: string }> = [];
+	let i = 0;
+	let j = 0;
+	while (i < rows && j < cols) {
+		if (original[i] === current[j]) {
+			out.push({ type: "same", line: original[i] });
+			i++;
+			j++;
+		} else if (dp[i + 1][j] >= dp[i][j + 1]) {
+			out.push({ type: "remove", line: original[i++] });
+		} else {
+			out.push({ type: "add", line: current[j++] });
+		}
+	}
+	while (i < rows) out.push({ type: "remove", line: original[i++] });
+	while (j < cols) out.push({ type: "add", line: current[j++] });
+	return out;
+}
+
+function splitLines(text: string): string[] {
+	if (text.length === 0) return [];
+	return text.replace(/\n$/, "").split("\n");
+}
+
+function patchFromBaseline(
+	displayPath: string,
+	original: string | null,
+	current: string,
+): string {
+	const before = splitLines(original ?? "");
+	const after = splitLines(current);
+	const diff = diffLines(before, after);
+	const lines = [`--- ${displayPath}`, `+++ ${displayPath}`, "@@"];
+	for (const part of diff) {
+		if (part.type === "add") lines.push(`+${part.line}`);
+		else if (part.type === "remove") lines.push(`-${part.line}`);
+		else lines.push(` ${part.line}`);
+	}
+	return `${lines.join("\n")}\n`;
+}
+
+async function ensureParentDir(absPath: string): Promise<void> {
+	await mkdir(dirname(absPath), { recursive: true });
+}
+
+export default function (pi: ExtensionAPI) {
+	// In-memory state (reconstructed on session_start from custom entries)
+	const baselines = new Map<string, Baseline>(); // key: relPath
+	const tracked = new Map<string, TrackedFile>(); // key: relPath
+	// Per-tool-call snapshot, only committed on successful tool_result
+	const pendingByToolCallId = new Map<string, PendingSnapshot>();
+
+	// ── Sync with CodePi's editor review ──────────────────────────────
+	// A lightweight reconcile loop keeps this widget in step with the editor
+	// review UI: files reverted via the editor (or manually) drop off via disk
+	// recompute, and files fully accepted in the editor drop off via host
+	// markers (content alone can't tell an accepted change from a pending one).
+	let reconcileTimer: ReturnType<typeof setInterval> | undefined;
+	let activeCtx: any;
+	let lastBranchHeadId: string | undefined;
+	const seenEntryIds = new Set<string>();
+
+	function startReconcile(ctx: any): void {
+		activeCtx = ctx;
+		if (reconcileTimer) return;
+		reconcileTimer = setInterval(() => {
+			void reconcile().catch(() => {});
+		}, 1000);
+	}
+
+	function stopReconcile(): void {
+		if (reconcileTimer) {
+			clearInterval(reconcileTimer);
+			reconcileTimer = undefined;
+		}
+	}
+
+	async function reconcile(): Promise<void> {
+		const ctx = activeCtx;
+		if (!ctx?.hasUI) return;
+		let changed = false;
+
+		// 1) Re-sync tracked files with disk: reverts via the editor review
+		//    UI (Reject), manual edits, git operations, …
+		if (baselines.size > 0) {
+			for (const relPath of [...baselines.keys()]) {
+				const before = tracked.get(relPath);
+				await recomputeTrackedFile(ctx, relPath);
+				if (before !== tracked.get(relPath)) changed = true;
+			}
+		}
+
+		// 2) Consume host markers. They tell us when the file-level review is
+		//    fully resolved; they must not replace the cumulative disk diff
+		//    shown in the list when a later write creates a new proposal.
+		const branch = ctx.sessionManager.getBranch();
+		const headId = branch.length > 0 ? branch[branch.length - 1].id : undefined;
+		if (headId !== lastBranchHeadId) {
+			lastBranchHeadId = headId;
+			for (const entry of branch) {
+				if (seenEntryIds.has(entry.id)) continue;
+				seenEntryIds.add(entry.id);
+				if (entry.type !== "custom" || entry.customType !== REVIEW_RESOLVED) {
+					continue;
+				}
+				const data = entry.data as
+					| {
+							path?: string;
+							status?: string;
+							pendingHunks?: number;
+					  }
+					| undefined;
+				if (!data?.path) continue;
+				const { relPath } = normalizeToolPath(ctx.cwd, data.path);
+				const pendingHunks = data.pendingHunks ?? 0;
+				// A fresh no-op proposal is still pending and must not clear an
+				// earlier cumulative file change. Only a non-pending marker with
+				// zero hunks means the whole file review is resolved.
+				if (pendingHunks <= 0 && data.status !== "pending") {
+					// All hunks resolved (accepted/rejected) — drop the file.
+					if (baselines.has(relPath) || tracked.has(relPath)) {
+						baselines.delete(relPath);
+						tracked.delete(relPath);
+						pi.appendEntry(ENTRY_UNTRACK, {
+							path: relPath,
+							timestamp: Date.now(),
+						});
+						changed = true;
+					}
+				} else if (tracked.has(relPath)) {
+					// The file is still pending. Keep the cumulative disk counts;
+					// a marker for a newer write is not a replacement diff.
+					changed = true;
+				}
+			}
+		}
+
+		if (changed) updateUi(ctx);
+	}
+
+	function updateUi(ctx: any) {
+		if (!ctx?.hasUI) return;
+
+		ctx.ui.setStatus("filechanges", formatStatus(tracked, ctx.ui.theme));
+		ctx.ui.setWidget(
+			"filechanges",
+			buildWidgetLines(tracked, ctx.ui.theme),
+		);
+	}
+
+	async function recomputeTrackedFile(_ctx: any, relPath: string) {
+		const baseline = baselines.get(relPath);
+		if (!baseline) return;
+
+		const current = await readTextOrNull(baseline.absPath);
+		if (baseline.originalContent === null) {
+			// file was created
+			if (current === null) {
+				tracked.delete(relPath);
+				return;
+			}
+			const displayPath = baseline.path;
+			const diff = patchFromBaseline(displayPath, null, current);
+			const { added, removed } = countDiffLines(diff);
+			tracked.set(relPath, {
+				path: baseline.path,
+				absPath: baseline.absPath,
+				displayPath,
+				originalContent: null,
+				currentContent: current,
+				diff,
+				added,
+				removed,
+				kind: "new",
+				updatedAt: Date.now(),
+			});
+			return;
+		}
+
+		// file existed before
+		if (current === null) {
+			// Deleted outside of tracked tools (or manually). Still track as edited; diff will show removal.
+			const displayPath = baseline.path;
+			const diff = patchFromBaseline(displayPath, baseline.originalContent, "");
+			const { added, removed } = countDiffLines(diff);
+			tracked.set(relPath, {
+				path: baseline.path,
+				absPath: baseline.absPath,
+				displayPath,
+				originalContent: baseline.originalContent,
+				currentContent: "",
+				diff,
+				added,
+				removed,
+				kind: "edited",
+				updatedAt: Date.now(),
+			});
+			return;
+		}
+
+		if (current === baseline.originalContent) {
+			// back to original; untrack
+			tracked.delete(relPath);
+			return;
+		}
+
+		const displayPath = baseline.path;
+		const diff = patchFromBaseline(
+			displayPath,
+			baseline.originalContent,
+			current,
+		);
+		const { added, removed } = countDiffLines(diff);
+		tracked.set(relPath, {
+			path: baseline.path,
+			absPath: baseline.absPath,
+			displayPath,
+			originalContent: baseline.originalContent,
+			currentContent: current,
+			diff,
+			added,
+			removed,
+			kind: "edited",
+			updatedAt: Date.now(),
+		});
+	}
+
+	async function clearLog(
+		ctx: ExtensionCommandContext,
+		reason: "accept" | "decline",
+	) {
+		baselines.clear();
+		tracked.clear();
+		pendingByToolCallId.clear();
+		pi.appendEntry(ENTRY_CLEAR, { timestamp: Date.now(), reason });
+		updateUi(ctx);
+	}
+
+	async function declineAll(ctx: ExtensionCommandContext) {
+		await ctx.waitForIdle();
+
+		if (tracked.size === 0) {
+			if (ctx.hasUI) ctx.ui.notify("filechanges: nothing to decline.", "info");
+			return;
+		}
+
+		const force = (ctx as any).args?.includes("force") ?? false;
+		if (ctx.hasUI && !force) {
+			const ok = await ctx.ui.confirm(
+				"Decline pi changes?",
+				"This will revert ALL currently logged pi changes (overwrite files / delete created files).",
+			);
+			if (!ok) return;
+		} else if (!ctx.hasUI && !force) {
+			throw new Error(
+				"Decline requires confirmation. Run: /filechanges-decline force",
+			);
+		}
+
+		const items = [...tracked.values()].sort(byDisplayPath);
+
+		const errors: string[] = [];
+
+		// Tell the host to resolve the matching editor-review proposals.
+		pi.appendEntry(RESOLVED, {
+			paths: [...tracked.keys()],
+			reason: "decline",
+			timestamp: Date.now(),
+		});
+
+		for (const item of items) {
+			try {
+				if (item.originalContent === null) {
+					// created file
+					await rm(item.absPath, { force: true });
+				} else {
+					await ensureParentDir(item.absPath);
+					await writeFile(item.absPath, item.originalContent, "utf-8");
+				}
+			} catch (e: any) {
+				errors.push(`${item.displayPath}: ${e?.message ?? String(e)}`);
+			}
+		}
+
+		await clearLog(ctx, "decline");
+
+		if (ctx.hasUI && errors.length > 0) {
+			ctx.ui.notify(
+				`filechanges: declined with ${errors.length} error(s). Run /filechanges to inspect; see console for details.`,
+				"warning",
+			);
+			console.warn("[filechanges] decline errors:\n" + errors.join("\n"));
+		}
+	}
+
+	async function acceptAll(ctx: ExtensionCommandContext) {
+		await ctx.waitForIdle();
+
+		if (tracked.size === 0) {
+			if (ctx.hasUI) ctx.ui.notify("filechanges: nothing to accept.", "info");
+			return;
+		}
+
+		const force = (ctx as any).args?.includes("force") ?? false;
+		if (ctx.hasUI && !force) {
+			const ok = await ctx.ui.confirm(
+				"Accept pi changes?",
+				"This will keep current files as-is and clear the modification log.",
+			);
+			if (!ok) return;
+		} else if (!ctx.hasUI && !force) {
+			throw new Error(
+				"Accept requires confirmation. Run: /filechanges-accept force",
+			);
+		}
+
+		// Tell the host to resolve the matching editor-review proposals so
+		// decorations / review bars clear in step with the tracker.
+		pi.appendEntry(RESOLVED, {
+			paths: [...tracked.keys()],
+			reason: "accept",
+			timestamp: Date.now(),
+		});
+
+		await clearLog(ctx, "accept");
+	}
+
+	function parseCommandArgs(args: string | undefined): string[] {
+		if (!args) return [];
+		return args
+			.split(/\s+/g)
+			.map((s) => s.trim())
+			.filter(Boolean);
+	}
+
+	// Commands
+	pi.registerCommand("filechanges", {
+		description: "Show files changed by pi and inspect diffs",
+		handler: async (_args, ctx) => {
+			// Provide args to helpers (a bit hacky but keeps code compact)
+			(ctx as any).args = parseCommandArgs(_args);
+
+			await ctx.waitForIdle();
+			updateUi(ctx);
+
+			if (!ctx.hasUI) {
+				const items = [...tracked.values()].sort(byDisplayPath);
+				if (items.length === 0) {
+					console.log("filechanges: no pi-made modifications recorded.");
+					return;
+				}
+				// Non-interactive: just print a summary to stdout
+				const lines = buildWidgetLines(tracked) ?? [];
+				console.log(lines.join("\n"));
+				return;
+			}
+
+			// Interactive loop: ESC in diff view returns to the modification log.
+			while (true) {
+				await ctx.waitForIdle();
+				updateUi(ctx);
+
+				const items = [...tracked.values()].sort(byDisplayPath);
+				if (items.length === 0) {
+					ctx.ui.notify(
+						"filechanges: no pi-made modifications recorded.",
+						"info",
+					);
+					return;
+				}
+
+				const selectItems: SelectItem[] = [
+					{
+						value: "__accept__",
+						label: "Accept changes (clear log)",
+						description: "Keep current files",
+					},
+					{
+						value: "__decline__",
+						label: "Undo changes (revert)",
+						description: "Restore original contents",
+					},
+					{ value: "__sep__", label: "────────", description: "" },
+					...items.map((t) => ({
+						value: t.path,
+						label: `${t.kind === "new" ? "+" : "Δ"} ${t.displayPath}`,
+						description: (() => {
+							const c = countsFor(t);
+							return formatAddedRemovedPlain(c.added, c.removed);
+						})(),
+					})),
+				];
+
+				const picked = await ctx.ui.custom<string | null>(
+					(tui, theme, _kb, done) => {
+						const container = new Container();
+						container.addChild(
+							new DynamicBorder((s: string) => theme.fg("accent", s)),
+						);
+						container.addChild(
+							new Text(theme.fg("accent", theme.bold("File changes")), 1, 0),
+						);
+
+						const list = new SelectList(
+							selectItems,
+							Math.min(14, selectItems.length),
+							{
+								selectedPrefix: (t) => theme.fg("accent", t),
+								selectedText: (t) => theme.fg("accent", t),
+								description: (t) => styleAddedRemovedForList(theme, t),
+								scrollInfo: (t) => theme.fg("dim", t),
+								noMatch: (t) => theme.fg("warning", t),
+							},
+						);
+
+						list.onSelect = (item) => {
+							if (item.value === "__sep__") return;
+							done(item.value);
+						};
+						list.onCancel = () => done(null);
+						container.addChild(list);
+
+						container.addChild(
+							new Text(
+								theme.fg("dim", "↑↓ navigate • enter select • esc close"),
+								1,
+								0,
+							),
+						);
+						container.addChild(
+							new DynamicBorder((s: string) => theme.fg("accent", s)),
+						);
+
+						return {
+							render: (w) => container.render(w),
+							invalidate: () => container.invalidate(),
+							handleInput: (data) => {
+								list.handleInput(data);
+								tui.requestRender();
+							},
+						};
+					},
+					{ overlay: true },
+				);
+
+				if (!picked) return;
+				if (picked === "__accept__") {
+					await acceptAll(ctx);
+					return;
+				}
+				if (picked === "__decline__") {
+					await declineAll(ctx);
+					return;
+				}
+
+				const t = tracked.get(picked);
+				if (!t) {
+					ctx.ui.notify(
+						"filechanges: entry not found (maybe log was cleared).",
+						"warning",
+					);
+					continue;
+				}
+
+				const md = "```diff\n" + (t.diff.trimEnd() || "(no diff)") + "\n```";
+				await ctx.ui.custom<void>(
+					(tui, theme, _kb, done) => {
+						const container = new Container();
+						container.addChild(
+							new DynamicBorder((s: string) => theme.fg("accent", s)),
+						);
+						container.addChild(
+							new Text(theme.fg("accent", theme.bold(t.displayPath)), 1, 0),
+						);
+						container.addChild(new Markdown(md, 1, 0, getMarkdownTheme()));
+						container.addChild(
+							new Text(theme.fg("dim", "esc to go back"), 1, 0),
+						);
+						container.addChild(
+							new DynamicBorder((s: string) => theme.fg("accent", s)),
+						);
+
+						return {
+							render: (w) => container.render(w),
+							invalidate: () => container.invalidate(),
+							handleInput: (data) => {
+								if (
+									matchesKey(data, Key.escape) ||
+									matchesKey(data, Key.ctrl("c"))
+								)
+									done();
+								else tui.requestRender();
+							},
+						};
+					},
+					{ overlay: true },
+				);
+
+				// After closing diff, loop back to the modification log.
+			}
+		},
+	});
+
+	pi.registerCommand("filechanges-accept", {
+		description: "Accept pi-made changes (keeps files, clears log)",
+		handler: async (args, ctx) => {
+			(ctx as any).args = parseCommandArgs(args);
+			await acceptAll(ctx);
+		},
+	});
+
+	pi.registerCommand("filechanges-decline", {
+		description: "Decline pi-made changes (reverts files, clears log)",
+		handler: async (args, ctx) => {
+			(ctx as any).args = parseCommandArgs(args);
+			await declineAll(ctx);
+		},
+	});
+
+	async function rebuildFromSession(ctx: any): Promise<void> {
+		baselines.clear();
+		tracked.clear();
+		pendingByToolCallId.clear();
+
+		// Replay custom entries on current branch
+		for (const entry of ctx.sessionManager.getBranch()) {
+			if (entry.type !== "custom") continue;
+
+			if (entry.customType === ENTRY_CLEAR) {
+				baselines.clear();
+				tracked.clear();
+				continue;
+			}
+
+			if (entry.customType === ENTRY_BASELINE) {
+				const data = entry.data as any;
+				if (!data?.path) continue;
+				const { absPath, relPath, inCwd } = normalizeToolPath(
+					ctx.cwd,
+					data.path,
+				);
+				// Skip out-of-cwd baselines (e.g. /tmp edits recorded by a
+				// different cwd/session) — only cwd files are tracked.
+				if (!inCwd) continue;
+				baselines.set(relPath, {
+					path: relPath,
+					absPath,
+					originalContent:
+						typeof data.originalContent === "string"
+							? data.originalContent
+							: null,
+					createdAt:
+						typeof data.timestamp === "number" ? data.timestamp : Date.now(),
+				});
+				continue;
+			}
+
+			if (entry.customType === ENTRY_UNTRACK) {
+				const data = entry.data as any;
+				if (!data?.path) continue;
+				const { relPath } = normalizeToolPath(ctx.cwd, data.path);
+				baselines.delete(relPath);
+				tracked.delete(relPath);
+				continue;
+			}
+
+			// Host markers describe review lifecycle. They may remove a file
+			// once every proposal hunk is resolved, but their line counts must
+			// never replace the cumulative disk diff shown by this extension.
+			if (entry.customType === REVIEW_RESOLVED) {
+				const data = entry.data as any;
+				if (!data?.path) continue;
+				const { relPath } = normalizeToolPath(ctx.cwd, data.path);
+				const pendingHunks =
+					typeof data.pendingHunks === "number" ? data.pendingHunks : 0;
+				if (
+					pendingHunks <= 0 &&
+					(data.status === "accepted" ||
+						data.status === "rejected" ||
+						data.status === "stale")
+				) {
+					baselines.delete(relPath);
+					tracked.delete(relPath);
+				}
+				continue;
+			}
+		}
+
+		// Compute current diffs
+		for (const relPath of baselines.keys()) {
+			await recomputeTrackedFile(ctx, relPath);
+		}
+
+		updateUi(ctx);
+	}
+
+	// Rebuild state on any session/branch navigation events; the reconcile
+	// loop keeps it in sync with editor-review resolutions afterwards.
+	pi.on("session_start", async (_event, ctx) => {
+		await rebuildFromSession(ctx);
+		startReconcile(ctx);
+	});
+
+	pi.on("session_switch", async (_event, ctx) => {
+		await rebuildFromSession(ctx);
+		startReconcile(ctx);
+	});
+
+	pi.on("session_tree", async (_event, ctx) => {
+		await rebuildFromSession(ctx);
+		startReconcile(ctx);
+	});
+
+	pi.on("session_fork", async (_event, ctx) => {
+		await rebuildFromSession(ctx);
+		startReconcile(ctx);
+	});
+
+	pi.on("session_shutdown", () => {
+		stopReconcile();
+	});
+
+	// Capture before snapshots for edit/write
+	pi.on("tool_call", async (event, ctx) => {
+		if (
+			isToolCallEventType("edit", event) ||
+			isToolCallEventType("write", event)
+		) {
+			const { absPath, relPath, inCwd } = normalizeToolPath(
+				ctx.cwd,
+				event.input.path,
+			);
+			if (!inCwd) return; // only track changes inside the session cwd
+			const before = await readTextOrNull(absPath);
+			pendingByToolCallId.set(event.toolCallId, {
+				path: relPath,
+				absPath,
+				before,
+			});
+		}
+	});
+
+	// Commit on successful results
+	pi.on("tool_result", async (event, ctx) => {
+		if (event.isError) {
+			pendingByToolCallId.delete(event.toolCallId);
+			return;
+		}
+
+		if (!isEditToolResult(event) && !isWriteToolResult(event)) return;
+
+		const pending = pendingByToolCallId.get(event.toolCallId);
+		pendingByToolCallId.delete(event.toolCallId);
+		if (!pending) return;
+
+		// If no baseline exists yet for this file, create one now from the successful call's snapshot.
+		if (!baselines.has(pending.path)) {
+			baselines.set(pending.path, {
+				path: pending.path,
+				absPath: pending.absPath,
+				originalContent: pending.before,
+				createdAt: Date.now(),
+			});
+			pi.appendEntry(ENTRY_BASELINE, {
+				path: pending.path,
+				originalContent: pending.before,
+				timestamp: Date.now(),
+			});
+		}
+
+		// Recompute cumulative diff against baseline
+		await recomputeTrackedFile(ctx, pending.path);
+
+		// If file is back to baseline, untrack + persist
+		const baseline = baselines.get(pending.path);
+		const current = await readTextOrNull(pending.absPath);
+		if (baseline) {
+			const backToOriginal =
+				(baseline.originalContent !== null &&
+					current === baseline.originalContent) ||
+				(baseline.originalContent === null && current === null);
+
+			if (backToOriginal) {
+				baselines.delete(pending.path);
+				tracked.delete(pending.path);
+				pi.appendEntry(ENTRY_UNTRACK, {
+					path: pending.path,
+					timestamp: Date.now(),
+				});
+			}
+		}
+
+		updateUi(ctx);
+	});
+}

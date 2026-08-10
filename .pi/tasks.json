@@ -1,0 +1,27 @@
+{
+  "tasks": {
+    "check-types": {
+      "command": "npx tsc -p ./tsconfig.json --noEmit",
+      "when": "after-implement",
+      "readOnly": true,
+      "description": "Type-check the extension host (tsc --noEmit)"
+    },
+    "test": {
+      "command": "npx vitest run",
+      "when": "after-implement",
+      "readOnly": true,
+      "description": "Run the vitest suite"
+    },
+    "build": {
+      "command": "npm run build",
+      "when": "after-implement",
+      "description": "Full production build (webview + extension)"
+    },
+    "verify": {
+      "command": "npm run check-types && npm test && node resources/extensions/__tests__/smoke-load.mjs",
+      "when": "after-implement",
+      "readOnly": true,
+      "description": "Full pre-release check (types + tests + smoke)"
+    }
+  }
+}
