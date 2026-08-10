@@ -1,6 +1,6 @@
 {
   "name": "code-pi",
-  "displayName": "CodePi",
+  "displayName": "CodePi - pi.dev agent extension for VSCode",
   "description": "Pi coding agent for VSCode",
   "repository": {
     "type": "git",
