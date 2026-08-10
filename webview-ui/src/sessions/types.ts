@@ -13,6 +13,8 @@ export interface SessionEntry {
 	modified: number;
 	/** Host-formatted compact date label (e.g. "2h", "Yesterday", "Mon"). */
 	dateLabel: string;
+	/** Whether the user pinned this session to the top of the sidebar list. */
+	pinned: boolean;
 }
 
 export type SessionsMessage =
@@ -22,6 +24,7 @@ export type SessionsMessage =
 	| { type: "open"; path: string }
 	| { type: "rename"; path: string }
 	| { type: "delete"; path: string }
+	| { type: "pin"; path: string; pinned: boolean }
 	| { type: "openExtensions" }
 	| { type: "openSettings" };
 

@@ -14,6 +14,7 @@ describe("sessions protocol", () => {
 			{ type: "open", path: "/sessions/a" },
 			{ type: "rename", path: "/sessions/a" },
 			{ type: "delete", path: "/sessions/a" },
+			{ type: "pin", path: "/sessions/a", pinned: true },
 			{ type: "openExtensions" },
 			{ type: "openSettings" },
 		];
@@ -24,6 +25,7 @@ describe("sessions protocol", () => {
 			"open",
 			"rename",
 			"delete",
+			"pin",
 			"openExtensions",
 			"openSettings",
 		]);
@@ -37,6 +39,7 @@ describe("sessions protocol", () => {
 			messageCount: 3,
 			modified: 0,
 			dateLabel: "Yesterday",
+			pinned: false,
 		};
 		const replies: SessionsReply[] = [
 			{ type: "list", sessions: [entry], hasWorkspace: true },
@@ -45,7 +48,7 @@ describe("sessions protocol", () => {
 		expect(replies[0]).toMatchObject({
 			type: "list",
 			hasWorkspace: true,
-			sessions: [{ id: "abc", messageCount: 3 }],
+			sessions: [{ id: "abc", messageCount: 3, pinned: false }],
 		});
 		expect(replies[1]).toEqual({ type: "error", message: "boom" });
 	});

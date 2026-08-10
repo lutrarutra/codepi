@@ -68,6 +68,20 @@ function SessionRow({ session }: { session: SessionEntry }): JSX.Element {
 				<button
 					type="button"
 					className="sessions-action"
+					title={
+						session.pinned
+							? "Unpin session"
+							: "Pin session to the top of the list"
+					}
+					onClick={() =>
+						post({ type: "pin", path: session.path, pinned: !session.pinned })
+					}
+				>
+					{session.pinned ? "Unpin" : "Pin"}
+				</button>
+				<button
+					type="button"
+					className="sessions-action"
 					title="Rename session"
 					onClick={() => post({ type: "rename", path: session.path })}
 				>
@@ -113,6 +127,11 @@ export function SessionsApp(): JSX.Element {
 		setBusy(true);
 		post({ type: "refresh" });
 	}, []);
+
+	// The host already sorts pinned sessions first; partition here so the
+	// pinned group can be rendered under its own section header + divider.
+	const pinnedSessions = (sessions ?? []).filter((s) => s.pinned);
+	const recentSessions = (sessions ?? []).filter((s) => !s.pinned);
 
 	return (
 		<div className="sessions-root">
@@ -166,11 +185,28 @@ export function SessionsApp(): JSX.Element {
 				</p>
 			)}
 			{sessions !== undefined && sessions.length > 0 && (
-				<ul className="sessions-list">
-					{sessions.map((session) => (
-						<SessionRow key={session.id} session={session} />
-					))}
-				</ul>
+				<div className="sessions-groups">
+					{pinnedSessions.length > 0 && (
+						<div className="sessions-section-header">Pinned</div>
+					)}
+					{pinnedSessions.length > 0 && (
+						<ul className="sessions-list">
+							{pinnedSessions.map((session) => (
+								<SessionRow key={session.id} session={session} />
+							))}
+						</ul>
+					)}
+					{pinnedSessions.length > 0 && recentSessions.length > 0 && (
+						<div className="sessions-divider" role="separator" />
+					)}
+					{recentSessions.length > 0 && (
+						<ul className="sessions-list">
+							{recentSessions.map((session) => (
+								<SessionRow key={session.id} session={session} />
+							))}
+						</ul>
+					)}
+				</div>
 			)}
 		</div>
 	);
