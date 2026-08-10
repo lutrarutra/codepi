@@ -12,6 +12,8 @@ context, workspace tools, edit review, session management, and safety controls.
 > affiliated with, endorsed by, sponsored by, or maintained by pi.dev or the pi
 > project.
 
+> **Note:** CodePi is in development and was built with the help of agentic coding. Opening issues for bugs, feature requests, and feedback, are highly encouraged and appreciated.
+
 ## Requirements
 
 - VS Code 1.93 or newer.
