@@ -430,6 +430,54 @@ function hideLoading(): void {
 				}
 				return false;
 			}
+			if (
+				(e.ctrlKey || e.metaKey) &&
+				!e.altKey &&
+				!e.shiftKey &&
+				(e.key === "ArrowLeft" ||
+					e.key === "ArrowRight" ||
+					e.key === "ArrowUp" ||
+					e.key === "ArrowDown")
+			) {
+				// pi's TUI binds ctrl+left/right to WORD movement (xterm sends
+				// \x1b[1;5D / \x1b[1;5C) and has no binding for ctrl+up/down at
+				// all, so remap to pi's line-start (\x01 = ctrl+a) and line-end
+				// (\x05 = ctrl+e) chords: ctrl+left/up move to the beginning of
+				// the input line, ctrl+right/down to its end. In the usually
+				// single-line composer that is the start/end of the text field.
+				// Cmd+arrows on macOS are the native text-field equivalents and
+				// get the same mapping. Single-byte chunks — pi's editor
+				// matches each incoming chunk against key combos as a whole.
+				e.preventDefault();
+				if (e.type === "keydown") {
+					term.input(
+						e.key === "ArrowLeft" || e.key === "ArrowUp" ? "\x01" : "\x05",
+						true,
+					);
+				}
+				return false;
+			}
+			if (e.key === "Backspace" && !e.altKey && !e.shiftKey && (e.ctrlKey || e.metaKey)) {
+				// pi's TUI has no binding for ctrl+backspace (the \x08 it would
+				// otherwise receive is dropped as an unknown control char), so
+				// remap it to delete-to-line-start (\x15) followed by
+				// delete-to-line-end (\x0b) — together they erase the whole
+				// input line regardless of cursor position. Cmd+Backspace on
+				// macOS gets the same treatment: xterm ignores meta for
+				// Backspace (plain single-char delete), and ⌘⌫ is the native
+				// "delete line" chord. The bytes must be sent as SEPARATE
+				// input events: pi's editor matches each incoming chunk
+				// against key combos as a whole, so a combined "\x15\x0b"
+				// chunk matches nothing and is dropped. The handler runs for
+				// both keydown and the synthesized keypress, so emit only on
+				// keydown.
+				e.preventDefault();
+				if (e.type === "keydown") {
+					term.input("\x15", true);
+					term.input("\x0b", true);
+				}
+				return false;
+			}
 			return true;
 		});
 
