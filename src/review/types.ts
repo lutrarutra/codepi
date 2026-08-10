@@ -7,8 +7,9 @@
  *     Copilot behavior ("applies and saves the edits to disk", then tracks them
  *     as pending edits).
  *  2. A proposal records the ORIGINAL content plus the computed line hunks.
- *  3. The user reviews in the editor (file-level CodeLens actions)
- *     and via bottom-right per-file notifications / the chat EditCard.
+ *  3. The user reviews in the editor (changed-line highlights plus file-level
+ *     CodeLens actions) and via bottom-right per-file notifications / the chat
+ *     EditCard.
  *  4. Accept → hunk stays applied. Reject → the inverse edit is applied to the
  *     current document and saved, restoring that section to its original text.
  *  5. If the user edits the file independently while a proposal is pending, the
