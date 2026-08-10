@@ -104,6 +104,18 @@ function clampFontSize(value: number): number {
 }
 
 /**
+ * Read CodePi's tab-handle width preference (codepi.tabHandleWidth).
+ * 0 (the default) leaves the user's workbench tab-sizing settings alone.
+ */
+export function readTabHandleWidth(settings: unknown): number {
+	if (!isRecord(settings) || !isRecord(settings.codepi)) return 0;
+	const v = settings.codepi.tabHandleWidth;
+	return typeof v === "number" && Number.isFinite(v)
+		? Math.max(0, Math.round(v))
+		: 0;
+}
+
+/**
  * Read CodePi's terminal preferences (codepi.fontFamily / codepi.fontSize)
  * without trusting malformed settings. These are CodePi-only: pi itself has
  * no font settings, so they never collide with the SDK's SettingsManager.

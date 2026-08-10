@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 // and postMessage() must be reachable (mock returns a fake webview below).
 vi.mock("vscode", () => ({ WebviewPanel: class {} }));
 
-import { stripPiFromTitle, WebviewPty } from "../tui/webview-pty";
+import { WebviewPty } from "../tui/webview-pty";
 
 function makePty() {
 	const onRequestClose = vi.fn();
@@ -155,28 +155,12 @@ describe("WebviewPty", () => {
 	});
 });
 
-describe("stripPiFromTitle", () => {
-	it("removes the π letter and its separator from pi's APP_TITLE prefix", () => {
-		expect(stripPiFromTitle("π - codepi - repo")).toBe("codepi - repo");
-	});
-
-	it("strips π anywhere in the title", () => {
-		expect(stripPiFromTitle("my π session")).toBe("my session");
-	});
-
-	it("falls back to PI when nothing remains", () => {
-		expect(stripPiFromTitle("π")).toBe("PI");
-	});
-
-	it("leaves Latin 'pi' untouched", () => {
-		expect(stripPiFromTitle("pi - hello - repo")).toBe("pi - hello - repo");
-	});
-
-	it("setTitle emits a π-free tab title", () => {
+describe("setTitle", () => {
+	it("passes the tab title through to the title change callback", () => {
 		const onTitleChange = vi.fn();
 		const webview = { postMessage: vi.fn() } as any;
-		const pty = new WebviewPty(webview, "π", () => {}, onTitleChange);
-		pty.setTitle("π - codepi - repo");
+		const pty = new WebviewPty(webview, "initial", () => {}, onTitleChange);
+		pty.setTitle("codepi - repo");
 		expect(onTitleChange).toHaveBeenCalledWith("codepi - repo");
 	});
 });

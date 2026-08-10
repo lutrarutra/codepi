@@ -41,7 +41,7 @@ import type {
 	ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
 import type { Extension as SdkExtension } from "@earendil-works/pi-coding-agent";
-import { stripPiFromTitle, WebviewPty } from "./tui/webview-pty";
+import { WebviewPty } from "./tui/webview-pty";
 import {
 	classifyAsUrl,
 	escapeGlob,
@@ -63,6 +63,7 @@ import {
 	migrateLegacyCodePiStorage,
 	readAutoVerifyMode,
 	readJsonFile,
+	readTabHandleWidth,
 	readTerminalPrefs,
 	seedAskModeAllowedToolsIfMissing,
 	setAgentDir,
@@ -106,6 +107,10 @@ interface SessionState {
 	fcSeenEntries: Set<string>;
 	/** last session branch head id seen by the codepi-diff sync poll. */
 	fcLastHead: string | undefined;
+	/** Tab-title refresh (CodePi-owned — recomputes, never shows the SDK's π). */
+	refreshTitle?: () => void;
+	/** Sidebar-rename result, applied until the open session sees a /name. */
+	sessionNameOverride?: string;
 }
 
 // ── Globals ──────────────────────────────────────────────────
@@ -367,6 +372,17 @@ export async function activate(context: vscode.ExtensionContext) {
 	const agentDir = getCanonicalAgentDir();
 	setAgentDir(agentDir);
 	fs.mkdirSync(agentDir, { recursive: true });
+
+	// Pin VS Code's global tab sizing to fixed min=max width when
+	// codepi.tabHandleWidth is set: URI tab icons (rendered with
+	// background-size:contain in a shrinkable flex box) scale down in
+	// narrow fixed-size tabs, so equal min/max keeps every handle the same
+	// width — icon stays 16px, label is cut dynamically by the workbench.
+	try {
+		applyTabHandleWidth(readJsonFile(getSettingsPath()) ?? {});
+	} catch {
+		/* settings unreadable — leave workbench settings untouched */
+	}
 
 	// Copilot-style pending-edit dot on tabs/Explorer for files awaiting review.
 	registerPendingReviewDots(extensionContext);
@@ -660,14 +676,15 @@ export async function activate(context: vscode.ExtensionContext) {
 			async (arg?: { path?: string }) => {
 				if (!arg?.path) return;
 				const newName = await sessionsProvider?.renameSession(arg.path);
-				// Keep an open session's terminal tab title in sync with the new name.
+				// Keep an open session's terminal tab title in sync with the new
+				// name. The sidebar rename writes a DIFFERENT SessionManager than
+				// the open session's, so the new name is recorded as an override
+				// and applied by refreshTitle (which also truncates it).
 				for (const [, state] of sessions) {
 					if (state.sessionPath === arg.path) {
-						const name = newName || state.sessionManager.getSessionName?.();
-						if (name) {
-							state.pty.setTitle(
-								name.length > 50 ? name.slice(0, 50) + "…" : name,
-							);
+						if (newName) {
+							state.sessionNameOverride = newName;
+							state.refreshTitle?.();
 						}
 						break;
 					}
@@ -1068,10 +1085,55 @@ async function openTerminalFile(
 	});
 }
 
-/** Tab title for a session: the session name, else the first user message. */
-function computeSessionTitle(sessionManager: SessionManager): string {
+/**
+ * Apply codepi.tabHandleWidth to VS Code's global tab sizing (fixed mode
+ * with equal min/max so every handle is the same width). Visible in the
+ * user's settings.json; revert by setting codepi.tabHandleWidth to 0.
+ */
+function applyTabHandleWidth(settings: unknown): void {
+	const width = readTabHandleWidth(settings);
+	if (width <= 0) return;
+	const wb = vscode.workspace.getConfiguration("workbench.editor");
+	void wb.update("tabSizing", "fixed", vscode.ConfigurationTarget.Global);
+	void wb.update(
+		"tabSizingFixedMinWidth",
+		width,
+		vscode.ConfigurationTarget.Global,
+	);
+	void wb.update(
+		"tabSizingFixedMaxWidth",
+		width,
+		vscode.ConfigurationTarget.Global,
+	);
+}
+
+/**
+ * Tab title for a session — owned by CodePi, never taken from pi (the SDK
+ * pushes its own `π - <name> - <cwd>` via the terminal's setTitle, which the
+ * panel ignores). Precedence:
+ *   1. the session's explicit name — in-memory (set via /name inside the TUI)
+ *      or the sidebar-rename override, which lands in a different
+ *      SessionManager than the open session's;
+ *   2. the first line of the first user message — shown as-is when it fits
+ *      in a tab handle, ellipsized when not;
+ *   3. "New Session" for a brand-new session with no user message yet.
+ *
+ * maxChars is derived from codepi.tabHandleWidth: a label longer than the
+ * handle's budget collapses the tab icon (VS Code's fixed-mode label
+ * container refuses to shrink, so the icon absorbs the squeeze).
+ */
+function computeSessionTitle(
+	sessionManager: SessionManager,
+	sessionNameOverride?: string,
+	maxChars = 20,
+): string {
+	const sessionName = sessionManager.getSessionName?.() ?? sessionNameOverride;
+	if (sessionName) {
+		return sessionName.length > maxChars
+			? sessionName.slice(0, maxChars - 1) + "…"
+			: sessionName;
+	}
 	const entries = sessionManager.getEntries();
-	const sessionName = sessionManager.getSessionName?.();
 	const userMessage = entries
 		.filter((e): e is SessionMessageEntry => e.type === "message")
 		.map((e) => e.message)
@@ -1080,8 +1142,18 @@ function computeSessionTitle(sessionManager: SessionManager): string {
 	const firstText = Array.isArray(content)
 		? content.find((c) => c.type === "text")?.text
 		: undefined;
-	const titleText = stripPiFromTitle(sessionName || firstText || "PI");
-	return titleText.length > 50 ? titleText.slice(0, 50) + "…" : titleText;
+	const firstLine = (firstText ?? "").trim().split(/\r?\n/)[0].trim();
+	if (!firstLine) {
+		return "New Session";
+	}
+	// Ellipsize when the label doesn't fit the handle budget (cut at a word
+	// boundary when possible, hard-cut otherwise).
+	if (firstLine.length <= maxChars) {
+		return firstLine;
+	}
+	const cut = firstLine.slice(0, maxChars);
+	const lastSpace = cut.lastIndexOf(" ");
+	return (lastSpace > 6 ? cut.slice(0, lastSpace) : cut.slice(0, maxChars - 1)) + "…";
 }
 
 /**
@@ -1209,8 +1281,18 @@ async function setupSessionPanel(
 
 	// Initial terminal name: session name or the first user message. A
 	// restored panel keeps its persisted tab title; overwrite with the
-	// current one (also strips the π letter pi's APP_TITLE injects).
-	const initialTitle = computeSessionTitle(sessionManager);
+	// current one.
+	//
+	// Label budget: derived from codepi.tabHandleWidth (fixed handle ⇒ fixed
+	// ~6.5px/char budget after the ~60px of icon/padding/close chrome; the
+	// workbench's fixed-mode flex collapses the icon when the label exceeds
+	// it). Falls back to 20 chars when tabHandleWidth is 0 (untouched).
+	const tabHandleWidth = readTabHandleWidth(
+		readJsonFile(getSettingsPath()) ?? {},
+	);
+	const labelMaxChars =
+		tabHandleWidth > 0 ? Math.max(8, Math.floor((tabHandleWidth - 60) / 6.5)) : 20;
+	const initialTitle = computeSessionTitle(sessionManager, undefined, labelMaxChars);
 	panel.title = initialTitle;
 
 	// `extensionUri` is resolved from the module-level activation context.
@@ -1231,18 +1313,31 @@ async function setupSessionPanel(
 	// Messages posted before the webview finishes loading are dropped by VS
 	// Code — anything config-like is sent in response to `tuiReady` below.
 
+	// Tab title is owned by CodePi (computeSessionTitle) — the SDK's own
+	// setTitle pushes ("π - <name> - <cwd>") are discarded and the CodePi
+	// title recomputed from the session. The " ●" progress suffix is
+	// re-applied from the pty's progress notifications. The tab INDICATOR
+	// icon is owned by the session-activity tracker (idle / working /
+	// waiting / error icons) once the backend starts — see startTuiBackend.
+	let progressActive = false;
+	const refreshTitle = () => {
+		// A name set inside the TUI (/name) supersedes any sidebar rename.
+		if (sessionManager.getSessionName?.()) {
+			state.sessionNameOverride = undefined;
+		}
+		panel.title =
+			computeSessionTitle(sessionManager, state.sessionNameOverride, labelMaxChars) +
+			(progressActive ? " ●" : "");
+	};
 	const pty = new WebviewPty(
 		panel.webview,
 		initialTitle,
 		() => cleanupSession(sessionId),
-		(title) => {
-			panel.title = title;
+		() => refreshTitle(),
+		(active) => {
+			progressActive = active;
+			refreshTitle();
 		},
-		// Tab indicator is owned by the session-activity tracker (idle /
-		// working / waiting / error icons) once the backend starts — see
-		// startTuiBackend. The TUI's own progress flag still drives the
-		// " ●" suffix on the title via setProgress/setTitle.
-		() => {},
 	);
 
 	const state: SessionState = {
@@ -1261,6 +1356,39 @@ async function setupSessionPanel(
 		fcLastHead: undefined,
 	};
 	sessions.set(sessionId, state);
+	state.refreshTitle = refreshTitle;
+
+	// Refresh the tab title when the session file changes: the SDK never
+	// pushes a title for the first user message, which is exactly when a new
+	// session goes from "New Session" to its prompt-derived name. Watch the
+	// session DIRECTORY and filter by filename — a brand-new session's file
+	// does not exist until the first entry is persisted. (In-TUI /name and
+	// sidebar renames reach refreshTitle via the SDK's setTitle and the
+	// rename handler instead.)
+	if (sessionPath) {
+		const sessionDir = path.dirname(sessionPath);
+		const sessionFileBasename = path.basename(sessionPath);
+		try {
+			fs.mkdirSync(sessionDir, { recursive: true });
+			let titleRefreshTimer: ReturnType<typeof setTimeout> | undefined;
+			const watcher = fs.watch(sessionDir, (_event, filename) => {
+				if (String(filename ?? "") !== sessionFileBasename) return;
+				if (titleRefreshTimer) clearTimeout(titleRefreshTimer);
+				titleRefreshTimer = setTimeout(() => {
+					titleRefreshTimer = undefined;
+					state.refreshTitle?.();
+				}, 200);
+			});
+			state.disposables.push({
+				dispose: () => {
+					watcher.close();
+					if (titleRefreshTimer) clearTimeout(titleRefreshTimer);
+				},
+			});
+		} catch {
+			// Session dir unavailable — title still updates via SDK pushes.
+		}
+	}
 
 	// Tab indicator: white dot (idle) / cyan (working) / yellow (waiting for
 	// user input) / red (error). Refined by the session-activity tracker once
@@ -1824,8 +1952,8 @@ function getWorkspaceRoot(): string {
 // ── Panel Status Icon ────────────────────────────────────────
 
 /**
- * Set the tab icon to the favicon artwork (media/favicon.svg: dark rounded
- * square + glyph) recolored by state — white = idle, cyan =
+ * Set the tab icon to the favicon artwork (media/favicon-idle.svg: dark
+ * rounded square + glyph) recolored by state — white = idle, cyan =
  * working/generating, yellow = waiting for user input (question / permission
  * approval), red = backend error. Only the glyph color changes; the
  * background stays the favicon's own #09090b.

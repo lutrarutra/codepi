@@ -2,19 +2,6 @@ import type * as vscode from "vscode";
 import type { TuiTerminal } from "./tui-pty";
 
 /**
- * Remove the Greek π character from a tab title.
- *
- * pi's APP_TITLE defaults to "π", so InteractiveMode titles arrive as
- * `π - <session> - <cwd>` — the literal π letter must not show in the tab
- * handle (the SVG logo is the visual identifier). Also strips the separator
- * that followed it, and falls back to "PI" if nothing remains.
- */
-export function stripPiFromTitle(title: string): string {
-	const stripped = title.replace(/π\s*[-–—]?\s*/g, "").trim();
-	return stripped || "PI";
-}
-
-/**
  * Adapts pi's InteractiveMode terminal to a webview hosting xterm.js.
  *
  * Implements `TuiTerminal` (what pi's InteractiveMode renders into), but
@@ -55,7 +42,7 @@ export class WebviewPty implements TuiTerminal {
 		private readonly onTitleChange: (title: string) => void,
 		private readonly onProgressChange?: (active: boolean) => void,
 	) {
-		this._title = stripPiFromTitle(initialTitle);
+		this._title = initialTitle;
 	}
 
 	// ── TuiTerminal (pi's InteractiveMode render target) ─────
@@ -135,7 +122,7 @@ export class WebviewPty implements TuiTerminal {
 	}
 
 	setTitle(title: string): void {
-		this._title = stripPiFromTitle(title);
+		this._title = title;
 		this.onTitleChange(this._title + (this._progress ? " ●" : ""));
 	}
 
