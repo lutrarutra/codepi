@@ -461,6 +461,7 @@ function hideLoading(): void {
 		// \x1b[3J (clear scrollback), which would jump the viewport to the
 		// top and destroy the user's history — strip it from the stream.
 		const scrollbackFilter = createScrollbackClearFilter();
+		let firstDataHandled = false;
 		window.addEventListener("message", (e: MessageEvent) => {
 			const msg = e.data as {
 				command?: string;
@@ -470,8 +471,20 @@ function hideLoading(): void {
 			if (!msg || typeof msg !== "object") return;
 			switch (msg.command) {
 				case "tuiData":
-					if (typeof msg.data === "string")
+					if (typeof msg.data === "string") {
 						term.write(scrollbackFilter(msg.data));
+						// The loading overlay is dismissed on the FIRST terminal
+						// output as well as on tuiLoadingDone: output only flows
+						// once the backend is live, so first-data is the definitive
+						// signal. This covers the cross-window-drag case, where the
+						// transferred webview can (re)load AFTER tuiLoadingDone was
+						// already posted and lost — the overlay would otherwise
+						// stay up forever over a live terminal.
+						if (!firstDataHandled) {
+							firstDataHandled = true;
+							hideLoading();
+						}
+					}
 					break;
 				case "tuiClipboardData":
 					clipboardReadResolver?.(typeof msg.text === "string" ? msg.text : "");

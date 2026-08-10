@@ -1281,6 +1281,19 @@ async function setupSessionPanel(
 				case "tuiReady":
 					pty.setDimensions(msg.cols, msg.rows);
 					pty.markReady();
+					// A webview can (re)load after the backend is already live —
+					// e.g. the transferred webview of a panel dragged across
+					// windows, which loads its html after the restore finished.
+					// The startup overlay is part of the html shell, so a late
+					// load shows it again; re-post the dismissal signal for every
+					// late tuiReady.
+					if (state.isBackendReady) {
+						try {
+							void panel.webview.postMessage({ command: "tuiLoadingDone" });
+						} catch {
+							/* webview disposed */
+						}
+					}
 					break;
 				case "tuiFontStatus":
 					console.log(
@@ -1390,7 +1403,34 @@ async function setupSessionPanel(
 	// loading overlay (PI logo + dots) covers the gap; startTuiBackend
 	// dismisses it once the TUI pipeline is live.
 	void (async () => {
-		await pty.waitForReady();
+		// A dragged-across-windows webview can fail to (re)load its html in
+		// the target window — no tuiReady ever arrives and the panel would
+		// sit on the loading screen with no backend. Bounded wait; on timeout
+		// re-set the html to force the webview to load (a second tuiReady
+		// re-posts the overlay dismissal via the late-ready path above).
+		const ready = await Promise.race([
+			pty.waitForReady().then(() => true),
+			new Promise<boolean>((resolve) =>
+				setTimeout(() => resolve(false), 20000),
+			),
+		]);
+		if (!ready) {
+			console.error(
+				"[CodePi] webview never became ready within 20s — re-populating webview html",
+			);
+			try {
+				panel.webview.html = buildTerminalHtml(
+					extensionUri,
+					panel.webview,
+					sessionId,
+				);
+			} catch {
+				/* webview disposed */
+			}
+			// Proceed without waiting again: the pty buffers all output until
+			// markReady, and if the reloaded webview eventually signals ready,
+			// the late-ready path above dismisses the overlay and flushes.
+		}
 		await startTuiBackend(state);
 	})().catch((err) => {
 		const msg = err instanceof Error ? err.message : String(err);
