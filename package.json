@@ -6,7 +6,7 @@
     "type": "git",
     "url": "https://github.com/lutrarutra/codepi.git"
   },
-  "version": "0.2.1",
+  "version": "0.4.0",
   "publisher": "lutrarutra",
   "license": "MIT",
   "engines": {
@@ -22,9 +22,6 @@
     "theme": "dark"
   },
   "main": "./dist/extension.js",
-  "enabledApiProposals": [
-    "terminalDataWriteEvent"
-  ],
   "activationEvents": [
     "onStartupFinished",
     "onWebviewPanel:codepi-tui"

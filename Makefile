@@ -4,9 +4,10 @@
 # install/uninstall into VS Code, verification, and cleanup.
 #
 # The package version follows the latest git tag (e.g. v0.2.0 -> 0.2.0):
-# `make vsix` / `make install` sync package.json to the tag before packaging
-# (output lands in dist/), falling back to the package.json version when no
-# tag is reachable.
+# `make build` / `make vsix` / `make install` sync both the root package.json
+# and webview-ui/package.json (plus their lockfiles) to the tag before
+# building (output lands in dist/), falling back to the package.json version
+# when no tag is reachable.
 #
 # Usage: `make help` lists all rules.
 
@@ -16,8 +17,12 @@ SHELL := /bin/bash
 VERSION := $(shell node -p "require('./package.json').version")
 
 # Latest git tag with the leading "v" stripped (e.g. v0.2.0 -> 0.2.0); empty
-# when no tag is reachable from HEAD. Packaging syncs package.json to this.
-GIT_VERSION := $(shell git describe --tags --abbrev=0 2>/dev/null | sed 's/^v//')
+# when no tag exists. Picks the most recently created tag (by ref creation
+# date) rather than git-describe: that stays correct even when several tags
+# point at the same commit (describe picks one arbitrarily in that case).
+# On a creatordate tie (lightweight tags on the same commit share the commit
+# date) the -refname tiebreak prefers the highest tag name.
+GIT_VERSION := $(shell git for-each-ref --sort=-creatordate --sort=-refname --format='%(refname:short)' refs/tags 2>/dev/null | head -1 | sed 's/^v//')
 
 # Packaging tool. `vsce` (classic) or `@vscode/vsce` (maintained) both work;
 # falls back to an on-demand npx install when neither is on PATH.
@@ -35,7 +40,7 @@ help: ## Show this help
 
 all: build ## Alias for `build`
 
-build: deps build-webview build-extension ## Full production build (webview + extension)
+build: deps _sync-version build-webview build-extension ## Full production build (webview + extension); version synced from the latest git tag
 
 build-webview: ## Build the webview UI (vite, tsc, terminal, fonts)
 	@npm --prefix webview-ui run build
@@ -76,7 +81,7 @@ vsix: ## Build the .vsix into dist/ at the latest git tag version (vsce runs the
 	$(VSCE) package -o "$$vsix"; \
 	echo "Packaged: $$vsix"
 
-_sync-version: ## Sync package.json version to the latest git tag (internal)
+_sync-version: ## Sync package.json + webview-ui/package.json versions to the latest git tag (internal)
 	@if [ -z "$(GIT_VERSION)" ]; then \
 		echo "No git tag reachable from HEAD — keeping package.json version $(VERSION)"; \
 	elif [ "$(GIT_VERSION)" = "$(VERSION)" ]; then \
@@ -86,6 +91,16 @@ _sync-version: ## Sync package.json version to the latest git tag (internal)
 	else \
 		echo "Syncing package.json version $(VERSION) -> $(GIT_VERSION) (git tag v$(GIT_VERSION))"; \
 		npm version "$(GIT_VERSION)" --no-git-tag-version --allow-same-version; \
+	fi
+	@if [ -z "$(GIT_VERSION)" ]; then \
+		echo "No git tag reachable from HEAD — keeping webview-ui version $$(node -p "require('./webview-ui/package.json').version")"; \
+	elif [ "$(GIT_VERSION)" = "$$(node -p "require('./webview-ui/package.json').version")" ]; then \
+		echo "webview-ui version $$(node -p "require('./webview-ui/package.json').version") already matches latest tag v$(GIT_VERSION)"; \
+	elif ! echo "$(GIT_VERSION)" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+([.-].+)?$$'; then \
+		echo "Tag v$(GIT_VERSION) is not valid semver — keeping webview-ui version $$(node -p "require('./webview-ui/package.json').version")"; \
+	else \
+		echo "Syncing webview-ui version $$(node -p "require('./webview-ui/package.json').version") -> $(GIT_VERSION) (git tag v$(GIT_VERSION))"; \
+		npm --prefix webview-ui version "$(GIT_VERSION)" --no-git-tag-version --allow-same-version; \
 	fi
 
 release: verify package ## Verify everything, then produce the .vsix
@@ -121,4 +136,5 @@ clean: ## Remove build outputs and packaged .vsix files
 ## ── Misc ────────────────────────────────────────────────────
 
 version: ## Print the effective version (latest git tag when present, else package.json)
-	@echo "$(if $(GIT_VERSION),$(GIT_VERSION)  (from git tag v$(GIT_VERSION)),$(VERSION)  (from package.json))"
+	@echo "root:       $(if $(GIT_VERSION),$(GIT_VERSION)  (from git tag v$(GIT_VERSION)),$(VERSION)  (from package.json))"
+	@echo "webview-ui: $$(node -p "require('./webview-ui/package.json').version")  (package.json)"
