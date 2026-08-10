@@ -1,50 +1,79 @@
 # CodePi
 
-A VS Code extension that embeds the [pi coding agent](https://pi.dev) in an editor-native chat panel.
+Github: [lutrarutra/codepi](https://github.com/lutrarutra/codepi)
 
-> **Third-party notice:** CodePi is an independent extension. It is not affiliated with, endorsed by, sponsored by, or maintained by pi.dev or the pi project.
+CodePi embeds the [pi coding agent](https://pi.dev) in VS Code. It runs pi in
+the extension host, renders pi's terminal UI in a webview, and adds VS Code
+context, workspace tools, edit review, session management, and safety controls.
 
-## What CodePi adds to pi
+> **Third-party notice:** CodePi is an independent extension. It is not
+> affiliated with, endorsed by, sponsored by, or maintained by pi.dev or the pi
+> project.
+
+## Requirements
+
+- VS Code 1.93 or newer.
+- A configured pi installation and provider in `~/.pi/agent`.
+- A workspace folder. The Sessions view is empty when no workspace is open.
+
+CodePi uses pi's normal resources, including `settings.json`, `models.json`,
+`auth.json`, skills, prompts, themes, packages, and user extensions.
+
+## Getting started
+
+1. Install CodePi and open a workspace in VS Code.
+2. Open the **PI** activity-bar view.
+3. Create a session from **Sessions** or run **CodePi: Start new session** from
+	the Command Palette.
+4. Configure models and authentication if pi needs them.
+
+The session is pi's interactive terminal UI, not a separate pi CLI process.
+Multiple sessions can remain open as editor tabs and are restored after a VS
+Code reload.
+
+## Features
 
 ### VS Code-native agent experience
 
-- Embedded pi runtime with streaming chat, tool calls, thinking levels, markdown, syntax highlighting, and a terminal-backed TUI.
-- Persistent sessions in a VS Code sidebar: create, reopen, rename, delete, refresh, and restore sessions after reloads.
-- Sessions and runtime state stored in VS Code extension storage; pi resources remain available from `~/.pi/agent`.
-- VS Code webview terminal with configurable font family and size. Fira Code Nerd Font is bundled by default.
-- Sessions work in local and Remote-SSH windows without sharing session files between machines.
+CodePi provides streaming chat, tool calls, thinking levels, markdown, syntax
+highlighting, and the familiar PI terminal-backed TUI. Sessions can be created, reopened,
+renamed, deleted, refreshed, and restored after reloads. Session files are
+stored in CodePi's VS Code extension storage, separately for each VS Code
+window and remote host.
 
 ### Editor context
 
-The agent receives a session-start `<editor_context>` snapshot and can refresh it live with:
+Each session receives an editor-context snapshot containing:
 
 - Active file, language, cursor, selections, and selection text.
 - Open editors, recently visited files, dirty state, workspace folders, trust state, and open terminals.
 - Git repositories, branches, changed files, line counts, and the SCM commit box.
 - Active debug session.
-- `get_editor_context` for a live combined snapshot.
-- `get_git_diff` for unified diffs, including untracked files.
-- Live context updates when the active file or selection changes.
+- `get_editor_context` for a current snapshot.
+- `get_git_diff` for Git diffs, including untracked files.
+- Live context refreshes when the active editor or selection changes.
+
+Snapshots and diffs are bounded so large workspaces do not consume the entire
+model context window.
 
 ### Workspace tools
 
-CodePi provides VS Code-aware tools for:
+CodePi overrides PI's default tools with VS Code-native tools:
 
-- `read` — read text files and images.
-- `head` — preview the first lines of a file.
-- `write` — create or overwrite files.
-- `edit` — apply targeted replacements.
-- `ls` — list directory contents.
-- `find` — find files using VS Code's file index and globs.
-- `grep` — search file contents with regex, case sensitivity, and include/exclude globs.
-- `get_diagnostics` — read Problems-panel diagnostics from language servers and problem matchers.
+- `read`, `head`, `ls`, `find`, and `grep` for workspace exploration.
+- `get_diagnostics` for language-server and problem-matcher diagnostics.
+- `write` and `edit` for file changes.
+
+These tools use VS Code workspace APIs rather than a shell. Shell commands use
+the separate bash tool below.
 
 ### Edit review
 
-Agent edits are written to disk immediately and tracked for review:
+File changes are applied to disk immediately and tracked as pending proposals:
 
 - File-level accept/reject CodeLens actions in the editor.
 - Side-by-side diff views, edit cards in chat, and a pending-edits status bar.
+- Rejecting restores the captured original content; accepting resolves review state.
 - Changes made manually while a proposal is pending are marked stale instead of being overwritten.
 - `/filechanges` provides a session-level change log; accept or decline changes with `/filechanges-accept` and `/filechanges-decline`.
 - Editor review state and the file-change tracker stay synchronized.
@@ -54,14 +83,14 @@ Agent edits are written to disk immediately and tracked for review:
 Switch with `/codepi-ask`, `/codepi-plan`, and `/codepi-implement`:
 
 - **Ask** — read-only mode; editing, shell commands, and non-whitelisted tools are blocked.
-- **Plan** — planning mode; explore the project and write Markdown plans without changing source code.
+- **Plan** — explore the project and write Markdown planning files without changing source or configuration code.
 - **Implement** — full tool access.
 
 Ask-mode tools are configurable with `codepi.modes.ask.allowedTools`.
 
 ### VS Code terminal bash
 
-The bundled `codepi-bash` extension replaces pi's stock bash tool with execution through a hidden VS Code terminal:
+The bundled `codepi-bash` extension runs commands through a hidden VS Code terminal:
 
 - `ask` mode with approval, denial, revision, or auto-approve options.
 - `allow` mode for automatic execution.
@@ -78,15 +107,35 @@ Define build, test, lint, package, and other commands in `.pi/tasks.json`:
 - `codepi-task-run`, `codepi-task-list`
 - `before-implement`, `after-implement`, and `anytime` task timing.
 - Read-only tasks can run in Ask mode.
-- Task changes require user confirmation and task output uses the VS Code terminal backend.
+- Creating, editing, and deleting tasks requires user confirmation.
 
-### Footer
-- Bundled `nebula-pulse` theme and Nerd Font icons.
+Example `.pi/tasks.json`:
+
+```json
+{
+	"tasks": {
+		"test": {
+			"command": "npm test",
+			"when": "after-implement",
+			"readOnly": true,
+			"timeout": 600,
+			"description": "Run the test suite"
+		}
+	}
+}
+```
+
+The default task timeout is 600 seconds.
+
+### Footer and verification
+
+- The footer shows token and cost information, model, thinking level, context usage, Git branch, mode, and bash approval state.
+- The bundled `nebula-pulse` theme and Nerd Font icons are enabled by default.
 
 ### Verification and workflow automation
 
 - Automatic post-edit diagnostics via `codepi.autoVerify`: `nextTurn`, `followUp`, or `off`.
-- `nextTurn` quietly adds problems to the next prompt; `followUp` asks pi to fix them immediately.
+- `nextTurn` adds diagnostics to the next prompt; `followUp` asks pi to address them immediately. This reads diagnostics; it does not run builds or tests.
 - A `codepi` command in VS Code's integrated terminal opens a new CodePi session. It is scoped to VS Code terminals and can be disabled with `codepi.terminalShortcut: false`.
 
 ### Settings and extension management
@@ -97,31 +146,96 @@ The CodePi sidebar includes:
 - Bundled-resource toggles for `codepi-footer`, `codepi-diff`, `codepi-modes`, `codepi-bash`, `codepi-context`, `codepi-task`, and `nebula-pulse`.
 - Links to pi's `settings.json`, `models.json`, and `auth.json`.
 - A live inventory of loaded core, bundled, project, user, and package extensions, commands, tools, handlers, flags, shortcuts, and message renderers.
-- Configuration for terminal font, terminal size, auto-verify, terminal shortcut, and Ask-mode tools.
+- Configuration for terminal font, terminal size, auto-verify, terminal shortcut, task behavior, and Ask-mode tools.
 
 CodePi also loads pi's normal resources and extension ecosystem: configured models and providers, authentication, skills, prompt templates, themes, packages, and custom extensions.
 
-## Requirements
+## Settings and storage
 
-- VS Code 1.93 or newer.
-- A pi configuration in `~/.pi/agent`, or the resources needed by your configured provider.
+CodePi-specific settings are stored under `codepi` in `~/.pi/agent/settings.json`:
+
+- `codepi.fontFamily` and `codepi.fontSize` — terminal appearance.
+- `codepi.autoVerify` — `nextTurn`, `followUp`, or `off`.
+- `codepi.modes.ask.allowedTools` — Ask-mode tool allowlist.
+- `codepi.terminalShortcut` — whether typing `codepi` in an integrated terminal opens a session.
+- `codepi.tasks.injectPrompt` and `codepi.tasks.remindAfterImplement` — task prompt behavior.
+- `codepi.bundledExtensions.*` and `codepi.bundledThemes.*` — bundled-resource toggles.
+
+Storage is split between `~/.pi/agent` for pi configuration, VS Code global
+storage for CodePi sessions, `<workspace>/.pi/tasks.json` for project tasks,
+and the extension's `resources/` directory for bundled resources. Local and
+Remote-SSH windows do not share session files.
+
+The Settings view links to pi's `settings.json`, `models.json`, and `auth.json`.
+The Extensions view inventories loaded core, bundled, project, user, and
+package resources, including commands, tools, and load errors.
+
+## Commands
+
+The Command Palette provides session, review, and dashboard commands, including
+**CodePi: Start new session**, **New Session**, **Open Session**, **Rename
+Session**, **Delete Session**, **Refresh Sessions**, edit accept/reject actions,
+**Open Edit Diff**, and the Sessions, Settings, and Extensions tabs.
+
+Pi slash commands are provided by bundled extensions:
+
+- Modes: `/codepi-ask`, `/codepi-plan`, `/codepi-implement`.
+- Bash: `/codepi-bash-ask`, `/codepi-bash-allow`, `/codepi-bash-disable`.
+- Tasks: `/codepi-task-create`, `/codepi-task-edit`, `/codepi-task-delete`,
+  `/codepi-task-run`, `/codepi-task-list`.
+
+Use pi's `/model` command or its model keybinding to change models.
 
 ## Development
 
 ```bash
-npm install
-npm --prefix webview-ui install
-npm run build       # build the webview and extension
-npm test            # run tests
-make verify         # type-check, test, and smoke-test
-make vsix           # build a VSIX package
+make deps        # install root and webview dependencies
+make build       # production webview and extension build
+make watch       # rebuild webview, TypeScript, and extension on changes
+make check-types # TypeScript check
+make unit        # Vitest suite
+make smoke       # load bundled extensions in isolation
+make verify      # type-check, tests, and smoke test
+make vsix        # package a VSIX in dist/
+make install     # package and install the VSIX into VS Code
 ```
 
 For watch mode:
 
-```bash
-npm run watch
-```
+The npm equivalents include `npm run build`, `npm test`, `npm run lint`, and
+`npm run watch`. Packaging synchronizes the package version to the latest
+reachable Git tag when the tag is valid semver.
+
+## Automated Marketplace publishing
+
+The repository includes a GitHub Actions workflow at
+`.github/workflows/publish.yml`. It runs when a SemVer tag such as `v0.2.1` is
+pushed, verifies that the tagged commit is reachable from `main`, installs both
+dependency trees, runs `make verify`, builds a VSIX, and publishes it to the
+Visual Studio Marketplace.
+
+To enable publishing:
+
+1. Create or sign in to the Visual Studio Marketplace publisher account named
+	`lutrarutra` (the `publisher` value in `package.json`).
+2. Create an Azure DevOps personal access token with Marketplace **Manage**
+	scope. Give it an expiration appropriate for your release process.
+3. Add the token to the GitHub repository as an Actions secret named
+	`VSCE_PAT`.
+4. Commit and merge release changes into `main`.
+5. Create and push a matching tag, for example `v0.2.1`.
+
+The workflow copies the tag version into `package.json` before packaging, so
+the Marketplace version matches the tag. Tags must use the `vMAJOR.MINOR.PATCH`
+format and must point to a commit contained in `main`. The generated VSIX is
+also retained as a workflow artifact.
+
+## Known limitations and compatibility notes
+
+- Large editor and Git states are truncated or capped before being sent to pi.
+- Edited extension source may require a VS Code reload before the runtime sees the change.
+- Disabling the bundled `codepi-bash` resource removes the approval bridge; `/codepi-bash-disable` keeps the safety layer active and rejects commands.
+- The contributed `codepi.piPath` setting is currently not used by the runtime and should be treated as stale compatibility configuration.
 
 ## License
 
