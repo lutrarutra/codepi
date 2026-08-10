@@ -1,6 +1,6 @@
 # CodePi
 
-![CodePi](media/marketplace-banner.png)
+![CodePi](https://raw.githubusercontent.com/lutrarutra/codepi/main/media/marketplace-banner.png)
 
 Github: [lutrarutra/codepi](https://github.com/lutrarutra/codepi)
 
