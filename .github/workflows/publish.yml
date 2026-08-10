@@ -25,10 +25,15 @@ jobs:
         with:
           fetch-depth: 0
 
+      # Node 20 is NOT supported: jsdom 30 requires ^22.22.2 || ^24.15.0 || >=26
+      # and undici 8 (used by jsdom + pi-coding-agent) requires >=22.19.0.
+      # On Node 20, undici's CacheStorage fails at module load with
+      # "webidl.util.markAsUncloneable is not a function" (markAsUncloneable was
+      # added to node:worker_threads in 22.19.0), breaking `make verify`.
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
 
       - name: Verify tag points to main
@@ -56,7 +61,7 @@ jobs:
       - name: Package VSIX
         run: |
           VERSION="$(node -p "require('./package.json').version")"
-          npx --yes @vscode/vsce package --no-dependencies -o "dist/codepi-${VERSION}.vsix"
+          npx --yes @vscode/vsce@3.9.2 package --no-dependencies -o "dist/codepi-${VERSION}.vsix"
 
       - name: Upload VSIX artifact
         uses: actions/upload-artifact@v4
@@ -70,4 +75,4 @@ jobs:
           VSCE_PAT: ${{ secrets.VSCE_PAT }}
         run: |
           VERSION="$(node -p "require('./package.json').version")"
-          npx --yes @vscode/vsce publish --packagePath "dist/codepi-${VERSION}.vsix" -p "$VSCE_PAT"
+          npx --yes @vscode/vsce@3.9.2 publish --packagePath "dist/codepi-${VERSION}.vsix" -p "$VSCE_PAT"

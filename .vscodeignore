@@ -26,3 +26,19 @@ tsconfig.json
 esbuild.mjs
 submodules
 .pi-subagents
+# Dev-only files — not needed at runtime (build tooling, design docs,
+# CI config, patch sources, dev scripts)
+Makefile
+vitest.config.ts
+docs
+patches
+scripts
+.github
+.pi
+webview-ui/vite.config.ts
+webview-ui/vite.terminal.config.ts
+webview-ui/tsconfig.json
+webview-ui/package.json
+webview-ui/package-lock.json
+webview-ui/scripts
+webview-ui/*.html

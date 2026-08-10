@@ -56,6 +56,10 @@ Each session receives an editor-context snapshot containing:
 Snapshots and diffs are bounded so large workspaces do not consume the entire
 model context window.
 
+### Editor Integration
+- ctrl + click to open files or follow links.
+- Tab handle icon tracks the state of the agent: idle (white), active (cyan), or waiting for user input (yellow).
+
 ### Workspace tools
 
 CodePi overrides PI's default tools with VS Code-native tools:
@@ -206,36 +210,16 @@ The npm equivalents include `npm run build`, `npm test`, `npm run lint`, and
 `npm run watch`. Packaging synchronizes the package version to the latest
 reachable Git tag when the tag is valid semver.
 
-## Automated Marketplace publishing
-
-The repository includes a GitHub Actions workflow at
-`.github/workflows/publish.yml`. It runs when a SemVer tag such as `v0.2.1` is
-pushed, verifies that the tagged commit is reachable from `main`, installs both
-dependency trees, runs `make verify`, builds a VSIX, and publishes it to the
-Visual Studio Marketplace.
-
-To enable publishing:
-
-1. Create or sign in to the Visual Studio Marketplace publisher account named
-	`lutrarutra` (the `publisher` value in `package.json`).
-2. Create an Azure DevOps personal access token with Marketplace **Manage**
-	scope. Give it an expiration appropriate for your release process.
-3. Add the token to the GitHub repository as an Actions secret named
-	`VSCE_PAT`.
-4. Commit and merge release changes into `main`.
-5. Create and push a matching tag, for example `v0.2.1`.
-
-The workflow copies the tag version into `package.json` before packaging, so
-the Marketplace version matches the tag. Tags must use the `vMAJOR.MINOR.PATCH`
-format and must point to a commit contained in `main`. The generated VSIX is
-also retained as a workflow artifact.
-
 ## Known limitations and compatibility notes
 
 - Large editor and Git states are truncated or capped before being sent to pi.
 - Edited extension source may require a VS Code reload before the runtime sees the change.
 - Disabling the bundled `codepi-bash` resource removes the approval bridge; `/codepi-bash-disable` keeps the safety layer active and rejects commands.
 - The contributed `codepi.piPath` setting is currently not used by the runtime and should be treated as stale compatibility configuration.
+
+## Acknowledgments
+- [github.com/abhinand5/pi-setup](https://github.com/abhinand5/pi-setup) Custom footer, filechanges extension, and other inspiration
+- [pi.dev](https://pi.dev) Pi coding agent SDK and TUI
 
 ## License
 
