@@ -1,5 +1,7 @@
 # CodePi
 
+![CodePi](media/marketplace-banner.png)
+
 Github: [lutrarutra/codepi](https://github.com/lutrarutra/codepi)
 
 CodePi embeds the [pi coding agent](https://pi.dev) in VS Code. It runs pi in
