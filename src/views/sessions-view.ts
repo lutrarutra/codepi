@@ -1,11 +1,17 @@
 import * as vscode from "vscode";
 import * as os from "node:os";
+import { join } from "node:path";
 import type {
 	SessionEntry,
 	SessionsMessage,
 	SessionsReply,
 } from "../shared/sessions-protocol";
 import type { SessionInfo } from "@earendil-works/pi-coding-agent";
+import {
+	readPinnedSessionPaths,
+	removePinnedSessionPath,
+	setSessionPinned,
+} from "../pinned-sessions";
 
 // ── Lazy pi SDK import ───────────────────────────────────────
 
@@ -55,7 +61,12 @@ export class SessionsViewProvider implements vscode.WebviewViewProvider {
 	constructor(
 		private readonly extensionUri: vscode.Uri,
 		private readonly sessionDir: string,
-	) {}
+	) {
+		// Sidecar store for pinned sessions (see src/pinned-sessions.ts).
+		this.pinnedStorePath = join(sessionDir, "pinned.json");
+	}
+
+	private readonly pinnedStorePath: string;
 
 	resolveWebviewView(webviewView: vscode.WebviewView): void {
 		this.view = webviewView;
@@ -101,6 +112,11 @@ export class SessionsViewProvider implements vscode.WebviewViewProvider {
 						path: msg.path,
 					});
 					break;
+				case "pin":
+					setSessionPinned(this.pinnedStorePath, msg.path, msg.pinned);
+					await this.loadSessions();
+					this.postList();
+					break;
 				case "openExtensions":
 					await vscode.commands.executeCommand("codepi.openExtensionsTab");
 					break;
@@ -131,7 +147,10 @@ export class SessionsViewProvider implements vscode.WebviewViewProvider {
 			vscode.window.showErrorMessage(
 				`Failed to delete session: ${err instanceof Error ? err.message : String(err)}`,
 			);
+			return;
 		}
+		// A deleted session can't stay pinned.
+		removePinnedSessionPath(this.pinnedStorePath, sessionPath);
 		await this.refresh();
 	}
 
@@ -187,6 +206,7 @@ export class SessionsViewProvider implements vscode.WebviewViewProvider {
 				cwd,
 				this.sessionDir,
 			);
+			const pinned = new Set(readPinnedSessionPaths(this.pinnedStorePath));
 			this.sessions = all
 				.map((s: SessionInfo): SessionEntry => {
 					const modified =
@@ -199,9 +219,13 @@ export class SessionsViewProvider implements vscode.WebviewViewProvider {
 						messageCount: s.messageCount ?? 0,
 						modified: modified.getTime(),
 						dateLabel: formatSessionDate(modified),
+						pinned: pinned.has(s.path),
 					};
 				})
-				.sort((a: SessionEntry, b: SessionEntry) => b.modified - a.modified);
+				.sort(
+					(a: SessionEntry, b: SessionEntry) =>
+						Number(b.pinned) - Number(a.pinned) || b.modified - a.modified,
+				);
 		} catch (err) {
 			console.error("[CodePi] Error loading sessions:", err);
 			this.sessions = [];

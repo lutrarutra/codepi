@@ -97,6 +97,33 @@ body {
 	gap: 2px;
 }
 
+/* Wrapper for the pinned/recent groups: keeps the section header, divider,
+ * and both lists at the same tight 2px rhythm as a single flat list. */
+.sessions-groups {
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+}
+
+.sessions-section-header {
+	font-size: 10px;
+	font-weight: 600;
+	text-transform: uppercase;
+	letter-spacing: 0.08em;
+	color: var(--vscode-descriptionForeground);
+	padding: 6px 8px 0;
+	user-select: none;
+}
+
+.sessions-divider {
+	height: 1px;
+	margin: 4px 0;
+	background: var(
+		--vscode-panel-border,
+		var(--vscode-widget-border, rgba(128, 128, 128, 0.35))
+	);
+}
+
 .sessions-row {
 	display: flex;
 	align-items: center;
