@@ -2,6 +2,16 @@
 
 All notable changes to CodePi are documented in this file.
 
+## 0.4.1
+
+- **Fix broken 0.4.0 release**: the GitHub Actions publish workflow passed
+  `vsce package --no-dependencies`, so the published vsix shipped without
+  `node_modules`. The extension died at activation (`Cannot find module
+  '@earendil-works/pi-coding-agent'`) and every command failed with
+  "command 'codepi.openPanel' not found". Packaging now bundles production
+  dependencies again, and CI verifies the vsix contains them before
+  publishing.
+
 ## 0.2.1
 
 - Add GitHub Actions publishing workflow (tag-triggered, automated vsix build + publish)

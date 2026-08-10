@@ -61,7 +61,19 @@ jobs:
       - name: Package VSIX
         run: |
           VERSION="$(node -p "require('./package.json').version")"
-          npx --yes @vscode/vsce@3.9.2 package --no-dependencies -o "dist/codepi-${VERSION}.vsix"
+          # NOTE: never pass --no-dependencies here. dist/extension.js imports
+          # @earendil-works/pi-coding-agent, @earendil-works/pi-tui and
+          # @vscode/ripgrep-universal at runtime (esbuild externals), so
+          # node_modules MUST ship inside the vsix. The 0.4.0 release was
+          # broken by exactly this flag: activation died on the missing
+          # modules and every command reported "command 'codepi.openPanel'
+          # not found".
+          npx --yes @vscode/vsce@3.9.2 package -o "dist/codepi-${VERSION}.vsix"
+
+      - name: Verify runtime dependencies are bundled
+        run: |
+          VERSION="$(node -p "require('./package.json').version")"
+          unzip -l "dist/codepi-${VERSION}.vsix" | grep -q "extension/node_modules/@earendil-works/pi-coding-agent/" || { echo "ERROR: vsix contains no node_modules — extension will fail at activation"; exit 1; }
 
       - name: Upload VSIX artifact
         uses: actions/upload-artifact@v4
