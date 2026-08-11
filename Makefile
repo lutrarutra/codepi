@@ -28,8 +28,8 @@ GIT_VERSION := $(shell git for-each-ref --sort=-creatordate --sort=-refname --fo
 # falls back to an on-demand npx install when neither is on PATH.
 VSCE ?= $(or $(shell command -v vsce 2>/dev/null),npx --yes @vscode/vsce)
 
-.PHONY: help all build build-webview build-extension check-types lint test unit \
-	watch dev smoke verify package vsix install uninstall clean version _sync-version \
+.PHONY: help all build build-webview build-extension build-bundled check-types lint test unit \
+	watch dev smoke verify package check-package vsix install uninstall clean version _sync-version \
 	deps deps-root deps-webview
 
 help: ## Show this help
@@ -40,13 +40,16 @@ help: ## Show this help
 
 all: build ## Alias for `build`
 
-build: deps _sync-version build-webview build-extension ## Full production build (webview + extension); version synced from the latest git tag
+build: deps _sync-version build-webview build-extension build-bundled ## Full production build (webview + extension + bundled pi extensions); version synced from the latest git tag
 
 build-webview: ## Build the webview UI (vite, tsc, terminal, fonts)
 	@npm --prefix webview-ui run build
 
 build-extension: check-types ## Build the extension host bundle (esbuild, production)
-	@node esbuild.mjs --production
+	@node esbuild.mjs --main --production
+
+build-bundled: ## Compile the bundled pi extensions into resources/extensions/dist (esbuild, production)
+	@node esbuild.mjs --bundled --production
 
 check-types: ## Type-check the extension host (tsc --noEmit)
 	@npx tsc -p ./tsconfig.json --noEmit
@@ -64,7 +67,7 @@ test: unit ## Alias for `unit`
 unit: ## Run the vitest suite
 	@npx vitest run
 
-smoke: ## Load the bundled extensions in isolation (smoke test)
+smoke: build-bundled ## Load the compiled bundled extensions in isolation (smoke test)
 	@node resources/extensions/__tests__/smoke-load.mjs
 
 verify: check-types unit smoke ## Full pre-release check (types + tests + smoke)
@@ -80,6 +83,9 @@ vsix: ## Build the .vsix into dist/ at the latest git tag version (vsce runs the
 	echo "Packaging $$vsix …"; \
 	$(VSCE) package -o "$$vsix"; \
 	echo "Packaged: $$vsix"
+
+check-package: vsix ## Verify the .vsix ships all runtime assets (compiled bundled extensions, nebula theme, fonts) and no dev sources
+	@node scripts/check-package.mjs
 
 _sync-version: ## Sync package.json + webview-ui/package.json versions to the latest git tag (internal)
 	@if [ -z "$(GIT_VERSION)" ]; then \
@@ -103,7 +109,7 @@ _sync-version: ## Sync package.json + webview-ui/package.json versions to the la
 		npm --prefix webview-ui version "$(GIT_VERSION)" --no-git-tag-version --allow-same-version; \
 	fi
 
-release: verify package ## Verify everything, then produce the .vsix
+release: verify package check-package ## Verify everything, produce the .vsix, then check its contents
 
 ## ── Install ─────────────────────────────────────────────────
 
@@ -131,7 +137,7 @@ deps-webview: ## Install webview-ui dependencies
 ## ── Cleanup ─────────────────────────────────────────────────
 
 clean: ## Remove build outputs and packaged .vsix files
-	rm -rf dist webview-ui/dist dist/*.vsix
+	rm -rf dist webview-ui/dist dist/*.vsix resources/extensions/dist
 
 ## ── Misc ────────────────────────────────────────────────────
 

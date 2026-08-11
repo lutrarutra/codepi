@@ -1,6 +1,6 @@
 node_modules
 dist
+resources/extensions/dist
 *.vsix
 submodules/
 .pi-subagents/
-.vscode/

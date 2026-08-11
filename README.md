@@ -132,8 +132,11 @@ Example `.pi/tasks.json`:
 	}
 }
 ```
-
 The default task timeout is 600 seconds.
+
+### Using in Remote with Remote-SSH
+- Since pi is bundled with the extension, it does not need to be installed on the remote host.
+- However, you will need to copy your local `~/.pi/agent` directory to the remote host `scp -r ~/.pi/agent user@remotehost:~/.pi/agent`  if you want to use your local pi extensions, settings, and models on the remote.
 
 ### Footer and verification
 

@@ -26,6 +26,20 @@ tsconfig.json
 esbuild.mjs
 submodules
 .pi-subagents
+# Bundled pi extensions ship COMPILED (resources/extensions/dist/*.js); the raw
+# TypeScript sources + their tests are dev-tree-only (codepi-task imports
+# src/tools/bash, which is not packaged).
+resources/extensions/*.ts
+resources/extensions/*.d.ts
+resources/extensions/tsconfig.json
+resources/extensions/__tests__
+# Runtime assets that MUST ship (checked by scripts/check-package.mjs): the
+# nebula theme is loaded from resources/themes, media/ feeds the webview
+# localResourceRoots (favicons, logo, terminal fonts), resources/shared is
+# imported by host code. Never exclude these.
+!media/**
+!resources/themes/**
+!resources/shared/**
 # Dev-only files — not needed at runtime (build tooling, design docs,
 # CI config, patch sources, dev scripts)
 Makefile

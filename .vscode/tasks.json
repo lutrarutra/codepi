@@ -1,0 +1,34 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "codepi: dev build",
+			"dependsOn": [
+				"codepi: build extension bundles",
+				"codepi: build webview"
+			],
+			"dependsOrder": "parallel",
+			"problemMatcher": []
+		},
+		{
+			"label": "codepi: build extension bundles",
+			"type": "shell",
+			"command": "node esbuild.mjs",
+			"options": {
+				"cwd": "${workspaceFolder}"
+			},
+			"detail": "Dev build (sourcemaps, no minify) of dist/extension.js + resources/extensions/dist/*.js",
+			"problemMatcher": []
+		},
+		{
+			"label": "codepi: build webview",
+			"type": "shell",
+			"command": "npm --prefix webview-ui run build",
+			"options": {
+				"cwd": "${workspaceFolder}"
+			},
+			"detail": "Webview UI (tsc + vite + terminal bundle + font copy) into webview-ui/dist",
+			"problemMatcher": []
+		}
+	]
+}

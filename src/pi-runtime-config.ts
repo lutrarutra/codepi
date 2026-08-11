@@ -30,13 +30,18 @@ export function buildPiRuntimeResourcePaths(
 ): PiRuntimeResourcePaths {
 	const enabled = getEnabledBundledResources(settings);
 	const enabledIds = new Set(enabled.map((resource) => resource.id));
+	// Bundled pi extensions ship COMPILED in resources/extensions/dist/*.js
+	// (see esbuild.mjs bundledExtensionsOptions): the raw sources reference
+	// dev-tree paths (codepi-task imports src/tools/bash) that must never be
+	// resolved from the installed package, so the runtime entry points are the
+	// compiled outputs.
 	const bundledExtensionPaths = [
-		["codepi-footer", "codepi-footer.ts"],
-		["codepi-diff", "codepi-diff.ts"],
-		["codepi-modes", "codepi-modes.ts"],
-		["codepi-bash", "codepi-bash.ts"],
-		["codepi-context", "codepi-context.ts"],
-		["codepi-task", "codepi-task.ts"],
+		["codepi-footer", "codepi-footer.js"],
+		["codepi-diff", "codepi-diff.js"],
+		["codepi-modes", "codepi-modes.js"],
+		["codepi-bash", "codepi-bash.js"],
+		["codepi-context", "codepi-context.js"],
+		["codepi-task", "codepi-task.js"],
 	]
 		.filter(([id]) =>
 			enabledIds.has(
@@ -49,7 +54,7 @@ export function buildPiRuntimeResourcePaths(
 					| "codepi-task",
 			),
 		)
-		.map(([, filename]) => join(extensionResourcesDir, filename));
+		.map(([, filename]) => join(extensionResourcesDir, "dist", filename));
 	const bundledThemePaths = enabledIds.has("nebula-pulse")
 		? [join(extensionResourcesDir, "..", "themes", "nebula-pulse.json")]
 		: [];

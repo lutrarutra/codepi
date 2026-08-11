@@ -92,6 +92,15 @@ export class ExtensionsViewProvider implements vscode.WebviewViewProvider {
 			"resources",
 			"extensions",
 		).fsPath;
+		// The compiled bundled-extension entry points live in …/extensions/dist
+		// (raw sources are not packaged), so the snapshot's bundled root must
+		// point there for loaders to classify them as bundled.
+		const bundledDir = vscode.Uri.joinPath(
+			this.extensionUri,
+			"resources",
+			"extensions",
+			"dist",
+		).fsPath;
 		const probe = await probeExtensions({
 			cwd,
 			agentDir,
@@ -112,7 +121,7 @@ export class ExtensionsViewProvider implements vscode.WebviewViewProvider {
 			},
 		];
 		return buildSnapshot({
-			bundledDir: extensionDir,
+			bundledDir,
 			agentDir,
 			cwd,
 			settings: readJsonFile(getSettingsPath()) ?? {},

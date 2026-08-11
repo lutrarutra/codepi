@@ -1,0 +1,18 @@
+{
+	"version": "0.2.0",
+	"configurations": [
+		{
+			"name": "Run Extension (dev build)",
+			"type": "extensionHost",
+			"request": "launch",
+			"args": ["--extensionDevelopmentPath=${workspaceFolder}"],
+			"outFiles": [
+				"${workspaceFolder}/dist/**/*.js",
+				"${workspaceFolder}/resources/extensions/dist/**/*.js"
+			],
+			"sourceMaps": true,
+			"preLaunchTask": "codepi: dev build",
+			"description": "Builds (dev, with sourcemaps) then launches an Extension Development Host with the repo as the extension under test."
+		}
+	]
+}

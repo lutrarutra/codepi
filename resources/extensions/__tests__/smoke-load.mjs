@@ -1,8 +1,11 @@
-// Smoke test: compile + execute the bundled extension factories through jiti
-// (the same loader pi uses at runtime) against a mock pi API.
+// Smoke test: load the COMPILED bundled extension entry points
+// (resources/extensions/dist/*.js — what the packaged extension ships) through
+// jiti (the same loader pi uses at runtime) against a mock pi API.
+// Prerequisite: `make build-bundled` (the Makefile's smoke target does this).
 import { createJiti } from "../../../node_modules/@earendil-works/pi-coding-agent/node_modules/jiti/lib/jiti.mjs";
 import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
+import { existsSync } from "node:fs";
 import { join } from "node:path";
 
 const root = fileURLToPath(new URL("../../..", import.meta.url));
@@ -77,6 +80,12 @@ function createMockPi() {
 
 async function loadExtension(relPath, label, expected) {
 	const extUrl = new URL(relPath, import.meta.url);
+	if (!existsSync(extUrl)) {
+		console.error(
+			`FAIL (${label}): ${relPath} not found — run \`make build-bundled\` first`,
+		);
+		process.exit(1);
+	}
 	const factory = await jiti.import(extUrl.pathname, { default: true });
 	if (typeof factory !== "function") {
 		console.error(
@@ -113,23 +122,23 @@ async function loadExtension(relPath, label, expected) {
 	}
 }
 
-await loadExtension("../codepi-modes.ts", "codepi-modes", {
+await loadExtension("../dist/codepi-modes.js", "codepi-modes", {
 	commands: ["codepi-ask", "codepi-implement", "codepi-plan"],
 	events: ["session_start", "tool_call", "before_agent_start"],
 });
 
-await loadExtension("../codepi-bash.ts", "codepi-bash", {
+await loadExtension("../dist/codepi-bash.js", "codepi-bash", {
 	commands: ["codepi-bash-ask", "codepi-bash-allow", "codepi-bash-disable"],
 	events: ["session_start"],
 	tools: [],
 });
 
-await loadExtension("../codepi-context.ts", "codepi-context", {
+await loadExtension("../dist/codepi-context.js", "codepi-context", {
 	events: ["session_start", "before_agent_start"],
 	tools: ["get_editor_context", "get_git_diff"],
 });
 
-await loadExtension("../codepi-task.ts", "codepi-task", {
+await loadExtension("../dist/codepi-task.js", "codepi-task", {
 	commands: [
 		"codepi-task-create",
 		"codepi-task-edit",

@@ -6,7 +6,7 @@
     "type": "git",
     "url": "https://github.com/lutrarutra/codepi.git"
   },
-  "version": "0.4.5",
+  "version": "0.5.1",
   "publisher": "lutrarutra",
   "license": "MIT",
   "engines": {
@@ -164,12 +164,84 @@
       {
         "command": "codepi.openExtensionsTab",
         "title": "Open CodePi Extensions"
+      },
+      {
+        "command": "codepi.openPendingReview",
+        "title": "Open CodePi Pending Review"
+      },
+      {
+        "command": "codepi.setModel",
+        "title": "CodePi: Select Model"
       }
     ],
     "menus": {
       "commandPalette": [
         {
+          "command": "codepi.openSession",
+          "when": "false"
+        },
+        {
+          "command": "codepi.renameSession",
+          "when": "false"
+        },
+        {
+          "command": "codepi.deleteSession",
+          "when": "false"
+        },
+        {
+          "command": "codepi.newSession",
+          "when": "false"
+        },
+        {
+          "command": "codepi.refreshSessions",
+          "when": "false"
+        },
+        {
+          "command": "codepi.acceptHunk",
+          "when": "false"
+        },
+        {
+          "command": "codepi.rejectHunk",
+          "when": "false"
+        },
+        {
+          "command": "codepi.acceptFile",
+          "when": "false"
+        },
+        {
+          "command": "codepi.rejectFile",
+          "when": "false"
+        },
+        {
+          "command": "codepi.acceptAllEdits",
+          "when": "false"
+        },
+        {
+          "command": "codepi.rejectAllEdits",
+          "when": "false"
+        },
+        {
+          "command": "codepi.openDiff",
+          "when": "false"
+        },
+        {
+          "command": "codepi.openSettingsTab",
+          "when": "false"
+        },
+        {
+          "command": "codepi.openSessionsTab",
+          "when": "false"
+        },
+        {
           "command": "codepi.openExtensionsTab",
+          "when": "false"
+        },
+        {
+          "command": "codepi.openPendingReview",
+          "when": "false"
+        },
+        {
+          "command": "codepi.setModel",
           "when": "false"
         }
       ],

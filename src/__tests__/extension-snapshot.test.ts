@@ -10,7 +10,7 @@ import {
 } from "../extension-snapshot";
 
 const ROOTS = {
-	bundledDir: "/ext/codepi/resources/extensions",
+	bundledDir: "/ext/codepi/resources/extensions/dist",
 	agentDir: "/home/u/.pi/agent",
 	cwd: "/proj/app",
 };
@@ -18,7 +18,7 @@ const ROOTS = {
 describe("classifySource", () => {
 	it("classifies bundled, agent, project, and package paths", () => {
 		expect(
-			classifySource("/ext/codepi/resources/extensions/codepi-bash.ts", ROOTS),
+			classifySource("/ext/codepi/resources/extensions/dist/codepi-bash.js", ROOTS),
 		).toBe("bundled");
 		expect(
 			classifySource("/home/u/.pi/agent/extensions/safety-guard.ts", ROOTS),
@@ -134,7 +134,7 @@ describe("buildSnapshot", () => {
 			mode: { active: true, current: "ask", sessionName: "s1" },
 			extensions: [
 				{
-					resolvedPath: "/ext/codepi/resources/extensions/codepi-bash.ts",
+					resolvedPath: "/ext/codepi/resources/extensions/dist/codepi-bash.js",
 					commands: new Map([
 						[
 							"codepi-bash-allow",
@@ -260,7 +260,7 @@ describe("buildSnapshot", () => {
 			mode: { active: false },
 			extensions: [
 				{
-					resolvedPath: "/ext/codepi/resources/extensions/codepi-bash.ts",
+					resolvedPath: "/ext/codepi/resources/extensions/dist/codepi-bash.js",
 					commands: new Map(),
 					tools: new Map(),
 					flags: new Map(),
@@ -283,7 +283,7 @@ describe("buildSnapshot", () => {
 			mode: { active: false },
 			extensions: [
 				{
-					resolvedPath: "/ext/codepi/resources/extensions/codepi-bash.ts",
+					resolvedPath: "/ext/codepi/resources/extensions/dist/codepi-bash.js",
 					commands: new Map(),
 					tools: new Map([["bash", { definition: { name: "bash", label: "Bash", description: "Run" } }]]),
 					flags: new Map(),
@@ -312,7 +312,7 @@ describe("buildSnapshot", () => {
 			mode: { active: false },
 			extensions: [
 				{
-					resolvedPath: "/ext/codepi/resources/extensions/codepi-footer.ts",
+					resolvedPath: "/ext/codepi/resources/extensions/dist/codepi-footer.js",
 					commands: new Map(),
 					tools: new Map(),
 					flags: new Map(),

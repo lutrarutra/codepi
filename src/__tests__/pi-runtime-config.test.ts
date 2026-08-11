@@ -16,12 +16,12 @@ describe("Pi runtime resource paths", () => {
 	it("enables CodePi bundled resources by default", () => {
 		const paths = buildPiRuntimeResourcePaths(extensionResources, agentDir, {});
 		expect(paths.bundledExtensionPaths).toEqual([
-			join(extensionResources, "codepi-footer.ts"),
-			join(extensionResources, "codepi-diff.ts"),
-			join(extensionResources, "codepi-modes.ts"),
-			join(extensionResources, "codepi-bash.ts"),
-			join(extensionResources, "codepi-context.ts"),
-			join(extensionResources, "codepi-task.ts"),
+			join(extensionResources, "dist", "codepi-footer.js"),
+			join(extensionResources, "dist", "codepi-diff.js"),
+			join(extensionResources, "dist", "codepi-modes.js"),
+			join(extensionResources, "dist", "codepi-bash.js"),
+			join(extensionResources, "dist", "codepi-context.js"),
+			join(extensionResources, "dist", "codepi-task.js"),
 		]);
 		expect(paths.bundledThemePaths).toEqual([
 			join(extensionResources, "..", "themes", "nebula-pulse.json"),
@@ -47,7 +47,7 @@ describe("Pi runtime resource paths", () => {
 			readSettings,
 		);
 		expect(first.bundledExtensionPaths).toContain(
-			join(extensionResources, "codepi-footer.ts"),
+			join(extensionResources, "dist", "codepi-footer.js"),
 		);
 		settings = { codepi: { bundledExtensions: { "codepi-footer": false } } };
 		const second = buildCurrentPiRuntimeResourcePaths(
@@ -56,10 +56,10 @@ describe("Pi runtime resource paths", () => {
 			readSettings,
 		);
 		expect(second.bundledExtensionPaths).not.toContain(
-			join(extensionResources, "codepi-footer.ts"),
+			join(extensionResources, "dist", "codepi-footer.js"),
 		);
 		expect(second.bundledExtensionPaths).toContain(
-			join(extensionResources, "codepi-diff.ts"),
+			join(extensionResources, "dist", "codepi-diff.js"),
 		);
 	});
 
@@ -71,11 +71,11 @@ describe("Pi runtime resource paths", () => {
 			},
 		});
 		expect(paths.bundledExtensionPaths).toEqual([
-			join(extensionResources, "codepi-diff.ts"),
-			join(extensionResources, "codepi-modes.ts"),
-			join(extensionResources, "codepi-bash.ts"),
-			join(extensionResources, "codepi-context.ts"),
-			join(extensionResources, "codepi-task.ts"),
+			join(extensionResources, "dist", "codepi-diff.js"),
+			join(extensionResources, "dist", "codepi-modes.js"),
+			join(extensionResources, "dist", "codepi-bash.js"),
+			join(extensionResources, "dist", "codepi-context.js"),
+			join(extensionResources, "dist", "codepi-task.js"),
 		]);
 		expect(paths.bundledThemePaths).toEqual([]);
 	});
@@ -193,8 +193,8 @@ describe("Pi runtime resource paths", () => {
 // ── filterConflictingExtensions ─────────────────────────────
 
 describe("filterConflictingExtensions", () => {
-	const bundledDiff = "/ext/resources/extensions/codepi-diff.ts";
-	const bundledBash = "/ext/resources/extensions/codepi-bash.ts";
+	const bundledDiff = "/ext/resources/extensions/dist/codepi-diff.js";
+	const bundledBash = "/ext/resources/extensions/dist/codepi-bash.js";
 	const thirdPartyDiff = "/home/user/.pi/agent/extensions/filechanges/index.ts";
 	const unrelated = "/home/user/.pi/agent/extensions/local-models.ts";
 
