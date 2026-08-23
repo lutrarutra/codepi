@@ -1,5 +1,5 @@
 diff --git a/node_modules/@earendil-works/pi-coding-agent/dist/core/sdk.d.ts b/node_modules/@earendil-works/pi-coding-agent/dist/core/sdk.d.ts
-index 7778619..f5a6077 100644
+index df0c5c1..1dbd7c4 100644
 --- a/node_modules/@earendil-works/pi-coding-agent/dist/core/sdk.d.ts
 +++ b/node_modules/@earendil-works/pi-coding-agent/dist/core/sdk.d.ts
 @@ -7,6 +7,7 @@ import type { ResourceLoader } from "./resource-loader.ts";
@@ -10,7 +10,7 @@ index 7778619..f5a6077 100644
  export interface CreateAgentSessionOptions {
      /** Working directory for project-local discovery. Default: process.cwd() */
      cwd?: string;
-@@ -41,6 +42,15 @@ export interface CreateAgentSessionOptions {
+@@ -43,6 +44,15 @@ export interface CreateAgentSessionOptions {
      tools?: string[];
      /** Optional denylist of tool names to disable. Applies after `tools` when both are provided. */
      excludeTools?: string[];
@@ -27,7 +27,7 @@ index 7778619..f5a6077 100644
      customTools?: ToolDefinition[];
      /** Resource loader. When omitted, DefaultResourceLoader is used. */
 diff --git a/node_modules/@earendil-works/pi-coding-agent/dist/core/sdk.js b/node_modules/@earendil-works/pi-coding-agent/dist/core/sdk.js
-index 2e8e67c..43d7e34 100644
+index 8c8d049..9a185af 100644
 --- a/node_modules/@earendil-works/pi-coding-agent/dist/core/sdk.js
 +++ b/node_modules/@earendil-works/pi-coding-agent/dist/core/sdk.js
 @@ -129,7 +129,9 @@ export async function createAgentSession(options = {}) {
@@ -38,10 +38,10 @@ index 2e8e67c..43d7e34 100644
 +    const defaultActiveToolNames = options.baseToolsOverride
 +        ? Object.keys(options.baseToolsOverride)
 +        : ["read", "bash", "edit", "write"];
+     const configuredDefaultToolNames = settingsManager.getDefaultTools();
      const allowedToolNames = options.tools ?? (options.noTools === "all" ? [] : undefined);
      const excludedToolNames = options.excludeTools;
-     const excludedToolNameSet = excludedToolNames ? new Set(excludedToolNames) : undefined;
-@@ -254,6 +256,7 @@ export async function createAgentSession(options = {}) {
+@@ -255,6 +257,7 @@ export async function createAgentSession(options = {}) {
          initialActiveToolNames,
          allowedToolNames,
          excludedToolNames,
@@ -74,7 +74,7 @@ index e05fec9..f8b2738 100644
      };
  }
 diff --git a/node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/interactive-mode.d.ts b/node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/interactive-mode.d.ts
-index e76c329..4230946 100644
+index 18f66f7..19801d9 100644
 --- a/node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/interactive-mode.d.ts
 +++ b/node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/interactive-mode.d.ts
 @@ -30,6 +30,8 @@ export interface InteractiveModeOptions {
@@ -83,14 +83,14 @@ index e76c329..4230946 100644
      tuiMode?: TuiMode;
 +    /** Custom terminal to render into. Defaults to the process terminal (stdin/stdout). */
 +    terminal?: import("@earendil-works/pi-tui").Terminal;
+     /** Initial interactive theme setting for this invocation. */
+     initialThemeSetting?: string;
  }
- interface InteractiveTuiOptions {
-     tuiMode: TuiMode;
 diff --git a/node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/interactive-mode.js b/node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/interactive-mode.js
-index 42e655d..ed1d69c 100644
+index 6a88679..2cba476 100644
 --- a/node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/interactive-mode.js
 +++ b/node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/interactive-mode.js
-@@ -339,6 +339,7 @@ export class InteractiveMode {
+@@ -354,6 +354,7 @@ export class InteractiveMode {
              tuiMode,
              showHardwareCursor: this.settingsManager.getShowHardwareCursor(),
              logDirectory: getAgentDir(),
@@ -98,7 +98,7 @@ index 42e655d..ed1d69c 100644
              onRightClickPaste: this.onRightClickPaste,
          });
          this.ui = createInteractiveTuiReference(() => this.renderer);
-@@ -1900,6 +1901,10 @@ export class InteractiveMode {
+@@ -1929,6 +1930,10 @@ export class InteractiveMode {
                  resolve(undefined);
                  return;
              }
@@ -109,7 +109,7 @@ index 42e655d..ed1d69c 100644
              const onAbort = () => {
                  this.hideExtensionSelector();
                  resolve(undefined);
-@@ -1925,6 +1930,8 @@ export class InteractiveMode {
+@@ -1954,6 +1959,8 @@ export class InteractiveMode {
       * Hide the extension selector.
       */
      hideExtensionSelector() {
@@ -118,7 +118,7 @@ index 42e655d..ed1d69c 100644
          this.extensionSelector?.dispose();
          this.editorContainer.clear();
          this.editorContainer.addChild(this.editor);
-@@ -1952,6 +1959,8 @@ export class InteractiveMode {
+@@ -1981,6 +1988,8 @@ export class InteractiveMode {
                  resolve(undefined);
                  return;
              }
@@ -127,7 +127,7 @@ index 42e655d..ed1d69c 100644
              const onAbort = () => {
                  this.hideExtensionInput();
                  resolve(undefined);
-@@ -1977,6 +1986,8 @@ export class InteractiveMode {
+@@ -2006,6 +2015,8 @@ export class InteractiveMode {
       * Hide the extension input.
       */
      hideExtensionInput() {
@@ -137,7 +137,7 @@ index 42e655d..ed1d69c 100644
          this.editorContainer.clear();
          this.editorContainer.addChild(this.editor);
 diff --git a/node_modules/@earendil-works/pi-coding-agent/package.json b/node_modules/@earendil-works/pi-coding-agent/package.json
-index f6fc21a..d111136 100644
+index 58d9dd6..6d859bf 100644
 --- a/node_modules/@earendil-works/pi-coding-agent/package.json
 +++ b/node_modules/@earendil-works/pi-coding-agent/package.json
 @@ -14,7 +14,8 @@
