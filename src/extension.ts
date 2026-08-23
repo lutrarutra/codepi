@@ -89,6 +89,7 @@ import {
 	getRecentFiles,
 } from "./context-snapshot";
 import { createHostContextTools } from "./context-tools";
+import { resolveConfiguredModelScope } from "./model-scope";
 // ── Types ────────────────────────────────────────────────────
 
 interface SessionState {
@@ -1798,9 +1799,19 @@ async function startTuiBackend(state: SessionState): Promise<void> {
 		if (hostContextTools) {
 			customTools.push(...hostContextTools);
 		}
+		const { scopedModels, diagnostics: modelScopeDiagnostics } =
+			await resolveConfiguredModelScope(
+				settingsManager,
+				services.modelRuntime,
+				pi.resolveModelScopeWithDiagnostics,
+			);
+		for (const diagnostic of modelScopeDiagnostics) {
+			console.warn(`[CodePi] ${diagnostic.message}`);
+		}
 
 		const result = await pi.createAgentSession({
 			modelRuntime: services.modelRuntime,
+			scopedModels,
 			resourceLoader: loader,
 			settingsManager: services.settingsManager,
 			cwd: opts.cwd,
