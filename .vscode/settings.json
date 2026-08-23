@@ -1,0 +1,8 @@
+{
+    "chat.tools.terminal.autoApprove": {
+        "/^cd /home/lutrarutra/dev/codepi && node --experimental-strip-types scripts/review-diff-smoke\\.ts 2>&1 \\| tail -12$/": {
+            "approve": true,
+            "matchCommandLine": true
+        }
+    }
+}
