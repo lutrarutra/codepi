@@ -128,3 +128,17 @@ index 19dafec..faa481b 100644
          this.extensionInput?.dispose();
          this.editorContainer.clear();
          this.editorContainer.addChild(this.editor);
+diff --git a/node_modules/@earendil-works/pi-coding-agent/package.json b/node_modules/@earendil-works/pi-coding-agent/package.json
+index 02f45a3..ed10c16 100644
+--- a/node_modules/@earendil-works/pi-coding-agent/package.json
++++ b/node_modules/@earendil-works/pi-coding-agent/package.json
+@@ -14,7 +14,8 @@
+ 	"exports": {
+ 		".": {
+ 			"types": "./dist/index.d.ts",
+-			"import": "./dist/index.js"
++			"import": "./dist/index.js",
++			"require": "./dist/index.js"
+ 		},
+ 		"./rpc-entry": {
+ 			"import": "./dist/bundle/rpc-entry.js"
