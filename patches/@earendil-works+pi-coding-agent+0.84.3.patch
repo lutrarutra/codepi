@@ -1,16 +1,8 @@
 diff --git a/node_modules/@earendil-works/pi-coding-agent/dist/core/sdk.d.ts b/node_modules/@earendil-works/pi-coding-agent/dist/core/sdk.d.ts
-index df0c5c1..1dbd7c4 100644
+index 040051f..45a9d44 100644
 --- a/node_modules/@earendil-works/pi-coding-agent/dist/core/sdk.d.ts
 +++ b/node_modules/@earendil-works/pi-coding-agent/dist/core/sdk.d.ts
-@@ -7,6 +7,7 @@ import type { ResourceLoader } from "./resource-loader.ts";
- import { SessionManager } from "./session-manager.ts";
- import { SettingsManager } from "./settings-manager.ts";
- import { createBashTool, createCodingTools, createEditTool, createFindTool, createGrepTool, createLsTool, createReadOnlyTools, createReadTool, createWriteTool, withFileMutationQueue } from "./tools/index.ts";
-+import type { Tool } from "./tools/index.ts";
- export interface CreateAgentSessionOptions {
-     /** Working directory for project-local discovery. Default: process.cwd() */
-     cwd?: string;
-@@ -43,6 +44,15 @@ export interface CreateAgentSessionOptions {
+@@ -43,6 +43,15 @@ export interface CreateAgentSessionOptions {
      tools?: string[];
      /** Optional denylist of tool names to disable. Applies after `tools` when both are provided. */
      excludeTools?: string[];
@@ -27,10 +19,10 @@ index df0c5c1..1dbd7c4 100644
      customTools?: ToolDefinition[];
      /** Resource loader. When omitted, DefaultResourceLoader is used. */
 diff --git a/node_modules/@earendil-works/pi-coding-agent/dist/core/sdk.js b/node_modules/@earendil-works/pi-coding-agent/dist/core/sdk.js
-index 8c8d049..9a185af 100644
+index 8bb4595..83f68fa 100644
 --- a/node_modules/@earendil-works/pi-coding-agent/dist/core/sdk.js
 +++ b/node_modules/@earendil-works/pi-coding-agent/dist/core/sdk.js
-@@ -129,7 +129,9 @@ export async function createAgentSession(options = {}) {
+@@ -136,7 +136,9 @@ export async function createAgentSession(options = {}) {
      else {
          thinkingLevel = clampThinkingLevel(model, thinkingLevel);
      }
@@ -41,7 +33,7 @@ index 8c8d049..9a185af 100644
      const configuredDefaultToolNames = settingsManager.getDefaultTools();
      const allowedToolNames = options.tools ?? (options.noTools === "all" ? [] : undefined);
      const excludedToolNames = options.excludeTools;
-@@ -255,6 +257,7 @@ export async function createAgentSession(options = {}) {
+@@ -262,6 +264,7 @@ export async function createAgentSession(options = {}) {
          initialActiveToolNames,
          allowedToolNames,
          excludedToolNames,
@@ -74,10 +66,10 @@ index e05fec9..f8b2738 100644
      };
  }
 diff --git a/node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/interactive-mode.d.ts b/node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/interactive-mode.d.ts
-index 18f66f7..19801d9 100644
+index 0b7c7fb..b40fa56 100644
 --- a/node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/interactive-mode.d.ts
 +++ b/node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/interactive-mode.d.ts
-@@ -30,6 +30,8 @@ export interface InteractiveModeOptions {
+@@ -33,6 +33,8 @@ export interface InteractiveModeOptions {
      verbose?: boolean;
      /** TUI layout mode. */
      tuiMode?: TuiMode;
@@ -87,10 +79,10 @@ index 18f66f7..19801d9 100644
      initialThemeSetting?: string;
  }
 diff --git a/node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/interactive-mode.js b/node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/interactive-mode.js
-index 6a88679..2cba476 100644
+index 19dafec..faa481b 100644
 --- a/node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/interactive-mode.js
 +++ b/node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/interactive-mode.js
-@@ -354,6 +354,7 @@ export class InteractiveMode {
+@@ -365,6 +365,7 @@ export class InteractiveMode {
              tuiMode,
              showHardwareCursor: this.settingsManager.getShowHardwareCursor(),
              logDirectory: getAgentDir(),
@@ -98,7 +90,7 @@ index 6a88679..2cba476 100644
              onRightClickPaste: this.onRightClickPaste,
          });
          this.ui = createInteractiveTuiReference(() => this.renderer);
-@@ -1929,6 +1930,10 @@ export class InteractiveMode {
+@@ -1968,6 +1969,10 @@ export class InteractiveMode {
                  resolve(undefined);
                  return;
              }
@@ -109,7 +101,7 @@ index 6a88679..2cba476 100644
              const onAbort = () => {
                  this.hideExtensionSelector();
                  resolve(undefined);
-@@ -1954,6 +1959,8 @@ export class InteractiveMode {
+@@ -1993,6 +1998,8 @@ export class InteractiveMode {
       * Hide the extension selector.
       */
      hideExtensionSelector() {
@@ -118,7 +110,7 @@ index 6a88679..2cba476 100644
          this.extensionSelector?.dispose();
          this.editorContainer.clear();
          this.editorContainer.addChild(this.editor);
-@@ -1981,6 +1988,8 @@ export class InteractiveMode {
+@@ -2020,6 +2027,8 @@ export class InteractiveMode {
                  resolve(undefined);
                  return;
              }
@@ -127,7 +119,7 @@ index 6a88679..2cba476 100644
              const onAbort = () => {
                  this.hideExtensionInput();
                  resolve(undefined);
-@@ -2006,6 +2015,8 @@ export class InteractiveMode {
+@@ -2045,6 +2054,8 @@ export class InteractiveMode {
       * Hide the extension input.
       */
      hideExtensionInput() {
@@ -136,17 +128,3 @@ index 6a88679..2cba476 100644
          this.extensionInput?.dispose();
          this.editorContainer.clear();
          this.editorContainer.addChild(this.editor);
-diff --git a/node_modules/@earendil-works/pi-coding-agent/package.json b/node_modules/@earendil-works/pi-coding-agent/package.json
-index 58d9dd6..6d859bf 100644
---- a/node_modules/@earendil-works/pi-coding-agent/package.json
-+++ b/node_modules/@earendil-works/pi-coding-agent/package.json
-@@ -14,7 +14,8 @@
- 	"exports": {
- 		".": {
- 			"types": "./dist/index.d.ts",
--			"import": "./dist/index.js"
-+			"import": "./dist/index.js",
-+			"require": "./dist/index.js"
- 		},
- 		"./rpc-entry": {
- 			"import": "./dist/rpc-entry.js"

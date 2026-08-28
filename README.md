@@ -147,7 +147,6 @@ The default task timeout is 600 seconds.
 
 - Automatic post-edit diagnostics via `codepi.autoVerify`: `nextTurn`, `followUp`, or `off`.
 - `nextTurn` adds diagnostics to the next prompt; `followUp` asks pi to address them immediately. This reads diagnostics; it does not run builds or tests.
-- A `codepi` command in VS Code's integrated terminal opens a new CodePi session. It is scoped to VS Code terminals and can be disabled with `codepi.terminalShortcut: false`.
 
 ### Settings and extension management
 
@@ -168,7 +167,6 @@ CodePi-specific settings are stored under `codepi` in `~/.pi/agent/settings.json
 - `codepi.fontFamily` and `codepi.fontSize` — terminal appearance.
 - `codepi.autoVerify` — `nextTurn`, `followUp`, or `off`.
 - `codepi.modes.ask.allowedTools` — Ask-mode tool allowlist.
-- `codepi.terminalShortcut` — whether typing `codepi` in an integrated terminal opens a session.
 - `codepi.tasks.injectPrompt` and `codepi.tasks.remindAfterImplement` — task prompt behavior.
 - `codepi.bundledExtensions.*` and `codepi.bundledThemes.*` — bundled-resource toggles.
 

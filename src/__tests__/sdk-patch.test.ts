@@ -11,7 +11,7 @@ const CORE_DIR = path.resolve(
 	"node_modules/@earendil-works/pi-coding-agent/dist/core",
 );
 
-describe("SDK host-integration patch (0.84.2)", () => {
+describe("SDK host-integration patch (0.84.3)", () => {
 	it("threads options.terminal into createInteractiveTui", () => {
 		const js = fs.readFileSync(
 			path.join(DIST_DIR, "interactive-mode.js"),
@@ -37,7 +37,7 @@ describe("SDK host-integration patch (0.84.2)", () => {
 		);
 	});
 
-	describe("SDK baseToolsOverride exposure patch (0.84.2)", () => {
+	describe("SDK baseToolsOverride exposure patch (0.84.3)", () => {
 		it("passes baseToolsOverride through createAgentSession", () => {
 			const js = fs.readFileSync(path.join(CORE_DIR, "sdk.js"), "utf8");
 			expect(js).toMatch(/baseToolsOverride: options\.baseToolsOverride/);
@@ -62,7 +62,7 @@ describe("SDK host-integration patch (0.84.2)", () => {
 		});
 	});
 
-	describe("SDK extension-dialog events patch (0.84.2)", () => {
+	describe("SDK extension-dialog events patch (0.84.3)", () => {
 		it("emits extension_ui_start/end for the selector dialog", () => {
 			const js = fs.readFileSync(
 				path.join(DIST_DIR, "interactive-mode.js"),
