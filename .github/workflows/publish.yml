@@ -14,8 +14,8 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  publish:
-    name: Build and publish VSIX
+  build:
+    name: Build VSIX
     runs-on: ubuntu-latest
     if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
 
@@ -82,9 +82,57 @@ jobs:
           path: dist/*.vsix
           if-no-files-found: error
 
+  publish:
+    name: Publish VSIX
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download VSIX artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: codepi-${{ github.ref_name }}
+          path: dist/
+
       - name: Publish to Visual Studio Marketplace
         env:
           VSCE_PAT: ${{ secrets.VSCE_PAT }}
         run: |
-          VERSION="$(node -p "require('./package.json').version")"
-          npx --yes @vscode/vsce@3.9.2 publish --packagePath "dist/codepi-${VERSION}.vsix" -p "$VSCE_PAT"
+          VSIX="$(ls dist/*.vsix)"
+          npx --yes @vscode/vsce@3.9.2 publish --packagePath "$VSIX" -p "$VSCE_PAT"
+
+      # Reuses the Marketplace VSIX (do not re-package). If this step fails after
+      # Marketplace already published this version, do not retag: re-run Open VSX
+      # only (`make publish-openvsx`) or skip the Marketplace step on a re-run.
+      - name: Publish to Open VSX Registry
+        env:
+          OVSX_PAT: ${{ secrets.OVSX_PAT }}
+        run: |
+          VSIX="$(ls dist/*.vsix)"
+          npx --yes ovsx@1.1.1 publish "$VSIX" -p "$OVSX_PAT"
+
+  github-release:
+    name: Attach VSIX to GitHub Release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download VSIX artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: codepi-${{ github.ref_name }}
+          path: dist/
+
+      - name: Create or update GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VSIX="$(ls dist/*.vsix)"
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" "$VSIX" --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" "$VSIX" --generate-notes
+          fi

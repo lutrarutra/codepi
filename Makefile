@@ -27,10 +27,11 @@ GIT_VERSION := $(shell git for-each-ref --sort=-creatordate --sort=-refname --fo
 # Packaging tool. `vsce` (classic) or `@vscode/vsce` (maintained) both work;
 # falls back to an on-demand npx install when neither is on PATH.
 VSCE ?= $(or $(shell command -v vsce 2>/dev/null),npx --yes @vscode/vsce)
+OVSX ?= $(or $(shell command -v ovsx 2>/dev/null),npx --yes ovsx)
 
 .PHONY: help all build build-webview build-extension build-bundled check-types lint test unit \
 	watch dev smoke verify package check-package vsix install uninstall clean version _sync-version \
-	deps deps-root deps-webview
+	deps deps-root deps-webview publish-openvsx
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) \
@@ -110,6 +111,14 @@ _sync-version: ## Sync package.json + webview-ui/package.json versions to the la
 	fi
 
 release: verify package check-package ## Verify everything, produce the .vsix, then check its contents
+
+publish-openvsx: ## Publish dist/codepi-<version>.vsix to Open VSX (requires OVSX_PAT; does not package)
+	@if [ -z "$$OVSX_PAT" ]; then echo "OVSX_PAT is not set"; exit 1; fi
+	@v=$$(node -p "require('./package.json').version"); \
+	vsix="dist/codepi-$$v.vsix"; \
+	if [ ! -f "$$vsix" ]; then echo "Missing $$vsix — run make vsix first"; exit 1; fi; \
+	echo "Publishing $$vsix to Open VSX …"; \
+	$(OVSX) publish "$$vsix" -p "$$OVSX_PAT"
 
 ## ── Install ─────────────────────────────────────────────────
 

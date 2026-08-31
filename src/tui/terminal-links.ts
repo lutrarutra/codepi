@@ -11,6 +11,14 @@
  * `_parseWords` (terminalWordLinkDetector.ts), including the default
  * `terminal.integrated.wordSeparators` set.
  *
+ * One deliberate deviation from VS Code: `[` and `]` are NOT hard word
+ * separators. Framework route params (`src/routes/item/[id]/+page.server.ts`)
+ * must stay one word so the whole path is Ctrl+clickable; VS Code's default
+ * separator set would split that into `src/routes/item/`, `id` and
+ * `/+page.server.ts`. Brackets still act as separators inside non-path words
+ * (prose like `[WARN]` keeps splitting to `WARN`), via a second pass in
+ * `detectWordLinks`.
+ *
  * Activation and hover behavior mirror TerminalLinkManager:
  * - xterm's Linkifier draws the hover underline + pointer cursor.
  * - Ctrl+click (also ⌘/Alt, covering both `editor.multiCursorModifier`
@@ -19,8 +27,15 @@
  *   through options.linkHandler with the same gate.
  */
 
-/** VS Code's default `terminal.integrated.wordSeparators`. */
-const WORD_SEPARATORS = " ()[]{}',\"`─\u2018\u2019\u201C\u201D|";
+/**
+ * Hard word separators: VS Code's default `terminal.integrated.wordSeparators`
+ * minus `[` and `]`, which are handled contextually in `detectWordLinks` so
+ * route params like `[id]` stay attached to path words.
+ */
+const WORD_SEPARATORS = " (){}',\"`─\u2018\u2019\u201C\u201D|";
+
+/** Brackets split only non-path words (see detectWordLinks). */
+const BRACKET_SEPARATOR_REGEX = /[\[\]]/g;
 
 function escapeRegExpCharacters(value: string): string {
 	return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -66,6 +81,11 @@ export const MAX_WORD_LINK_LENGTH = 100;
  * split on the terminal word separators, drop a trailing `:` from each word
  * (`https://example.com:` → `https://example.com`), skip empties and
  * over-long words. The extension classifies each word on activation.
+ *
+ * Deviation from VS Code: a word is first split on the hard separators (which
+ * EXCLUDE `[`/`]`), then brackets only split words that are not path-like
+ * (contain no `/`). So `src/routes/item/[id]/+page.server.ts` stays a single
+ * word, while `[WARN]` in prose still splits to `WARN`.
  */
 export function detectWordLinks(line: string): CodePiLink[] {
 	if (line.length === 0 || line.length > MAX_LINK_LINE_LENGTH) return [];
@@ -75,24 +95,36 @@ export function detectWordLinks(line: string): CodePiLink[] {
 	let runningIndex = 0;
 	for (const part of parts) {
 		if (part.length > 0) {
-			let text = part;
-			let end = runningIndex + part.length;
-			if (text.charAt(text.length - 1) === ":") {
-				text = text.slice(0, -1);
-				end--;
-			}
-			if (text.length > 0 && text.length <= MAX_WORD_LINK_LENGTH) {
-				links.push({
-					kind: "word",
-					text,
-					start: runningIndex,
-					end,
-				});
+			const isPathLike = part.includes("/");
+			if (isPathLike) {
+				pushWord(links, part, runningIndex);
+			} else {
+				// Non-path word: brackets act as separators, like VS Code.
+				let localIndex = 0;
+				const bracketParts = part.split(BRACKET_SEPARATOR_REGEX);
+				for (const sub of bracketParts) {
+					if (sub.length > 0) {
+						pushWord(links, sub, runningIndex + localIndex);
+					}
+					localIndex += sub.length + 1;
+				}
 			}
 		}
 		runningIndex += part.length + 1;
 	}
 	return links;
+}
+
+/** Push a single word with the trailing-colon and length rules applied. */
+function pushWord(links: CodePiLink[], text: string, start: number): void {
+	let end = start + text.length;
+	if (text.charAt(text.length - 1) === ":") {
+		text = text.slice(0, -1);
+		end--;
+	}
+	if (text.length > 0 && text.length <= MAX_WORD_LINK_LENGTH) {
+		links.push({ kind: "word", text, start, end });
+	}
 }
 
 // ── Activation modifier ─────────────────────────────────────

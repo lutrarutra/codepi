@@ -98,6 +98,59 @@ describe("detectWordLinks — every word is a link (VS Code parity)", () => {
 	});
 });
 
+describe("detectWordLinks — route params stay attached to path words", () => {
+	it("keeps a SvelteKit route with [id] as a single word", () => {
+		const words = texts("src/routes/item/[id]/+page.server.ts");
+		expect(words.map((w) => w.text)).toEqual([
+			"src/routes/item/[id]/+page.server.ts",
+		]);
+	});
+
+	it("keeps multiple bracket params as a single word", () => {
+		const words = texts("src/routes/[lang]/blog/[slug]/+page.svelte");
+		expect(words.map((w) => w.text)).toEqual([
+			"src/routes/[lang]/blog/[slug]/+page.svelte",
+		]);
+	});
+
+	it("computes correct ranges for a bracketed route", () => {
+		const words = texts("go to src/routes/[x]/page.ts now");
+		expect(words).toEqual([
+			{ text: "go", start: 0, end: 2 },
+			{ text: "to", start: 3, end: 5 },
+			{ text: "src/routes/[x]/page.ts", start: 6, end: 28 },
+			{ text: "now", start: 29, end: 32 },
+		]);
+	});
+
+	it("keeps :line:col suffixes on bracketed routes", () => {
+		const words = texts("edit src/routes/item/[id]/+page.server.ts:12:5");
+		expect(words.map((w) => w.text)).toEqual([
+			"edit",
+			"src/routes/item/[id]/+page.server.ts:12:5",
+		]);
+	});
+
+	it("keeps URLs containing brackets as single words", () => {
+		const words = texts("see https://example.com/docs/[id] now");
+		expect(words.map((w) => w.text)).toEqual([
+			"see",
+			"https://example.com/docs/[id]",
+			"now",
+		]);
+	});
+
+	it("still splits brackets in prose (no slash in the word)", () => {
+		const words = texts("build [WARN] done");
+		expect(words.map((w) => w.text)).toEqual(["build", "WARN", "done"]);
+	});
+
+	it("still splits bracket-prefixed prose", () => {
+		const words = texts("log [id] ok");
+		expect(words.map((w) => w.text)).toEqual(["log", "id", "ok"]);
+	});
+});
+
 describe("activation modifier", () => {
 	it("accepts ctrl, meta and alt", () => {
 		expect(
