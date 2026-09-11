@@ -129,6 +129,11 @@ jobs:
       - name: Create or update GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
+          # This job never checks out the repository (it only downloads the
+          # vsix artifact), so gh cannot infer the repo from a git remote —
+          # without GH_REPO it dies with "failed to run git: fatal: not a git
+          # repository". Point it at the repo explicitly.
+          GH_REPO: ${{ github.repository }}
         run: |
           VSIX="$(ls dist/*.vsix)"
           if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
