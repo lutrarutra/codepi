@@ -1,9 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+	createActivityBridge,
 	createSessionActivityTracker,
 	readBashApprovalMode,
 	type ActivityEvent,
 	type SessionActivity,
+	type UIPromptEvent,
+	type UIPromptEventSource,
 } from "../session-activity";
 
 function makeTracker(bashMode: () => "ask" | "auto" = () => "ask") {
@@ -25,6 +28,8 @@ function makeTracker(bashMode: () => "ask" | "auto" = () => "ask") {
 			toolName?: string;
 			message?: { errorMessage?: string };
 		}) => listener?.(e as ActivityEvent),
+		/** The externally-fed path (used by the activity bridge). */
+		push: tracker.emit,
 		activities: () => onActivity.mock.calls.map((c) => c[0] as SessionActivity),
 		dispose: tracker.dispose,
 	};
@@ -101,7 +106,12 @@ describe("createSessionActivityTracker", () => {
 		auto.emit({ type: "extension_ui_end" });
 		auto.emit({ type: "tool_execution_end", toolName: "bash" });
 		auto.emit({ type: "agent_end" });
-		expect(auto.activities()).toEqual(["working", "waiting", "working", "idle"]);
+		expect(auto.activities()).toEqual([
+			"working",
+			"waiting",
+			"working",
+			"idle",
+		]);
 	});
 
 	it("does not flip to waiting for extension dialogs while idle (slash commands)", () => {
@@ -129,6 +139,17 @@ describe("createSessionActivityTracker", () => {
 		t.emit({ type: "extension_ui_start" }); // revision input
 		t.emit({ type: "extension_ui_end" });
 		t.emit({ type: "tool_execution_end", toolName: "bash" });
+		expect(t.activities()).toEqual(["working", "waiting", "working"]);
+	});
+
+	it("accepts externally-fed dialog events via emit() (activity bridge)", () => {
+		// The session event stream does not carry dialog events; pi's ui_prompt
+		// events reach the host through the bridge and tracker.emit, which
+		// shares the same state machine as session events.
+		const t = makeTracker();
+		t.emit({ type: "turn_start" });
+		t.push({ type: "extension_ui_start", ui: "custom" });
+		t.push({ type: "extension_ui_end", ui: "custom" });
 		expect(t.activities()).toEqual(["working", "waiting", "working"]);
 	});
 
@@ -189,5 +210,47 @@ describe("readBashApprovalMode", () => {
 			},
 		];
 		expect(readBashApprovalMode(branch)).toBe("ask");
+	});
+});
+
+describe("createActivityBridge", () => {
+	/** Minimal fake ExtensionAPI capturing the registered handlers. */
+	function makePiStub() {
+		const handlers = new Map<string, (event: UIPromptEvent) => void>();
+		const pi: UIPromptEventSource = {
+			on: (event, handler) => {
+				handlers.set(event, handler);
+			},
+		};
+		return {
+			pi,
+			fire: (event: string, payload: UIPromptEvent) =>
+				handlers.get(event)?.(payload),
+		};
+	}
+
+	it("maps ui_prompt_start/end onto the tracker event vocabulary", () => {
+		const events: ActivityEvent[] = [];
+		const stub = makePiStub();
+		createActivityBridge((event) => events.push(event))(stub.pi);
+		stub.fire("ui_prompt_start", { kind: "custom", title: "Review changes" });
+		stub.fire("ui_prompt_end", { kind: "custom" });
+		expect(events).toEqual([
+			{ type: "extension_ui_start", ui: "custom", title: "Review changes" },
+			{ type: "extension_ui_end", ui: "custom" },
+		]);
+	});
+
+	it("drives the indicator for dialog kinds the old patch never covered", () => {
+		// editor/custom have no bundled call sites, so the patched
+		// interactive-mode hooks could not see them; upstream's ui_prompt
+		// events cover every ctx.ui.* kind.
+		const t = makeTracker();
+		const stub = makePiStub();
+		createActivityBridge(t.push)(stub.pi);
+		t.emit({ type: "turn_start" });
+		stub.fire("ui_prompt_start", { kind: "editor" });
+		stub.fire("ui_prompt_end", { kind: "editor" });
+		expect(t.activities()).toEqual(["working", "waiting", "working"]);
 	});
 });

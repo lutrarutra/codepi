@@ -16,7 +16,7 @@ blocks the one browser-level workaround. Two viable designs, both implemented
 or fully scoped:
 
 | Approach | Before-close? | Cost |
-|---|---|---|
+| --- | --- | --- |
 | **A. Restore-based modal** (prototyped, tested) | No — warns immediately *after* close, tab is recreated; agent never stops | None beyond ~1 frame of flicker. Honest dialog, explicit [Keep Session Open]. |
 | **B. Convert TUI tab to a custom editor** (scoped, not implemented) | **Yes** — native dirty-save dialog, Cancel keeps the tab open | File-save dialog semantics ("Save"/"Don't Save" both close; only "Cancel" keeps), tab icon regression, refactor, engine bump. |
 
@@ -94,7 +94,7 @@ genesis-ai-dev/codex-editor#1097).
 Feasibility findings, verified against installed VS Code 1.124.2:
 
 | Item | Verdict |
-|---|---|
+| --- | --- |
 | Native before-close dialog when the custom document is dirty | ✅ Works. **Cancel keeps the tab open.** |
 | Custom tab title (`webviewPanel.title`) | ✅ Works since the Oct 2025 release — PR microsoft/vscode#272375 (fixes #105299; follow-up cleanup #272787). ⚠️ Our engine `^1.105.0` predates it → bump to `^1.107.0` or accept filename titles on 1.105/1.106. |
 | `retainContextWhenHidden`, `localResourceRoots` | ✅ Via `registerCustomEditorProvider(..., { webviewOptions })` — the xterm TUI survives tab switches. |
@@ -138,6 +138,7 @@ closed webviews").
 ### 2.2 Implementation (files touched)
 
 **`src/tui/webview-pty.ts`**
+
 - `private readonly webview` → `private webview`.
 - New `setWebview(webview)`: re-points the pty at a new panel's webview;
   resets `ready = false` and clears `pendingWrite` so writes buffer until the
@@ -146,6 +147,7 @@ closed webviews").
   re-sent).
 
 **`src/extension.ts`**
+
 - `SessionState` gains `activity: SessionActivity` (import the type from
   `./session-activity`) and `progressActive: boolean`. The existing
   `createSessionActivityTracker` (which already distinguishes exactly
@@ -160,6 +162,7 @@ closed webviews").
   icon, title. Shared by fresh panels (`setupSessionPanel`), window-reload
   restores (serializer), and reattached panels.
 - `panel.onDidDispose` logic:
+
   ```ts
   const agentActive = state.activity === "working" || state.activity === "waiting";
   if (agentActive && !state.pty.quitting && sessions.has(sessionId)) {
@@ -168,6 +171,7 @@ closed webviews").
     cleanupSession(sessionId);
   }
   ```
+
   (`pty.quitting` is set by `drainInput` on TUI shutdown paths — `/quit`
   already cleans up via the `process.exit` interception, so intentional closes
   never prompt.)
@@ -183,6 +187,7 @@ closed webviews").
   `getModeInfoFromSessions` guards `state.panel.visible` with try/catch.
 
 **`src/__tests__/webview-pty.test.ts`**
+
 - New test: `setWebview` re-points the pty, buffers writes until the new
   webview reports ready, flushes in order afterwards.
 
@@ -252,7 +257,12 @@ If the before-close dialog is a hard requirement, this is the only route
   - `createSessionActivityTracker` (`src/session-activity.ts`) — emits
     `idle | working | waiting | error` from pi session events; `waiting`
     covers `ask_user_question`, the bash approval dialog ("ask" mode), and
-    extension UI dialogs (`extension_ui_start/end`).
+    extension UI dialogs. Dialog events arrive through the activity bridge
+    (`createActivityBridge`, registered as a hidden inline extension via the
+    resource loader's `extensionFactories`), which forwards pi's official
+    `ui_prompt_start` / `ui_prompt_end` extension events — they cover every
+    `ctx.ui.*` kind (select / confirm / input / editor / custom) and do not
+    travel on the session event stream.
   - `pty.quitting` (`src/tui/webview-pty.ts`) — set by `drainInput()` on
     TUI shutdown paths; the `process.exit` interception
     (`src/extension.ts` ~line 334) uses it to target `/quit` closes.

@@ -13,9 +13,12 @@ import { createCodepiBashToolDefinition } from "./tools/bash";
 import { getBashBridge } from "../resources/extensions/bash-bridge";
 import { disposeDiagnosticsCache } from "./tools/diagnostics";
 import { installAutoVerify } from "./auto-verify";
+import { installInspectorUncaughtGuard } from "./uncaught-guard";
 import {
+	createActivityBridge,
 	createSessionActivityTracker,
 	readBashApprovalMode,
+	type ActivityEvent,
 } from "./session-activity";
 import { SessionsViewProvider } from "./views/sessions-view";
 import { ReviewManager, pendingLineCounts } from "./review/review-manager";
@@ -36,7 +39,10 @@ import type {
 	SessionMessageEntry,
 	ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
-import type { Extension as SdkExtension } from "@earendil-works/pi-coding-agent";
+import type {
+	Extension as SdkExtension,
+	InlineExtension,
+} from "@earendil-works/pi-coding-agent";
 import { WebviewPty } from "./tui/webview-pty";
 import {
 	classifyAsUrl,
@@ -72,6 +78,7 @@ import {
 	buildCurrentPiRuntimeResourcePaths,
 	buildPiResourceLoaderOptions,
 	buildPiRuntimeResourcePaths,
+	extensionRegistersName,
 	filterConflictingExtensions,
 	installImplicitBundledThemeReload,
 } from "./pi-runtime-config";
@@ -184,7 +191,9 @@ function updateReviewStatusBar(): void {
 
 // Lazy import — pi SDK is ESM-only, must use dynamic import from CJS bundle
 let _pi: typeof import("@earendil-works/pi-coding-agent") | undefined;
-async function getPi(): Promise<typeof import("@earendil-works/pi-coding-agent")> {
+async function getPi(): Promise<
+	typeof import("@earendil-works/pi-coding-agent")
+> {
 	if (!_pi) {
 		_pi = await import("@earendil-works/pi-coding-agent");
 	}
@@ -296,6 +305,16 @@ export async function activate(context: vscode.ExtensionContext) {
 	} catch {
 		/* settings unreadable — recent list stays empty */
 	}
+
+	// Node's inspector network tracking — active whenever a JS debugger is
+	// attached with the Network view (`debug.javascript.enableNetworkView`
+	// defaults to true) — throws `TypeError: Missing dataLength in event` from
+	// inside its own response handler. pi treats every uncaughtException as
+	// fatal, so that benign runtime error used to tear down healthy sessions
+	// (it is raised by the debugger's instrumentation, not by the request).
+	// Installed only while this process is inspectable; every other error keeps
+	// its existing handling (see src/uncaught-guard.ts).
+	context.subscriptions.push(installInspectorUncaughtGuard());
 
 	// pi's InteractiveMode ends every quit path (/quit, Ctrl+C/Ctrl+D, signals)
 	// with process.exit(). VS Code's extension host already neutralizes
@@ -1125,7 +1144,9 @@ function computeSessionTitle(
 	}
 	const cut = firstLine.slice(0, maxChars);
 	const lastSpace = cut.lastIndexOf(" ");
-	return (lastSpace > 6 ? cut.slice(0, lastSpace) : cut.slice(0, maxChars - 1)) + "…";
+	return (
+		(lastSpace > 6 ? cut.slice(0, lastSpace) : cut.slice(0, maxChars - 1)) + "…"
+	);
 }
 
 /**
@@ -1263,8 +1284,14 @@ async function setupSessionPanel(
 		readJsonFile(getSettingsPath()) ?? {},
 	);
 	const labelMaxChars =
-		tabHandleWidth > 0 ? Math.max(8, Math.floor((tabHandleWidth - 60) / 6.5)) : 20;
-	const initialTitle = computeSessionTitle(sessionManager, undefined, labelMaxChars);
+		tabHandleWidth > 0
+			? Math.max(8, Math.floor((tabHandleWidth - 60) / 6.5))
+			: 20;
+	const initialTitle = computeSessionTitle(
+		sessionManager,
+		undefined,
+		labelMaxChars,
+	);
 	panel.title = initialTitle;
 
 	// `extensionUri` is resolved from the module-level activation context.
@@ -1298,8 +1325,11 @@ async function setupSessionPanel(
 			state.sessionNameOverride = undefined;
 		}
 		panel.title =
-			computeSessionTitle(sessionManager, state.sessionNameOverride, labelMaxChars) +
-			(progressActive ? " ●" : "");
+			computeSessionTitle(
+				sessionManager,
+				state.sessionNameOverride,
+				labelMaxChars,
+			) + (progressActive ? " ●" : "");
 	};
 	const pty = new WebviewPty(
 		panel.webview,
@@ -1614,6 +1644,20 @@ async function startTuiBackend(state: SessionState): Promise<void> {
 		? vscode.Uri.joinPath(extensionUri, "resources", "extensions")
 		: undefined;
 
+	// Tab-indicator dialog bridge: pi emits `ui_prompt_start` / `ui_prompt_end`
+	// on the extension event bus for every ctx.ui.* dialog kind (select /
+	// confirm / input / editor / custom). A hidden inline extension forwards
+	// them onto the activity tracker, so blocking dialogs flip the panel icon
+	// to "waiting" without patching pi's interactive mode. The tracker is
+	// created after the session (it needs the runtime), so the emitter is
+	// late-bound here and assigned below.
+	let emitActivityEvent: ((event: ActivityEvent) => void) | undefined;
+	const activityBridge: InlineExtension = {
+		name: "codepi-activity-bridge",
+		hidden: true,
+		factory: createActivityBridge((event) => emitActivityEvent?.(event)),
+	};
+
 	// Build all resource paths inside the runtime factory. The SDK may invoke this
 	// factory for more than one new session; each session must see current settings
 	// and bundled-resource toggles rather than activation-time snapshots.
@@ -1680,6 +1724,9 @@ async function startTuiBackend(state: SessionState): Promise<void> {
 				noExtensions: loaderOptions.noExtensions,
 				additionalExtensionPaths: loaderOptions.additionalExtensionPaths,
 				additionalThemePaths: loaderOptions.additionalThemePaths,
+				// Hidden inline extension forwarding pi's ui_prompt_start/end
+				// extension events to the tab-indicator tracker (see above).
+				extensionFactories: [activityBridge],
 				appendSystemPromptOverride: (base: string[]) =>
 					contextSnapshot ? [...base, contextSnapshot] : base,
 				extensionsOverride: (base: LoadExtensionsResult) => {
@@ -1692,11 +1739,10 @@ async function startTuiBackend(state: SessionState): Promise<void> {
 					// non-bundled extension that registers a command or tool name
 					// also provided by a bundled extension, and clear the loader's
 					// conflict diagnostics for the dropped extension.
-					const { extensions, droppedPaths } =
-						filterConflictingExtensions(
-							base.extensions,
-							bundledExtensions,
-						);
+					const { extensions, droppedPaths } = filterConflictingExtensions(
+						base.extensions,
+						bundledExtensions,
+					);
 					for (const extPath of droppedPaths) {
 						console.warn(
 							`[CodePi] dropping extension ${extPath}: it registers commands/tools also provided by a CodePi bundled extension (bundled copy wins).`,
@@ -1706,9 +1752,7 @@ async function startTuiBackend(state: SessionState): Promise<void> {
 					return {
 						...base,
 						extensions,
-						errors: base.errors.filter(
-							(error) => !dropped.has(error.path),
-						),
+						errors: base.errors.filter((error) => !dropped.has(error.path)),
 					};
 				},
 			},
@@ -1720,20 +1764,23 @@ async function startTuiBackend(state: SessionState): Promise<void> {
 		let hostContextTools: ReturnType<typeof createHostContextTools> | undefined;
 		if (isContextExtensionEnabled(settings)) {
 			const extensionResult = loader.getExtensions();
+			// Match by registered tool, not file name: bundled extensions ship
+			// compiled as `dist/codepi-context.js` (dev loads use the `.ts`
+			// source), so a suffix check on "codepi-context.ts" never matched
+			// and the fallback registered duplicate tools on every session.
 			const contextLoaded = extensionResult.extensions.some(
 				(extension: SdkExtension) =>
-					(extension.resolvedPath ?? extension.path).endsWith(
-						"codepi-context.ts",
-					),
+					extensionRegistersName(extension, "get_editor_context"),
 			);
 			if (!contextLoaded) {
+				const shortPath = (p: string) => p.split(/[\\/]/).slice(-2).join("/");
 				console.warn(
 					"[CodePi] codepi-context extension did not load in this environment — registering get_editor_context/get_git_diff via the host fallback instead. Loaded extensions:",
-						extensionResult.extensions.map((e: SdkExtension) =>
-						(e.resolvedPath ?? e.path).split(/[\\/]/).slice(-2).join("/"),
+					extensionResult.extensions.map((e: SdkExtension) =>
+						shortPath(e.resolvedPath ?? e.path),
 					),
 					"Loader errors:",
-					extensionResult.errors,
+					extensionResult.errors.map((e) => `${shortPath(e.path)}: ${e.error}`),
 				);
 				hostContextTools = createHostContextTools();
 			}
@@ -1764,9 +1811,7 @@ async function startTuiBackend(state: SessionState): Promise<void> {
 					: () => "auto",
 			}),
 		);
-		const customTools: Array<VscodeTool | ToolDefinition> = [
-			...customToolDefs,
-		];
+		const customTools: Array<VscodeTool | ToolDefinition> = [...customToolDefs];
 		if (hostContextTools) {
 			customTools.push(...hostContextTools);
 		}
@@ -1818,13 +1863,13 @@ async function startTuiBackend(state: SessionState): Promise<void> {
 	// cyan while generating, yellow while a tool waits on user input
 	// (ask_user_question dialog, or the bash approval dialog in "ask" mode),
 	// white when idle, red on a failed turn.
-	state.disposables.push(
-		createSessionActivityTracker({
-			subscribe: (listener) => runtime.session.subscribe(listener),
-			bashMode: () => readBashApprovalMode(state.sessionManager.getBranch()),
-			onActivity: (activity) => setPanelIcon(state.panel, activity),
-		}),
-	);
+	const activityTracker = createSessionActivityTracker({
+		subscribe: (listener) => runtime.session.subscribe(listener),
+		bashMode: () => readBashApprovalMode(state.sessionManager.getBranch()),
+		onActivity: (activity) => setPanelIcon(state.panel, activity),
+	});
+	emitActivityEvent = activityTracker.emit;
+	state.disposables.push(activityTracker);
 
 	// Auto-verify: after a turn that edited files, lint exactly those files
 	// and feed the findings back to the model (mode from codepi.autoVerify).

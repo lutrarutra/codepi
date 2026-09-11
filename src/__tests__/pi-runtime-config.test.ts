@@ -5,6 +5,7 @@ import {
 	buildCurrentPiRuntimeResourcePaths,
 	buildPiResourceLoaderOptions,
 	buildPiRuntimeResourcePaths,
+	extensionRegistersName,
 	filterConflictingExtensions,
 	installImplicitBundledThemeReload,
 } from "../pi-runtime-config";
@@ -191,6 +192,62 @@ describe("Pi runtime resource paths", () => {
 });
 
 // ── filterConflictingExtensions ─────────────────────────────
+
+describe("extensionRegistersName", () => {
+	const bundledContext = "/ext/resources/extensions/dist/codepi-context.js";
+
+	function ext(
+		path: string,
+		commands: string[] = [],
+		tools: string[] = [],
+	): any {
+		return {
+			path,
+			resolvedPath: path,
+			commands: new Map(commands.map((name) => [name, { name }])),
+			tools: new Map(tools.map((name) => [name, { name }])),
+		};
+	}
+
+	it("detects a bundled extension by its registered tools (compiled .js path)", () => {
+		// Regression: the host used to test the "codepi-context.ts" path suffix,
+		// which never matched bundled extensions shipped as dist/*.js — so the
+		// host fallback registered duplicate get_editor_context/get_git_diff
+		// tools and warned on every session.
+		expect(
+			extensionRegistersName(
+				ext(bundledContext, [], ["get_editor_context", "get_git_diff"]),
+				"get_editor_context",
+			),
+		).toBe(true);
+	});
+
+	it("reads command registrations as well", () => {
+		expect(
+			extensionRegistersName(
+				ext(bundledContext, ["filechanges"]),
+				"filechanges",
+			),
+		).toBe(true);
+	});
+
+	it("is false for other names, no registrations and plain key tables", () => {
+		expect(
+			extensionRegistersName(ext(bundledContext), "get_editor_context"),
+		).toBe(false);
+		expect(
+			extensionRegistersName(
+				ext(bundledContext, ["status"], ["head"]),
+				"get_editor_context",
+			),
+		).toBe(false);
+		const plainTables = {
+			path: bundledContext,
+			commands: { keys: () => ["filechanges"][Symbol.iterator]() },
+		};
+		expect(extensionRegistersName(plainTables, "filechanges")).toBe(true);
+	});
+});
 
 describe("filterConflictingExtensions", () => {
 	const bundledDiff = "/ext/resources/extensions/dist/codepi-diff.js";

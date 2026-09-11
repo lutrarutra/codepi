@@ -11,7 +11,7 @@ const CORE_DIR = path.resolve(
 	"node_modules/@earendil-works/pi-coding-agent/dist/core",
 );
 
-describe("SDK host-integration patch (0.84.3)", () => {
+describe("SDK host-integration patch (0.85.1)", () => {
 	it("threads options.terminal into createInteractiveTui", () => {
 		const js = fs.readFileSync(
 			path.join(DIST_DIR, "interactive-mode.js"),
@@ -19,10 +19,11 @@ describe("SDK host-integration patch (0.84.3)", () => {
 		);
 		// The `?? new ProcessTerminal()` fallback exists upstream inside
 		// createInteractiveTui since 0.84.0; the patch only threads the option
-		// from InteractiveModeOptions into that call. 0.84.1 added
-		// `onRightClickPaste` to the same call, so it may sit after terminal.
+		// from InteractiveModeOptions into that call. Upstream keeps adding
+		// properties to the same call (0.84.1 `onRightClickPaste`, 0.85.1
+		// `fullscreenCopyOnSelect`), so allow any trailing property lines.
 		expect(js).toMatch(
-			/createInteractiveTui\(\{[\s\S]*?terminal: options\.terminal,?\n\s*(?:onRightClickPaste: this\.onRightClickPaste,\n\s*)?\}\)/,
+			/createInteractiveTui\(\{[\s\S]*?\n\s*terminal: options\.terminal,\n(?:\s*\w+: [^\n]*,\n)*\s*\}\)/,
 		);
 	});
 	it("declares terminal on InteractiveModeOptions", () => {
@@ -37,7 +38,7 @@ describe("SDK host-integration patch (0.84.3)", () => {
 		);
 	});
 
-	describe("SDK baseToolsOverride exposure patch (0.84.3)", () => {
+	describe("SDK baseToolsOverride exposure patch (0.85.1)", () => {
 		it("passes baseToolsOverride through createAgentSession", () => {
 			const js = fs.readFileSync(path.join(CORE_DIR, "sdk.js"), "utf8");
 			expect(js).toMatch(/baseToolsOverride: options\.baseToolsOverride/);
@@ -52,6 +53,15 @@ describe("SDK host-integration patch (0.84.3)", () => {
 			const dts = fs.readFileSync(path.join(CORE_DIR, "sdk.d.ts"), "utf8");
 			expect(dts).toMatch(/baseToolsOverride\?: Record<string, Tool>/);
 		});
+		it("imports the Tool type used by the option", () => {
+			// 0.85.1 re-exports Tool but does not bind it locally, so the
+			// patch must add the import itself (skipLibCheck would hide the
+			// dangling reference — assert the import explicitly).
+			const dts = fs.readFileSync(path.join(CORE_DIR, "sdk.d.ts"), "utf8");
+			expect(dts).toMatch(
+				/import type \{ Tool \} from "\.\/tools\/index\.ts";/,
+			);
+		});
 		it("forwards prompt metadata and renderers when synthesizing definitions", () => {
 			const js = fs.readFileSync(
 				path.join(CORE_DIR, "tools/tool-definition-wrapper.js"),
@@ -62,22 +72,18 @@ describe("SDK host-integration patch (0.84.3)", () => {
 		});
 	});
 
-	describe("SDK extension-dialog events patch (0.84.3)", () => {
-		it("emits extension_ui_start/end for the selector dialog", () => {
+	describe("SDK extension-dialog events (moved to the ui_prompt bridge)", () => {
+		it("no longer patches dialog events into interactive-mode", () => {
+			// Dialog coverage comes from pi's official ui_prompt_start/end
+			// extension events via createActivityBridge (src/session-activity.ts),
+			// so the patch must not emit anything itself — and must not depend on
+			// the private AgentSession._emit that upstream could rename at will.
 			const js = fs.readFileSync(
 				path.join(DIST_DIR, "interactive-mode.js"),
 				"utf8",
 			);
-			expect(js).toMatch(/extension_ui_start", ui: "select/);
-			expect(js).toMatch(/extension_ui_end", ui: "select"/);
-		});
-		it("emits extension_ui_start/end for the input dialog", () => {
-			const js = fs.readFileSync(
-				path.join(DIST_DIR, "interactive-mode.js"),
-				"utf8",
-			);
-			expect(js).toMatch(/extension_ui_start", ui: "input"/);
-			expect(js).toMatch(/extension_ui_end", ui: "input"/);
+			expect(js).not.toMatch(/extension_ui_start|extension_ui_end/);
+			expect(js).not.toMatch(/this\.session\?\._emit/);
 		});
 	});
 });

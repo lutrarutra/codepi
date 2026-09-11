@@ -1,8 +1,16 @@
 diff --git a/node_modules/@earendil-works/pi-coding-agent/dist/core/sdk.d.ts b/node_modules/@earendil-works/pi-coding-agent/dist/core/sdk.d.ts
-index 040051f..45a9d44 100644
+index 040051f..c35eec3 100644
 --- a/node_modules/@earendil-works/pi-coding-agent/dist/core/sdk.d.ts
 +++ b/node_modules/@earendil-works/pi-coding-agent/dist/core/sdk.d.ts
-@@ -43,6 +43,15 @@ export interface CreateAgentSessionOptions {
+@@ -7,6 +7,7 @@ import type { ResourceLoader } from "./resource-loader.ts";
+ import { SessionManager } from "./session-manager.ts";
+ import { SettingsManager } from "./settings-manager.ts";
+ import { createBashTool, createCodingTools, createEditTool, createFindTool, createGrepTool, createLsTool, createPowerShellTool, createReadOnlyTools, createReadTool, createWriteTool, withFileMutationQueue } from "./tools/index.ts";
++import type { Tool } from "./tools/index.ts";
+ export interface CreateAgentSessionOptions {
+     /** Working directory for project-local discovery. Default: process.cwd() */
+     cwd?: string;
+@@ -43,6 +44,15 @@ export interface CreateAgentSessionOptions {
      tools?: string[];
      /** Optional denylist of tool names to disable. Applies after `tools` when both are provided. */
      excludeTools?: string[];
@@ -66,10 +74,10 @@ index e05fec9..f8b2738 100644
      };
  }
 diff --git a/node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/interactive-mode.d.ts b/node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/interactive-mode.d.ts
-index 0b7c7fb..b40fa56 100644
+index 33af177..e73c48e 100644
 --- a/node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/interactive-mode.d.ts
 +++ b/node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/interactive-mode.d.ts
-@@ -33,6 +33,8 @@ export interface InteractiveModeOptions {
+@@ -32,6 +32,8 @@ export interface InteractiveModeOptions {
      verbose?: boolean;
      /** TUI layout mode. */
      tuiMode?: TuiMode;
@@ -79,57 +87,19 @@ index 0b7c7fb..b40fa56 100644
      initialThemeSetting?: string;
  }
 diff --git a/node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/interactive-mode.js b/node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/interactive-mode.js
-index 19dafec..faa481b 100644
+index a1e7d98..d9d53c2 100644
 --- a/node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/interactive-mode.js
 +++ b/node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/interactive-mode.js
-@@ -365,6 +365,7 @@ export class InteractiveMode {
+@@ -322,6 +322,7 @@ export class InteractiveMode {
              tuiMode,
              showHardwareCursor: this.settingsManager.getShowHardwareCursor(),
              logDirectory: getAgentDir(),
 +            terminal: options.terminal,
              onRightClickPaste: this.onRightClickPaste,
+             fullscreenCopyOnSelect: this.settingsManager.getFullscreenCopyOnSelect(),
          });
-         this.ui = createInteractiveTuiReference(() => this.renderer);
-@@ -1968,6 +1969,10 @@ export class InteractiveMode {
-                 resolve(undefined);
-                 return;
-             }
-+            // CodePi patch: surface the dialog on the session event stream so
-+            // hosts (tab icon tracker) can show "waiting for user input" while
-+            // the agent is blocked on extension UI (e.g. a permission dialog).
-+            this.session?._emit?.({ type: "extension_ui_start", ui: "select", title });
-             const onAbort = () => {
-                 this.hideExtensionSelector();
-                 resolve(undefined);
-@@ -1993,6 +1998,8 @@ export class InteractiveMode {
-      * Hide the extension selector.
-      */
-     hideExtensionSelector() {
-+        // CodePi patch: dialog closed — mirror the event.
-+        this.session?._emit?.({ type: "extension_ui_end", ui: "select" });
-         this.extensionSelector?.dispose();
-         this.editorContainer.clear();
-         this.editorContainer.addChild(this.editor);
-@@ -2020,6 +2027,8 @@ export class InteractiveMode {
-                 resolve(undefined);
-                 return;
-             }
-+            // CodePi patch: surface the dialog on the session event stream.
-+            this.session?._emit?.({ type: "extension_ui_start", ui: "input", title });
-             const onAbort = () => {
-                 this.hideExtensionInput();
-                 resolve(undefined);
-@@ -2045,6 +2054,8 @@ export class InteractiveMode {
-      * Hide the extension input.
-      */
-     hideExtensionInput() {
-+        // CodePi patch: dialog closed — mirror the event.
-+        this.session?._emit?.({ type: "extension_ui_end", ui: "input" });
-         this.extensionInput?.dispose();
-         this.editorContainer.clear();
-         this.editorContainer.addChild(this.editor);
 diff --git a/node_modules/@earendil-works/pi-coding-agent/package.json b/node_modules/@earendil-works/pi-coding-agent/package.json
-index 02f45a3..ed10c16 100644
+index 572af1e..69f7ce5 100644
 --- a/node_modules/@earendil-works/pi-coding-agent/package.json
 +++ b/node_modules/@earendil-works/pi-coding-agent/package.json
 @@ -14,7 +14,8 @@

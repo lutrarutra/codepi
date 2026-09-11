@@ -129,6 +129,22 @@ function registrationNames(ext: LoadedExtensionLike): string[] {
 }
 
 /**
+ * Whether the extension registered a given command or tool name.
+ *
+ * Used by the host to detect whether a bundled extension actually loaded
+ * without matching on its file name: bundled extensions ship compiled as
+ * `dist/<name>.js` while dev loads use the raw `.ts` sources, and a name
+ * check also catches the case where the extension loaded but failed to
+ * register (the capability is what the caller needs, not the file).
+ */
+export function extensionRegistersName(
+	ext: LoadedExtensionLike,
+	name: string,
+): boolean {
+	return registrationNames(ext).includes(name);
+}
+
+/**
  * Drop user-installed extensions that collide with CodePi's bundled ones.
  *
  * The SDK keeps every loaded extension and disambiguates same-named

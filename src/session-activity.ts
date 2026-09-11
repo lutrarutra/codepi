@@ -9,13 +9,16 @@
  *      - `ask_user_question` (the pi agent package dialog) always blocks
  *      - `bash` only blocks when the per-session approval mode is "ask" (the
  *        4-option Yes/No/Revise/auto-approve dialog gates every invocation)
- *  - `extension_ui_start/end` — an extension opened a blocking UI dialog
- *    (ctx.ui.select / ctx.ui.input, e.g. the safety-guard "Allow this
- *    action?" permission dialog). The dialog opens inside the tool_call
- *    hook, so `tool_execution_start` alone cannot detect it — the session
- *    emits these events when the interactive mode shows/hides the dialog.
- *    Only flips to "waiting" while a turn is active, so user-initiated
- *    extension dialogs (slash commands) while idle stay white.
+ *  - `extension_ui_start/end` — a blocking extension UI dialog opened (any
+ *    ctx.ui.* dialog: select / confirm / input / editor / custom, e.g. the
+ *    safety-guard "Allow this action?" permission dialog or the bash
+ *    approval dialog). The dialog opens inside the tool_call hook, so
+ *    `tool_execution_start` alone cannot detect it. These events are fed in
+ *    by the activity bridge (createActivityBridge), which forwards pi's
+ *    official `ui_prompt_start` / `ui_prompt_end` extension events — the
+ *    session event stream does not carry them. Only flips to "waiting"
+ *    while a turn is active, so user-initiated extension dialogs (slash
+ *    commands) while idle stay white.
  *  - `turn_end` with `message.errorMessage` — failed turn (red)
  *
  * Limitation (shared with installAutoVerify): the subscription is attached to
@@ -36,8 +39,11 @@ export type ActivityEvent = {
 	// `unknown`: the real events carry the full AgentMessage union here; the
 	// tracker only reads errorMessage, narrowed below.
 	message?: unknown;
-	/** Which extension UI surface opened/closed ("select" | "input"). */
+	/** Which extension UI surface opened/closed (select / confirm / input /
+	 *  editor / custom). */
 	ui?: string;
+	/** Dialog title, when the source provides one. */
+	title?: string;
 };
 
 const INPUT_TOOL_NAMES = new Set(["ask_user_question"]);
@@ -84,6 +90,12 @@ export function isInputTool(
 export type SessionActivityTracker = {
 	/** Unsubscribe and forget all state. */
 	dispose: () => void;
+	/**
+	 * Feed an externally-sourced event through the same state machine as
+	 * session events — used by the activity bridge to inject blocking
+	 * extension UI dialogs, which the session event stream does not carry.
+	 */
+	emit: (event: ActivityEvent) => void;
 };
 
 /**
@@ -105,7 +117,7 @@ export function createSessionActivityTracker(options: {
 	// an end event always clears its own start — even when the bash approval
 	// mode flips mid-execution (auto-approve picked inside the dialog).
 	const pendingInputToolIds = new Set<string>();
-	// Extension UI dialogs currently open (ctx.ui.select / ctx.ui.input).
+	// Extension UI dialogs currently open (any ctx.ui.* dialog).
 	// Counted (not boolean) so nested dialogs — e.g. approve → "Revise…" —
 	// keep the "waiting" state until the last one closes.
 	let pendingExtensionUiCount = 0;
@@ -116,7 +128,7 @@ export function createSessionActivityTracker(options: {
 		options.onActivity(next);
 	};
 
-	const dispose = options.subscribe((event) => {
+	const handle = (event: ActivityEvent): void => {
 		switch (event.type) {
 			case "turn_start":
 				turnActive = true;
@@ -183,11 +195,61 @@ export function createSessionActivityTracker(options: {
 				// agent-blocking dialogs do), so nothing to restore.
 				break;
 		}
-	});
+	};
 
-	return { dispose };
+	// Session events and the activity bridge's dialog events share one state
+	// machine.
+	const dispose = options.subscribe(handle);
+
+	return { dispose, emit: handle };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+// ── Extension UI activity bridge ─────────────────────────────
+
+/** Structural subset of pi's `ui_prompt_*` extension event payload. */
+export interface UIPromptEvent {
+	/** Dialog kind: select / confirm / input / editor / custom. */
+	kind?: string;
+	title?: string;
+}
+
+/** Structural subset of pi's ExtensionAPI that the bridge subscribes to. */
+export interface UIPromptEventSource {
+	on(
+		event: "ui_prompt_start" | "ui_prompt_end",
+		handler: (event: UIPromptEvent) => void,
+	): void;
+}
+
+/**
+ * Bridge pi's official `ui_prompt_start` / `ui_prompt_end` extension events
+ * onto the tracker's event stream.
+ *
+ * pi emits these from `ExtensionRunner.withUIPrompt()` for every `ctx.ui.*`
+ * dialog kind (select / confirm / input / editor / custom), so they cover
+ * dialogs an SDK patch would never reach — and they stay correct upstream
+ * refactors, unlike the interactive-mode internals this used to patch. The
+ * factory is registered as a hidden inline extension (the loader's
+ * `extensionFactories` option) and must be wired in by the host: pi's
+ * extension event bus is separate from the session event stream the tracker
+ * subscribes to.
+ *
+ * The tracker is created after the session (it needs the runtime), so the
+ * caller passes a late-bound emitter that forwards into `tracker.emit`.
+ */
+export function createActivityBridge(
+	emit: (event: ActivityEvent) => void,
+): (pi: UIPromptEventSource) => void {
+	return (pi) => {
+		pi.on("ui_prompt_start", (event) =>
+			emit({ type: "extension_ui_start", ui: event.kind, title: event.title }),
+		);
+		pi.on("ui_prompt_end", (event) =>
+			emit({ type: "extension_ui_end", ui: event.kind }),
+		);
+	};
 }
