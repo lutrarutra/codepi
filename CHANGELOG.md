@@ -2,6 +2,21 @@
 
 All notable changes to CodePi are documented in this file.
 
+## Unreleased
+
+- **Update to pi 0.87.1.** The host-integration patch shrinks from six files to
+  four: 0.87.0 adopted the `terminal` option on `InteractiveModeOptions`
+  natively, so only the `baseToolsOverride` exposure
+  (`dist/core/sdk.d.ts`, `dist/core/sdk.js`,
+  `dist/core/tools/tool-definition-wrapper.js`) and the CJS `require` export
+  condition still need patching. `@earendil-works/pi-tui` follows to 0.87.1.
+- Settings: expose pi 0.86's `cacheWarming` mode (`off`/`streaming`/`idle`) in
+  the settings dashboard.
+- Fix Ctrl+Left/Right in the TUI: on Windows/Linux the chord is no longer
+  remapped to line start/end, so xterm sends pi's native word-navigation
+  sequences. Cmd+Left/Right (macOS) and Ctrl/Cmd+Up/Down keep moving to the
+  start/end of the input line.
+
 ## 0.4.1
 
 - **Fix broken 0.4.0 release**: the GitHub Actions publish workflow passed

@@ -69,6 +69,7 @@ export const SETTINGS_SCHEMA: SchemaSection[] = [
 			f("httpProxy", "HTTP proxy URL", "string"),
 			f("httpIdleTimeoutMs", "HTTP idle timeout (ms)", "number", undefined, "0 disables"),
 			f("websocketConnectTimeoutMs", "WebSocket connect timeout (ms)", "number", undefined, "0 disables"),
+			f("cacheWarming", "Cache warming", "enum", ["off", "streaming", "idle"], 'Keep prompt caches alive during long tool runs; "idle" also warms between runs (costs money)'),
 			f("editorPaddingX", "Editor horizontal padding", "number"),
 			f("autocompleteMaxVisible", "Autocomplete max visible", "number"),
 			f("lastChangelogVersion", "Last changelog version", "string"),

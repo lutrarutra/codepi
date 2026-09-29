@@ -13,6 +13,9 @@ import {
 import { createScrollbackClearFilter } from "./scrollback";
 import { createViewportAnchor } from "./viewport-anchor";
 import { createFindWidget } from "./find";
+// The modifier+arrow chord table is shared with the extension's source tree
+// (the same cross-import as ./links) and kept DOM-free so it is unit-tested.
+import { resolveArrowChord } from "../../../src/tui/terminal-keys";
 
 // VSCode injects acquireVsCodeApi() globally — get it once at module level
 const vscodeApi =
@@ -430,30 +433,18 @@ function hideLoading(): void {
 				}
 				return false;
 			}
-			if (
-				(e.ctrlKey || e.metaKey) &&
-				!e.altKey &&
-				!e.shiftKey &&
-				(e.key === "ArrowLeft" ||
-					e.key === "ArrowRight" ||
-					e.key === "ArrowUp" ||
-					e.key === "ArrowDown")
-			) {
-				// pi's TUI binds ctrl+left/right to WORD movement (xterm sends
-				// \x1b[1;5D / \x1b[1;5C) and has no binding for ctrl+up/down at
-				// all, so remap to pi's line-start (\x01 = ctrl+a) and line-end
-				// (\x05 = ctrl+e) chords: ctrl+left/up move to the beginning of
-				// the input line, ctrl+right/down to its end. In the usually
-				// single-line composer that is the start/end of the text field.
-				// Cmd+arrows on macOS are the native text-field equivalents and
-				// get the same mapping. Single-byte chunks — pi's editor
-				// matches each incoming chunk against key combos as a whole.
+			const arrowInput = resolveArrowChord(e);
+			if (arrowInput !== undefined) {
+				// Only the chords pi cannot receive from xterm are remapped
+				// (Cmd+Left/Right, Ctrl/Cmd+Up/Down); Ctrl+Left/Right resolves
+				// to undefined and falls through, so xterm emits pi's native
+				// word-navigation sequences (\x1b[1;5D / \x1b[1;5C) instead of
+				// line start/end. See src/tui/terminal-keys.ts for the table.
+				// Single-byte chunks — pi's editor matches each incoming chunk
+				// against key combos as a whole.
 				e.preventDefault();
 				if (e.type === "keydown") {
-					term.input(
-						e.key === "ArrowLeft" || e.key === "ArrowUp" ? "\x01" : "\x05",
-						true,
-					);
+					term.input(arrowInput, true);
 				}
 				return false;
 			}

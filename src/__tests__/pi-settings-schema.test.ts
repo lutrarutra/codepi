@@ -77,6 +77,7 @@ describe("validateSettings", () => {
 			"treeFilterMode", "thinkingBudgets", "editorPaddingX",
 			"autocompleteMaxVisible", "showHardwareCursor", "markdown", "warnings",
 			"sessionDir", "httpProxy", "httpIdleTimeoutMs", "websocketConnectTimeoutMs",
+			"cacheWarming",
 		];
 		for (const k of expected) {
 			expect(keys).toContain(k);

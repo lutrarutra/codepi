@@ -27,10 +27,10 @@ index 040051f..c35eec3 100644
      customTools?: ToolDefinition[];
      /** Resource loader. When omitted, DefaultResourceLoader is used. */
 diff --git a/node_modules/@earendil-works/pi-coding-agent/dist/core/sdk.js b/node_modules/@earendil-works/pi-coding-agent/dist/core/sdk.js
-index 8bb4595..83f68fa 100644
+index cb6d649..f4915f5 100644
 --- a/node_modules/@earendil-works/pi-coding-agent/dist/core/sdk.js
 +++ b/node_modules/@earendil-works/pi-coding-agent/dist/core/sdk.js
-@@ -136,7 +136,9 @@ export async function createAgentSession(options = {}) {
+@@ -137,7 +137,9 @@ export async function createAgentSession(options = {}) {
      else {
          thinkingLevel = clampThinkingLevel(model, thinkingLevel);
      }
@@ -41,7 +41,7 @@ index 8bb4595..83f68fa 100644
      const configuredDefaultToolNames = settingsManager.getDefaultTools();
      const allowedToolNames = options.tools ?? (options.noTools === "all" ? [] : undefined);
      const excludedToolNames = options.excludeTools;
-@@ -262,6 +264,7 @@ export async function createAgentSession(options = {}) {
+@@ -283,6 +285,7 @@ export async function createAgentSession(options = {}) {
          initialActiveToolNames,
          allowedToolNames,
          excludedToolNames,
@@ -50,19 +50,10 @@ index 8bb4595..83f68fa 100644
          sessionStartEvent: options.sessionStartEvent,
      });
 diff --git a/node_modules/@earendil-works/pi-coding-agent/dist/core/tools/tool-definition-wrapper.js b/node_modules/@earendil-works/pi-coding-agent/dist/core/tools/tool-definition-wrapper.js
-index e05fec9..f8b2738 100644
+index e05fec9..afd2805 100644
 --- a/node_modules/@earendil-works/pi-coding-agent/dist/core/tools/tool-definition-wrapper.js
 +++ b/node_modules/@earendil-works/pi-coding-agent/dist/core/tools/tool-definition-wrapper.js
-@@ -20,6 +20,8 @@ export function wrapToolDefinitions(definitions, ctxFactory) {
-  *
-  * This keeps AgentSession's internal registry definition-first even when a caller
-  * provides plain AgentTool overrides that do not include prompt metadata or renderers.
-+ * Prompt metadata and renderers ARE forwarded when the AgentTool carries them, so
-+ * baseToolsOverride tools can stay first-class (built-in parity).
-  */
- export function createToolDefinitionFromAgentTool(tool) {
-     return {
-@@ -30,6 +32,10 @@ export function createToolDefinitionFromAgentTool(tool) {
+@@ -30,6 +30,10 @@ export function createToolDefinitionFromAgentTool(tool) {
          constrainedSampling: tool.constrainedSampling,
          prepareArguments: tool.prepareArguments,
          executionMode: tool.executionMode,
@@ -73,33 +64,8 @@ index e05fec9..f8b2738 100644
          execute: async (toolCallId, params, signal, onUpdate) => tool.execute(toolCallId, params, signal, onUpdate),
      };
  }
-diff --git a/node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/interactive-mode.d.ts b/node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/interactive-mode.d.ts
-index 33af177..e73c48e 100644
---- a/node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/interactive-mode.d.ts
-+++ b/node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/interactive-mode.d.ts
-@@ -32,6 +32,8 @@ export interface InteractiveModeOptions {
-     verbose?: boolean;
-     /** TUI layout mode. */
-     tuiMode?: TuiMode;
-+    /** Custom terminal to render into. Defaults to the process terminal (stdin/stdout). */
-+    terminal?: import("@earendil-works/pi-tui").Terminal;
-     /** Initial interactive theme setting for this invocation. */
-     initialThemeSetting?: string;
- }
-diff --git a/node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/interactive-mode.js b/node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/interactive-mode.js
-index a1e7d98..d9d53c2 100644
---- a/node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/interactive-mode.js
-+++ b/node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/interactive-mode.js
-@@ -322,6 +322,7 @@ export class InteractiveMode {
-             tuiMode,
-             showHardwareCursor: this.settingsManager.getShowHardwareCursor(),
-             logDirectory: getAgentDir(),
-+            terminal: options.terminal,
-             onRightClickPaste: this.onRightClickPaste,
-             fullscreenCopyOnSelect: this.settingsManager.getFullscreenCopyOnSelect(),
-         });
 diff --git a/node_modules/@earendil-works/pi-coding-agent/package.json b/node_modules/@earendil-works/pi-coding-agent/package.json
-index 572af1e..69f7ce5 100644
+index 62c01de..a934b5f 100644
 --- a/node_modules/@earendil-works/pi-coding-agent/package.json
 +++ b/node_modules/@earendil-works/pi-coding-agent/package.json
 @@ -14,7 +14,8 @@

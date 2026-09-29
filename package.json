@@ -6,7 +6,7 @@
     "type": "git",
     "url": "https://github.com/lutrarutra/codepi.git"
   },
-  "version": "0.5.6",
+  "version": "0.7.0",
   "publisher": "lutrarutra",
   "license": "MIT",
   "engines": {
@@ -286,8 +286,8 @@
     "postinstall": "patch-package"
   },
   "dependencies": {
-    "@earendil-works/pi-coding-agent": "^0.85.1",
-    "@earendil-works/pi-tui": "0.85.1",
+    "@earendil-works/pi-coding-agent": "^0.87.1",
+    "@earendil-works/pi-tui": "0.87.1",
     "@vscode/ripgrep-universal": "^1.18.0",
     "get-east-asian-width": "1.6.0",
     "marked": "18.0.5"
