@@ -2,7 +2,7 @@
 
 All notable changes to CodePi are documented in this file.
 
-## Unreleased
+## 0.8.0
 
 - **Update to pi 1.0.4** (from 0.87.1). The SDK API is unchanged for our
   integration — `createAgentSession`, `AgentSessionRuntime`, `SettingsManager`,
@@ -46,6 +46,16 @@ All notable changes to CodePi are documented in this file.
   used, and the tool now fails with an actionable message instead of spawning
   the wrong shell. Temp-file redirect paths are quoted and slash-converted, so
   a profile path containing spaces no longer breaks output capture.
+- Fix "CodePi TUI error: Webview is disposed" on startup (e.g. a debug session
+  with a restored or duplicate session tab). VS Code throws that error from the
+  `WebviewPanel` accessors (`title`, `iconPath`, `reveal`, `visible`) once the
+  panel is gone, and CodePi reached them after teardown — pi's shutdown keeps
+  writing to the terminal while the session closes. The panel is now torn down
+  only after the TUI stops, the pty goes inert with it, and every async panel
+  touch (title refresh, activity icon, delete-session) is guarded. A TUI that
+  exits after its session is already gone is logged instead of reported, and a
+  non-zero `process.exit()` from pi now says so instead of closing the tab
+  silently.
 
 ## 0.4.1
 
