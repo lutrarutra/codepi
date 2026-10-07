@@ -27,6 +27,16 @@ export class WebviewPty implements TuiTerminal {
 	private ready = false;
 	private readyWaiters: Array<() => void> = [];
 	private pendingWrite: string[] = [];
+	/**
+	 * Set once the hosting panel is gone. VS Code throws
+	 * "Webview is disposed" from panel accessors (title, iconPath, reveal) and
+	 * returns false from postMessage(), and pi's shutdown path keeps writing to
+	 * the terminal after CodePi tears the panel down (stop() resets the progress
+	 * state and restores the cursor). Dropping the traffic here keeps that
+	 * teardown from throwing inside pi's run() and surfacing as a bogus
+	 * "CodePi TUI error".
+	 */
+	private disposed = false;
 
 	/**
 	 * True once pi's InteractiveMode starts shutting down (drainInput is only
@@ -77,6 +87,7 @@ export class WebviewPty implements TuiTerminal {
 	}
 
 	write(data: string): void {
+		if (this.disposed) return;
 		if (!this.ready) {
 			this.pendingWrite.push(data);
 			return;
@@ -123,11 +134,13 @@ export class WebviewPty implements TuiTerminal {
 
 	setTitle(title: string): void {
 		this._title = title;
+		if (this.disposed) return;
 		this.onTitleChange(this._title + (this._progress ? " ●" : ""));
 	}
 
 	setProgress(active: boolean): void {
 		this._progress = active;
+		if (this.disposed) return;
 		this.onTitleChange(this._title + (active ? " ●" : ""));
 		this.onProgressChange?.(active);
 	}
@@ -139,16 +152,28 @@ export class WebviewPty implements TuiTerminal {
 		this.inputHandler?.(data);
 	}
 
-	/** Called when the webview reports its terminal dimensions. */
+	/**
+	 * Called when the webview reports its terminal dimensions.
+	 */
 	setDimensions(cols: number, rows: number): void {
+		if (this.disposed) return;
 		this._columns = cols;
 		this._rows = rows;
 		this.resizeHandler?.();
 	}
 
+	/**
+	 * Called when the hosting panel is disposed: the pty must go inert before
+	 * pi's shutdown writes land, so nothing touches the dead webview.
+	 */
+	markDisposed(): void {
+		this.disposed = true;
+		this.pendingWrite = [];
+	}
+
 	/** Called when the webview has finished initializing xterm. */
 	markReady(): void {
-		if (this.ready) return;
+		if (this.ready || this.disposed) return;
 		this.ready = true;
 		for (const w of this.readyWaiters) w();
 		this.readyWaiters = [];
@@ -173,8 +198,14 @@ export class WebviewPty implements TuiTerminal {
 	}
 
 	private post(msg: unknown): void {
+		if (this.disposed) return;
 		try {
-			this.webview.postMessage(msg);
+			const sent = this.webview.postMessage(msg);
+			// VS Code returns `false` (and can reject) once the webview is gone;
+			// the rejection is otherwise unhandled.
+			void Promise.resolve(sent).then(undefined, () => {
+				/* webview disposed */
+			});
 		} catch {
 			/* webview disposed */
 		}

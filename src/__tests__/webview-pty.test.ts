@@ -131,6 +131,40 @@ describe("WebviewPty", () => {
 		expect(pty.quitting).toBe(true);
 	});
 
+	it("goes inert once the panel is disposed", () => {
+		// VS Code panel accessors throw "Webview is disposed", and pi's shutdown
+		// path keeps writing to the terminal (progress reset, cursor restore),
+		// so a disposed pty must drop everything instead of reaching the webview.
+		const posted: unknown[] = [];
+		const webview = {
+			postMessage: (msg: unknown) => {
+				posted.push(msg);
+				return Promise.resolve();
+			},
+		} as any;
+		const onTitleChange = vi.fn();
+		const onProgressChange = vi.fn();
+		const pty = new WebviewPty(
+			webview,
+			"pi - hello - repo",
+			() => {},
+			onTitleChange,
+			onProgressChange,
+		);
+		pty.markReady();
+		pty.markDisposed();
+
+		pty.setTitle("pi - new title - repo");
+		pty.setProgress(true);
+		pty.setProgress(false);
+		pty.write("late");
+		pty.setDimensions(100, 40);
+
+		expect(posted).toEqual([]);
+		expect(onTitleChange).not.toHaveBeenCalled();
+		expect(onProgressChange).not.toHaveBeenCalled();
+	});
+
 	it("requestClose invokes onRequestClose", () => {
 		const { pty, onRequestClose } = makePty();
 		pty.requestClose();

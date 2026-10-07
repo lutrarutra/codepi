@@ -148,7 +148,13 @@ function getModeInfoFromSessions(): ModeInfo {
 		}
 	};
 	for (const state of sessions.values()) {
-		if (state.panel.visible) return pick(state);
+		// `visible` throws once the panel is disposed (it can be gone for a
+		// moment before cleanupSession removes the entry).
+		try {
+			if (state.panel.visible) return pick(state);
+		} catch {
+			/* webview disposed */
+		}
 	}
 	const first = sessions.values().next().value;
 	return first ? pick(first) : { active: false };
@@ -338,9 +344,21 @@ export async function activate(context: vscode.ExtensionContext) {
 			(s) => (s.pty as WebviewPty).quitting,
 		);
 		const targets = quitting.length > 0 ? quitting : [...sessions.values()];
-		console.log(
-			`[CodePi] pi requested process.exit(${code}) — closing ${targets.length} TUI panel(s)`,
-		);
+		if (code !== undefined && code !== 0) {
+			// A non-zero exit is pi reporting a failure (fatal runtime error, an
+			// unusable terminal). The panel closes with it, so surface something
+			// the user can act on instead of leaving a silent no-op quit.
+			console.warn(
+				`[CodePi] pi requested process.exit(${code}) — closing ${targets.length} TUI panel(s)`,
+			);
+			void vscode.window.showErrorMessage(
+				`pi exited with code ${code}. See the CodePi logs (Developer: Show Logs → Extension Host) for the error.`,
+			);
+		} else {
+			console.log(
+				`[CodePi] pi requested process.exit(${code}) — closing ${targets.length} TUI panel(s)`,
+			);
+		}
 		for (const s of targets) {
 			if (sessions.has(s.sessionId)) cleanupSession(s.sessionId);
 		}
@@ -701,7 +719,11 @@ export async function activate(context: vscode.ExtensionContext) {
 				const sessionPath = arg.path;
 				for (const [, state] of sessions) {
 					if (state.sessionPath === sessionPath) {
-						state.panel.dispose();
+						try {
+							state.panel.dispose();
+						} catch {
+							/* webview disposed */
+						}
 						break;
 					}
 				}
@@ -1321,6 +1343,13 @@ async function setupSessionPanel(
 	// waiting / error icons) once the backend starts — see startTuiBackend.
 	let progressActive = false;
 	const refreshTitle = () => {
+		// The panel is gone once cleanupSession ran (it drops the session from
+		// `sessions` before disposing the panel), and every VS Code panel
+		// accessor then throws "Webview is disposed". Title refreshes arrive from
+		// async sources — pi's setTitle/setProgress during shutdown, the
+		// fs.watch debounce below, sidebar renames — so a liveness check is
+		// required here.
+		if (!sessions.has(sessionId)) return;
 		// A name set inside the TUI (/name) supersedes any sidebar rename.
 		if (sessionManager.getSessionName?.()) {
 			state.sessionNameOverride = undefined;
@@ -1332,14 +1361,22 @@ async function setupSessionPanel(
 				labelMaxChars,
 			) + (progressActive ? " ●" : "");
 	};
+	/** Never let a "Webview is disposed" throw escape into an async caller. */
+	const applyTitle = () => {
+		try {
+			refreshTitle();
+		} catch {
+			/* webview disposed */
+		}
+	};
 	const pty = new WebviewPty(
 		panel.webview,
 		initialTitle,
 		() => cleanupSession(sessionId),
-		() => refreshTitle(),
+		() => applyTitle(),
 		(active) => {
 			progressActive = active;
-			refreshTitle();
+			applyTitle();
 		},
 	);
 
@@ -1359,7 +1396,7 @@ async function setupSessionPanel(
 		fcLastHead: undefined,
 	};
 	sessions.set(sessionId, state);
-	state.refreshTitle = refreshTitle;
+	state.refreshTitle = applyTitle;
 
 	// Refresh the tab title when the session file changes: the SDK never
 	// pushes a title for the first user message, which is exactly when a new
@@ -1596,6 +1633,19 @@ function cleanupSession(sessionId: string): void {
 	// Pending-edit tab dots must drop for this session's files.
 	syncPendingReviewDots();
 
+	// Stop the TUI BEFORE disposing the panel: pi's shutdown path keeps writing
+	// to the terminal (progress reset, cursor restore, alt-screen exit), and a
+	// disposed panel turns those writes into "Webview is disposed" throws from
+	// inside pi's run() — which surfaced as a bogus "CodePi TUI error" toast.
+	// The pty goes inert immediately after, so no late write reaches the dead
+	// webview either.
+	try {
+		state.tui?.stop();
+	} catch {
+		/* ignore */
+	}
+	state.pty.markDisposed();
+
 	// Close the hosting panel (no-op if already disposed — cleanup may be
 	// triggered from the panel's own onDidDispose).
 	try {
@@ -1604,12 +1654,6 @@ function cleanupSession(sessionId: string): void {
 		/* ignore */
 	}
 
-	// Stop the TUI and dispose the runtime (disposes the session).
-	try {
-		state.tui?.stop();
-	} catch {
-		/* ignore */
-	}
 	void state.runtime?.dispose().catch(() => {
 		/* ignore */
 	});
@@ -1868,7 +1912,16 @@ async function startTuiBackend(state: SessionState): Promise<void> {
 	const activityTracker = createSessionActivityTracker({
 		subscribe: (listener) => runtime.session.subscribe(listener),
 		bashMode: () => readBashApprovalMode(state.sessionManager.getBranch()),
-		onActivity: (activity) => setPanelIcon(state.panel, activity),
+		onActivity: (activity) => {
+			// The activity tracker can fire after teardown (a turn settling while
+			// the panel closes); panel.iconPath throws once the panel is disposed.
+			if (!sessions.has(state.sessionId)) return;
+			try {
+				setPanelIcon(state.panel, activity);
+			} catch {
+				/* webview disposed */
+			}
+		},
 	});
 	emitActivityEvent = activityTracker.emit;
 	state.disposables.push(activityTracker);
@@ -1908,14 +1961,21 @@ async function startTuiBackend(state: SessionState): Promise<void> {
 		/* webview disposed */
 	}
 
-	// run() resolves when the TUI exits (e.g. /quit) → close the panel tab.
+	// run() resolves when the TUI exits (e.g. /quit) → tear the session down.
+	// cleanupSession is idempotent and closes the panel, so a TUI that exits
+	// after its panel is already gone cannot throw here.
 	void state.tui
 		.run()
 		.then(() => {
-			state.panel.dispose();
+			cleanupSession(state.sessionId);
 		})
 		.catch((err: Error) => {
 			console.error("[CodePi] TUI exited with error:", err);
+			// A rejection after teardown (the panel was already closed by
+			// cleanupSession, or pi's shutdown touched the disposed webview) is
+			// expected and must not surface as an error toast — the session is
+			// already gone.
+			if (!sessions.has(state.sessionId)) return;
 			void vscode.window.showErrorMessage(
 				`CodePi TUI error: ${err.message || String(err)}`,
 			);
