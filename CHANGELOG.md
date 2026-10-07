@@ -4,12 +4,33 @@ All notable changes to CodePi are documented in this file.
 
 ## Unreleased
 
-- **Update to pi 0.87.1.** The host-integration patch shrinks from six files to
-  four: 0.87.0 adopted the `terminal` option on `InteractiveModeOptions`
-  natively, so only the `baseToolsOverride` exposure
-  (`dist/core/sdk.d.ts`, `dist/core/sdk.js`,
-  `dist/core/tools/tool-definition-wrapper.js`) and the CJS `require` export
-  condition still need patching. `@earendil-works/pi-tui` follows to 0.87.1.
+- **Update to pi 1.0.4** (from 0.87.1). The SDK API is unchanged for our
+  integration — `createAgentSession`, `AgentSessionRuntime`, `SettingsManager`,
+  `InteractiveMode` and the pi-tui components all work as before — so the bump is
+  mostly version plumbing:
+  - The host-integration patch keeps its four files (upstream 1.0 added
+    `baseToolsOverride` to `AgentSessionOptions` but `createAgentSession` still
+    neither declares nor forwards it, and `createToolDefinitionFromAgentTool`
+    still drops prompt metadata and renderers). It now also forwards
+    `renderShell`, and the default-tool hunk moved to
+    `initialActiveToolNames` because 1.0 computes the active set itself.
+    `@earendil-works/pi-tui` follows to 1.0.4.
+  - typebox is imported directly (`typebox` is a direct dependency now) instead
+    of through a deep path into pi's nested `node_modules`.
+  - The TUI is pinned to `tuiMode: "regular"`. pi 1.0 runs fullscreen by
+    default; CodePi renders the TUI into its own xterm.js webview and owns
+    scrollback, find, and viewport anchoring, so the alternate-screen layout
+    would fight those features.
+  - Packaging: pi 1.0 hoists its dependency closure to the root `node_modules`
+    (0.87.x nested it under `pi-coding-agent`), so `.vscodeignore` now
+    allow-lists every production package explicitly. Without that the vsix
+    shipped 131 of 148 packages missing and died at activation.
+    `src/__tests__/packaging-allowlist.test.ts` recomputes the closure from the
+    lockfile and fails when the allowlist drifts; `scripts/check-package.mjs`
+    also asserts the SDK's entry points are in the built vsix.
+  - Test/dev plumbing follows the hoisted layout: the vitest alias map and the
+    bundled-extension smoke loader resolve their entries through the package
+    resolver instead of hardcoding `pi-coding-agent/node_modules/...`.
 - Settings: expose pi 0.86's `cacheWarming` mode (`off`/`streaming`/`idle`) in
   the settings dashboard.
 - Fix Ctrl+Left/Right in the TUI: on Windows/Linux the chord is no longer

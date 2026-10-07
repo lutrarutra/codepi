@@ -11,7 +11,7 @@ const CORE_DIR = path.resolve(
 	"node_modules/@earendil-works/pi-coding-agent/dist/core",
 );
 
-describe("SDK host-integration patch (0.87.1)", () => {
+describe("SDK host-integration patch (1.0.4)", () => {
 	it("threads options.terminal into createInteractiveTui", () => {
 		const js = fs.readFileSync(
 			path.join(DIST_DIR, "interactive-mode.js"),
@@ -41,12 +41,15 @@ describe("SDK host-integration patch (0.87.1)", () => {
 		);
 	});
 
-	describe("SDK baseToolsOverride exposure patch (0.87.1)", () => {
+	describe("SDK baseToolsOverride exposure patch (1.0.4)", () => {
 		it("passes baseToolsOverride through createAgentSession", () => {
 			const js = fs.readFileSync(path.join(CORE_DIR, "sdk.js"), "utf8");
 			expect(js).toMatch(/baseToolsOverride: options\.baseToolsOverride/);
 		});
 		it("derives the default active tool set from the override keys", () => {
+			// 1.0 computes the active set in createAgentSession (AgentSession's own
+			// defaultActiveToolNames derivation is bypassed by the explicit
+			// initialActiveToolNames argument), so the patch has to seed it there.
 			const js = fs.readFileSync(path.join(CORE_DIR, "sdk.js"), "utf8");
 			expect(js).toMatch(
 				/defaultActiveToolNames = options\.baseToolsOverride\n\s*\? Object\.keys\(options\.baseToolsOverride\)/,
@@ -57,9 +60,10 @@ describe("SDK host-integration patch (0.87.1)", () => {
 			expect(dts).toMatch(/baseToolsOverride\?: Record<string, Tool>/);
 		});
 		it("imports the Tool type used by the option", () => {
-			// 0.87.1 still re-exports Tool but does not bind it locally, so the
-			// patch must add the import itself (skipLibCheck would hide the
-			// dangling reference — assert the import explicitly).
+			// 1.0.4 re-exports Tool from its package root but does not bind it
+			// locally in sdk.d.ts, so the patch must add the import itself
+			// (skipLibCheck would hide the dangling reference — assert the import
+			// explicitly).
 			const dts = fs.readFileSync(path.join(CORE_DIR, "sdk.d.ts"), "utf8");
 			expect(dts).toMatch(
 				/import type \{ Tool \} from "\.\/tools\/index\.ts";/,
@@ -71,6 +75,9 @@ describe("SDK host-integration patch (0.87.1)", () => {
 				"utf8",
 			);
 			expect(js).toMatch(/promptSnippet: tool\.promptSnippet/);
+			expect(js).toMatch(/promptGuidelines: tool\.promptGuidelines/);
+			expect(js).toMatch(/renderShell: tool\.renderShell/);
+			expect(js).toMatch(/renderCall: tool\.renderCall/);
 			expect(js).toMatch(/renderResult: tool\.renderResult/);
 		});
 	});
@@ -91,12 +98,12 @@ describe("SDK host-integration patch (0.87.1)", () => {
 	});
 });
 
-describe("SDK patch scope (0.87.1)", () => {
+describe("SDK patch scope (1.0.4)", () => {
 	// The patch exists only for what upstream still lacks: the baseToolsOverride
-	// exposure and the CJS `require` export condition. 0.87.0 adopted the
-	// interactive-mode `terminal` option, so a leftover hunk for that file would
-	// fail to apply on the next bump — guard the patch's scope, not just the
-	// installed tree.
+	// exposure, the prompt-metadata/renderer pass-through, and the CJS `require`
+	// export condition. The interactive-mode `terminal` option has been native
+	// since 0.87.0, so a leftover hunk for that file would fail to apply on the
+	// next bump — guard the patch's scope, not just the installed tree.
 	const PATCH_DIR = path.resolve(process.cwd(), "patches");
 
 	function piPatches(): string[] {
@@ -107,7 +114,7 @@ describe("SDK patch scope (0.87.1)", () => {
 
 	it("ships exactly one patch, for the pinned pi version", () => {
 		expect(piPatches()).toEqual([
-			"@earendil-works+pi-coding-agent+0.87.1.patch",
+			"@earendil-works+pi-coding-agent+1.0.4.patch",
 		]);
 	});
 

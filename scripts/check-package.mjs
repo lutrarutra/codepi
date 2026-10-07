@@ -31,6 +31,17 @@ const files = new Set(
 const required = [
 	// Extension host bundle
 	"dist/extension.js",
+	// pi's SDK + the packages its entry points import (the SDK is externalized in
+	// the bundle, so these have to ship — see .vscodeignore's node_modules
+	// allowlist and src/__tests__/packaging-allowlist.test.ts)
+	"node_modules/@earendil-works/pi-coding-agent/dist/index.js",
+	"node_modules/@earendil-works/pi-coding-agent/dist/core/sdk.js",
+	"node_modules/@earendil-works/pi-agent-core/dist/index.js",
+	"node_modules/@earendil-works/pi-ai/dist/compat.js",
+	"node_modules/@earendil-works/pi-tui/dist/index.js",
+	"node_modules/typebox/build/index.mjs",
+	"node_modules/get-east-asian-width/package.json",
+	"node_modules/marked/package.json",
 	// Compiled bundled pi extensions (the codepi-task fix)
 	"resources/extensions/dist/codepi-footer.js",
 	"resources/extensions/dist/codepi-diff.js",
@@ -70,9 +81,21 @@ const forbidden = [
 const missing = required.filter((f) => !files.has(f));
 const leaked = forbidden.filter((f) => files.has(f));
 
-if (missing.length || leaked.length) {
+// Packages npm may install at the root or nested under their dependent (the
+// layout shifted when pi 1.0 hoisted its dependencies): match them anywhere.
+const requiredAnywhere = [
+	"/jiti/package.json", // pi's extension loader (jiti) for bundled extensions
+	"/chalk/package.json", // terminal styling used by the TUI
+];
+const missingAnywhere = requiredAnywhere.filter(
+	(suffix) => ![...files].some((f) => f.endsWith(suffix)),
+);
+
+if (missing.length || leaked.length || missingAnywhere.length) {
 	for (const f of missing)
 		console.error(`check-package: MISSING required asset: ${f}`);
+	for (const f of missingAnywhere)
+		console.error(`check-package: MISSING required package: *${f}`);
 	for (const f of leaked)
 		console.error(`check-package: UNEXPECTED dev source in package: ${f}`);
 	console.error(`check-package: FAIL (${vsix})`);
@@ -80,5 +103,5 @@ if (missing.length || leaked.length) {
 }
 
 console.log(
-	`check-package: PASS (${vsix}) — ${required.length} required assets present, 0 dev sources leaked`,
+	`check-package: PASS (${vsix}) — ${required.length + requiredAnywhere.length} required assets present, 0 dev sources leaked`,
 );

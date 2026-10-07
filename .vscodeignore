@@ -2,15 +2,84 @@
 src
 webview-ui/src
 webview-ui/node_modules
+# node_modules: the extension host requires pi's full production dependency
+# closure at runtime, so it has to ship. pi 1.0 hoists that closure to the root
+# (0.87.x nested it under pi-coding-agent), which is why every production
+# package is allowlisted explicitly — an omitted package means the released
+# extension dies at activation with "Cannot find package ...". The list below
+# is the installed production closure of package-lock.json; src/__tests__/
+# packaging-allowlist.test.ts fails when it drifts from the lockfile.
 node_modules
-!node_modules/@vscode/ripgrep-universal/**
-!node_modules/@earendil-works/pi-coding-agent/**
-!node_modules/@earendil-works/pi-tui/**
-# pi-tui's runtime dependencies (its dist imports these directly —
-# without them the released extension dies at activation with
-# "Cannot find package 'get-east-asian-width'").
+!node_modules/@anthropic-ai/**
+!node_modules/@aws/lambda-invoke-store/**
+!node_modules/@aws-sdk/**
+!node_modules/@babel/**
+!node_modules/@earendil-works/**
+!node_modules/@google/**
+!node_modules/@protobufjs/**
+!node_modules/@smithy/**
+!node_modules/@stablelib/**
+!node_modules/@types/node/**
+!node_modules/@types/retry/**
+!node_modules/@vscode/**
+!node_modules/agent-base/**
+!node_modules/balanced-match/**
+!node_modules/base64-js/**
+!node_modules/bignumber.js/**
+!node_modules/bowser/**
+!node_modules/brace-expansion/**
+!node_modules/buffer-equal-constant-time/**
+!node_modules/cross-spawn/**
+!node_modules/data-uri-to-buffer/**
+!node_modules/debug/**
+!node_modules/diff/**
+!node_modules/ecdsa-sig-formatter/**
+!node_modules/extend/**
+!node_modules/fast-sha256/**
+!node_modules/fetch-blob/**
+!node_modules/formdata-polyfill/**
+!node_modules/gaxios/**
+!node_modules/gcp-metadata/**
 !node_modules/get-east-asian-width/**
+!node_modules/google-auth-library/**
+!node_modules/google-logging-utils/**
+!node_modules/graceful-fs/**
+!node_modules/http-proxy-agent/**
+!node_modules/https-proxy-agent/**
+!node_modules/ignore/**
+!node_modules/isexe/**
+!node_modules/json-bigint/**
+!node_modules/json-schema-to-ts/**
+!node_modules/jwa/**
+!node_modules/jws/**
+!node_modules/long/**
+!node_modules/lru-cache/**
 !node_modules/marked/**
+!node_modules/ms/**
+!node_modules/node-domexception/**
+!node_modules/node-fetch/**
+!node_modules/openai/**
+!node_modules/p-retry/**
+!node_modules/partial-json/**
+!node_modules/path-key/**
+!node_modules/protobufjs/**
+!node_modules/proxy-agent-negotiate/**
+!node_modules/quickjs-wasi/**
+!node_modules/retry/**
+!node_modules/safe-buffer/**
+!node_modules/semver/**
+!node_modules/shebang-command/**
+!node_modules/shebang-regex/**
+!node_modules/standardwebhooks/**
+!node_modules/ts-algebra/**
+!node_modules/tslib/**
+!node_modules/typebox/**
+!node_modules/undici-types/**
+!node_modules/web-streams-polyfill/**
+!node_modules/which/**
+!node_modules/ws/**
+!node_modules/yaml/**
+# pi ships docs/examples/changelog inside the package; not needed at runtime.
 node_modules/@earendil-works/pi-coding-agent/docs
 node_modules/@earendil-works/pi-coding-agent/examples
 node_modules/@earendil-works/pi-coding-agent/CHANGELOG.md

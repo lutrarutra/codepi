@@ -2,55 +2,45 @@
 // (resources/extensions/dist/*.js — what the packaged extension ships) through
 // jiti (the same loader pi uses at runtime) against a mock pi API.
 // Prerequisite: `make build-bundled` (the Makefile's smoke target does this).
-import { createJiti } from "../../../node_modules/@earendil-works/pi-coding-agent/node_modules/jiti/lib/jiti.mjs";
-import { fileURLToPath } from "node:url";
-import { createRequire } from "node:module";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { existsSync } from "node:fs";
-import { join } from "node:path";
 
-const root = fileURLToPath(new URL("../../..", import.meta.url));
-const require = createRequire(import.meta.url);
+// Load jiti the way pi itself does: import pi's own loader module, which
+// re-exports createJiti resolved from pi's package context (jiti is a
+// dependency of pi-coding-agent, not of CodePi).
+const { createJiti } = await import(
+	new URL(
+		"./core/extensions/jiti-loader.js",
+		pathToFileURL(
+			fileURLToPath(import.meta.resolve("@earendil-works/pi-coding-agent")),
+		),
+	).href,
+);
 
-// Mirror the alias map pi's extension loader uses (loader.ts getAliases), so
-// jiti resolves the @earendil-works packages and typebox the same way at
-// runtime. resolve() walks up from the coding-agent package for nested deps.
-const resolveFromPi = (specifier) =>
-	require.resolve(specifier, {
-		paths: [join(root, "node_modules", "@earendil-works", "pi-coding-agent")],
-	});
-const nestedPi = (name, rel) =>
-	join(
-		root,
-		"node_modules",
-		"@earendil-works",
-		"pi-coding-agent",
-		"node_modules",
-		"@earendil-works",
-		name,
-		rel,
-	);
+// jiti resolves each alias to a concrete file, mirroring pi's loader map
+// (loader.ts getAliases) so the compiled bundled extensions import the same
+// modules at runtime as they do under pi's own loader. pi 1.0 hoists its
+// dependencies into the root node_modules and resolves each entry through the
+// ESM resolver, so do the same here.
+const resolveEntry = (specifier) => fileURLToPath(import.meta.resolve(specifier));
 
 const aliases = {
-	"@earendil-works/pi-coding-agent": join(
-		root,
-		"node_modules",
-		"@earendil-works",
-		"pi-coding-agent",
-		"dist",
-		"index.js",
+	"@earendil-works/pi-coding-agent": resolveEntry(
+		"@earendil-works/pi-coding-agent",
 	),
-	"@earendil-works/pi-agent-core": nestedPi("pi-agent-core", "dist/index.js"),
-	"@earendil-works/pi-tui": nestedPi("pi-tui", "dist/index.js"),
-	"@earendil-works/pi-ai/compat": nestedPi("pi-ai", "dist/compat.js"),
-	"@earendil-works/pi-ai/oauth": nestedPi("pi-ai", "dist/oauth.js"),
-	"@earendil-works/pi-ai/providers/all": nestedPi(
-		"pi-ai",
-		"dist/providers/all.js",
+	"@earendil-works/pi-agent-core": resolveEntry(
+		"@earendil-works/pi-agent-core",
 	),
-	"@earendil-works/pi-ai": nestedPi("pi-ai", "dist/compat.js"),
-	typebox: resolveFromPi("typebox"),
-	"typebox/compile": resolveFromPi("typebox/compile"),
-	"typebox/value": resolveFromPi("typebox/value"),
+	"@earendil-works/pi-tui": resolveEntry("@earendil-works/pi-tui"),
+	"@earendil-works/pi-ai/compat": resolveEntry("@earendil-works/pi-ai/compat"),
+	"@earendil-works/pi-ai/oauth": resolveEntry("@earendil-works/pi-ai/oauth"),
+	"@earendil-works/pi-ai/providers/all": resolveEntry(
+		"@earendil-works/pi-ai/providers/all",
+	),
+	"@earendil-works/pi-ai": resolveEntry("@earendil-works/pi-ai/compat"),
+	typebox: resolveEntry("typebox"),
+	"typebox/compile": resolveEntry("typebox/compile"),
+	"typebox/value": resolveEntry("typebox/value"),
 };
 
 const jiti = createJiti(import.meta.url, {

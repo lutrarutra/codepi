@@ -1,8 +1,7 @@
 diff --git a/node_modules/@earendil-works/pi-coding-agent/dist/core/sdk.d.ts b/node_modules/@earendil-works/pi-coding-agent/dist/core/sdk.d.ts
-index 040051f..c35eec3 100644
 --- a/node_modules/@earendil-works/pi-coding-agent/dist/core/sdk.d.ts
 +++ b/node_modules/@earendil-works/pi-coding-agent/dist/core/sdk.d.ts
-@@ -7,6 +7,7 @@ import type { ResourceLoader } from "./resource-loader.ts";
+@@ -7,6 +7,7 @@
  import { SessionManager } from "./session-manager.ts";
  import { SettingsManager } from "./settings-manager.ts";
  import { createBashTool, createCodingTools, createEditTool, createFindTool, createGrepTool, createLsTool, createPowerShellTool, createReadOnlyTools, createReadTool, createWriteTool, withFileMutationQueue } from "./tools/index.ts";
@@ -10,9 +9,9 @@ index 040051f..c35eec3 100644
  export interface CreateAgentSessionOptions {
      /** Working directory for project-local discovery. Default: process.cwd() */
      cwd?: string;
-@@ -43,6 +44,15 @@ export interface CreateAgentSessionOptions {
-     tools?: string[];
-     /** Optional denylist of tool names to disable. Applies after `tools` when both are provided. */
+@@ -48,6 +49,15 @@
+      * provided, MCP tools included.
+      */
      excludeTools?: string[];
 +    /**
 +     * Optional override of the base (built-in) tool set.
@@ -27,22 +26,22 @@ index 040051f..c35eec3 100644
      customTools?: ToolDefinition[];
      /** Resource loader. When omitted, DefaultResourceLoader is used. */
 diff --git a/node_modules/@earendil-works/pi-coding-agent/dist/core/sdk.js b/node_modules/@earendil-works/pi-coding-agent/dist/core/sdk.js
-index cb6d649..f4915f5 100644
 --- a/node_modules/@earendil-works/pi-coding-agent/dist/core/sdk.js
 +++ b/node_modules/@earendil-works/pi-coding-agent/dist/core/sdk.js
-@@ -137,7 +137,9 @@ export async function createAgentSession(options = {}) {
-     else {
-         thinkingLevel = clampThinkingLevel(model, thinkingLevel);
-     }
--    const defaultActiveToolNames = ["read", "bash", "edit", "write"];
-+    const defaultActiveToolNames = options.baseToolsOverride
-+        ? Object.keys(options.baseToolsOverride)
-+        : ["read", "bash", "edit", "write"];
-     const configuredDefaultToolNames = settingsManager.getDefaultTools();
+@@ -146,7 +146,10 @@
      const allowedToolNames = options.tools ?? (options.noTools === "all" ? [] : undefined);
      const excludedToolNames = options.excludeTools;
-@@ -283,6 +285,7 @@ export async function createAgentSession(options = {}) {
-         initialActiveToolNames,
+     const isExcludedTool = excludedToolNames ? createToolNameMatcher(excludedToolNames) : undefined;
+-    const initialActiveToolNames = (options.tools ?? (options.noTools ? [] : (configuredDefaultToolNames ?? DEFAULT_TOOL_NAMES))).filter((name) => !isExcludedTool?.(name));
++    const defaultActiveToolNames = options.baseToolsOverride
++        ? Object.keys(options.baseToolsOverride)
++        : (configuredDefaultToolNames ?? DEFAULT_TOOL_NAMES);
++    const initialActiveToolNames = (options.tools ?? (options.noTools ? [] : defaultActiveToolNames)).filter((name) => !isExcludedTool?.(name));
+     // Create convertToLlm wrapper that filters images if blockImages is enabled (defense-in-depth)
+     const convertToLlmWithBlockImages = (messages) => {
+         const converted = convertToLlm(messages);
+@@ -303,6 +306,7 @@
+         usesDefaultTools: options.tools === undefined && !options.noTools,
          allowedToolNames,
          excludedToolNames,
 +        baseToolsOverride: options.baseToolsOverride,
@@ -50,22 +49,21 @@ index cb6d649..f4915f5 100644
          sessionStartEvent: options.sessionStartEvent,
      });
 diff --git a/node_modules/@earendil-works/pi-coding-agent/dist/core/tools/tool-definition-wrapper.js b/node_modules/@earendil-works/pi-coding-agent/dist/core/tools/tool-definition-wrapper.js
-index e05fec9..afd2805 100644
 --- a/node_modules/@earendil-works/pi-coding-agent/dist/core/tools/tool-definition-wrapper.js
 +++ b/node_modules/@earendil-works/pi-coding-agent/dist/core/tools/tool-definition-wrapper.js
-@@ -30,6 +30,10 @@ export function createToolDefinitionFromAgentTool(tool) {
+@@ -32,6 +32,11 @@
          constrainedSampling: tool.constrainedSampling,
          prepareArguments: tool.prepareArguments,
          executionMode: tool.executionMode,
 +        promptSnippet: tool.promptSnippet,
 +        promptGuidelines: tool.promptGuidelines,
++        renderShell: tool.renderShell,
 +        renderCall: tool.renderCall,
 +        renderResult: tool.renderResult,
          execute: async (toolCallId, params, signal, onUpdate) => tool.execute(toolCallId, params, signal, onUpdate),
      };
  }
 diff --git a/node_modules/@earendil-works/pi-coding-agent/package.json b/node_modules/@earendil-works/pi-coding-agent/package.json
-index 62c01de..a934b5f 100644
 --- a/node_modules/@earendil-works/pi-coding-agent/package.json
 +++ b/node_modules/@earendil-works/pi-coding-agent/package.json
 @@ -14,7 +14,8 @@

@@ -1889,6 +1889,11 @@ async function startTuiBackend(state: SessionState): Promise<void> {
 	state.tui = new pi.InteractiveMode(runtime, {
 		terminal: state.pty,
 		verbose: true,
+		// pi 1.0 runs the TUI fullscreen by default (alternate screen buffer,
+		// absolute cursor positioning, its own transcript scrolling). CodePi
+		// renders pi's TUI into its own xterm.js webview and owns scrollback,
+		// find, and viewport anchoring itself, so it needs regular mode.
+		tuiMode: "regular",
 	});
 
 	state.isBackendReady = true;

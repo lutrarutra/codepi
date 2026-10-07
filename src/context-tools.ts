@@ -16,7 +16,8 @@
  * snapshot/git logic.
  */
 import * as vscode from "vscode";
-import { Type } from "../node_modules/@earendil-works/pi-coding-agent/node_modules/typebox/build/index.mjs";
+// typebox is a direct dependency (the SDK's schema types come from it).
+import { Type } from "typebox";
 import type { AgentToolResult, ToolDefinition } from "@earendil-works/pi-coding-agent";
 import {
 	collectEditorContext,

@@ -37,9 +37,9 @@ import {
 // the SDK itself) so its module-scope createRequire(import.meta.url) code is
 // never bundled into the CJS extension output.
 import { Container, Text, truncateToWidth } from "@earendil-works/pi-tui";
-// typebox is a nested dependency of the SDK (not hoisted); the same deep
-// relative import pattern as src/context-tools.ts.
-import { Type } from "../../node_modules/@earendil-works/pi-coding-agent/node_modules/typebox/build/index.mjs";
+// typebox is a direct dependency (the SDK's schema types come from it); the same
+// import pattern as src/context-tools.ts.
+import { Type } from "typebox";
 import { randomBytes } from "node:crypto";
 import {
 	closeSync,
