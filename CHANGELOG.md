@@ -16,6 +16,15 @@ All notable changes to CodePi are documented in this file.
   remapped to line start/end, so xterm sends pi's native word-navigation
   sequences. Cmd+Left/Right (macOS) and Ctrl/Cmd+Up/Down keep moving to the
   start/end of the input line.
+- **Fix bash on Windows** ([#5](https://github.com/lutrarutra/codepi/issues/5)):
+  the hidden terminal no longer hardcodes `/bin/bash`. The shell is now resolved
+  per command — pi's `shellPath` setting (Settings → Behavior → Shell path), then
+  the VS Code default shell (`terminal.integrated.defaultProfile.*`, i.e. the
+  Git Bash profile you configured), then the well-known Git for Windows install
+  locations and `bash.exe` on `PATH`. The WSL launcher is deliberately never
+  used, and the tool now fails with an actionable message instead of spawning
+  the wrong shell. Temp-file redirect paths are quoted and slash-converted, so
+  a profile path containing spaces no longer breaks output capture.
 
 ## 0.4.1
 

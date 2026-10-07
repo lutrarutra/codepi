@@ -22,6 +22,7 @@ import {
 	readAskModeAllowedTools,
 	readJsonFile,
 	readAutoVerifyMode,
+	readShellPath,
 	readTerminalPrefs,
 	seedAskModeAllowedToolsIfMissing,
 	setAgentDir,
@@ -191,6 +192,16 @@ describe("CodePi settings merge and Pi JSON files", () => {
 				codepi: { fontFamily: 42, fontSize: "14" },
 			}),
 		).toEqual({ fontFamily: "FiraCode Nerd Font", fontSize: 14 });
+	});
+
+	it("reads pi's shellPath setting, ignoring blank and non-string values", () => {
+		expect(readShellPath(undefined)).toBeUndefined();
+		expect(readShellPath({})).toBeUndefined();
+		expect(readShellPath({ shellPath: "   " })).toBeUndefined();
+		expect(readShellPath({ shellPath: 42 })).toBeUndefined();
+		expect(
+			readShellPath({ shellPath: "  C:\\Program Files\\Git\\bin\\bash.exe  " }),
+		).toBe("C:\\Program Files\\Git\\bin\\bash.exe");
 	});
 
 	it("writes terminal prefs into the codepi namespace", () => {

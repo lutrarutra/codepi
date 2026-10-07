@@ -392,24 +392,210 @@ export async function getVscode(): Promise<typeof import("vscode") | undefined> 
 function createHiddenTerminal(
 	vscode: typeof import("vscode"),
 	cwd: string,
+	shell: BashShell,
 ): import("vscode").Terminal {
 	return vscode.window.createTerminal({
 		name: "CodePi bash",
 		cwd,
 		hideFromUser: true,
 		isTransient: true,
-		// A MINIMAL shell on purpose: no rc files, no prompt themes (p10k,
-		// etc.), no shell-integration scripts. Running in the user's heavy
-		// interactive shell breaks command execution: prompt themes clobber
-		// $? and re-render prompts into the captured stream, and VS Code's
-		// shell-integration exit-code tracking never settles for heredoc/
-		// multi-line input. A bare bash + the sentinel marker (see
-		// runViaSendText) gives exact exit codes and clean output for every
-		// command shape. Env is inherited from the extension host — the same
-		// semantics as pi's built-in bash tool.
-		shellPath: "/bin/bash",
-		shellArgs: ["--noprofile", "--norc"],
+		// A MINIMAL shell on purpose: no prompt themes (p10k, etc.), no
+		// shell-integration scripts. Running in the user's heavy interactive
+		// shell breaks command execution: prompt themes can clobber $? and
+		// re-render prompts, and VS Code's shell-integration exit-code
+		// tracking never settles for heredoc/multi-line input. The flags that
+		// make the shell minimal are picked per platform in resolveBashShell —
+		// a bare bash + the sentinel marker (see runWithOutputCapture) gives
+		// exact exit codes and clean output for every command shape. Env is
+		// inherited from the extension host — the same semantics as pi's
+		// built-in bash tool.
+		shellPath: shell.path,
+		shellArgs: shell.args,
 	});
+}
+
+// ── Shell resolution (platform-aware) ────────────────────────
+
+/** A POSIX-compatible shell the hidden terminal can run our wrapper in. */
+export interface BashShell {
+	path: string;
+	args: string[];
+}
+
+/**
+ * Minimal-shell flags on POSIX hosts (unchanged since the tool was ported):
+ * no rc files, no profile. `/bin/bash` exists on macOS and Linux, so this is
+ * also the fallback when nothing else is configured.
+ */
+const POSIX_BASH_ARGS = ["--noprofile", "--norc"];
+
+/**
+ * Git for Windows flags. `--login` is not cosmetic: /etc/profile is what
+ * initializes the MSYS environment (PATH with /usr/bin so sed/find/ls exist,
+ * TMPDIR, HOME, …). Without it, a Git Bash started from the extension host
+ * inherits only the Windows PATH, where the coreutils are missing. `--norc`
+ * skips ~/.bashrc so a prompt theme cannot rewrite the prompt while output
+ * capture is in flight (the same reason POSIX uses --norc).
+ */
+const GIT_BASH_ARGS = ["--login", "--norc"];
+
+/**
+ * Well-known Git for Windows install locations, in preference order: the
+ * machine-wide Program Files roots, then the per-user install. The value is
+ * the env var holding the root, the rest is appended to it.
+ */
+const GIT_BASH_CANDIDATES: Array<[string, string]> = [
+	["ProgramFiles", "Git"],
+	["ProgramW6432", "Git"],
+	["ProgramFiles(x86)", "Git"],
+	["LOCALAPPDATA", "Programs\\Git"],
+];
+
+/**
+ * Join Windows path segments explicitly. `node:path.join` is host-dependent,
+ * and these candidates must resolve the same way on every machine (including
+ * the POSIX machines that unit-test the Windows branch).
+ */
+function windowsJoin(...parts: string[]): string {
+	return parts
+		.map((part) => part.replace(/^[\\/]+|[\\/]+$/g, ""))
+		.join("\\");
+}
+
+/** Last path segment, accepting both separators: these checks must behave
+ * identically for Windows paths on a POSIX host (unit tests). */
+function basenameAny(path: string): string {
+	const parts = path.split(/[\\/]/);
+	return parts[parts.length - 1] ?? "";
+}
+
+/** bash/git-bash only: `sh`/`dash`/`zsh` reject the bash-specific flags. */
+function isBashLike(path: string): boolean {
+	const name = basenameAny(path).toLowerCase().replace(/\.exe$/, "");
+	return name === "bash" || name === "git-bash" || name === "gitbash";
+}
+
+/**
+ * The WSL launcher (`C:\Windows\System32\bash.exe`). Must never be used: WSL
+ * cannot see the Windows session cwd or the temp-file paths the wrapper
+ * redirects to, so it fails in confusing ways instead of loudly.
+ */
+function isWslBash(path: string): boolean {
+	return /(^|[\\/])system32[\\/]bash\.exe$/i.test(path);
+}
+
+function isUsableBash(path: string): boolean {
+	return isBashLike(path) && !isWslBash(path);
+}
+
+/** bash-specific flags only apply to the bash family; anything else (e.g. a
+ * configured zsh) runs the POSIX wrapper with no extra args. */
+function bashArgsFor(path: string, platform: NodeJS.Platform): string[] {
+	if (!isBashLike(path)) return [];
+	return platform === "win32" ? GIT_BASH_ARGS : POSIX_BASH_ARGS;
+}
+
+/** First `<dir>/bash.exe` that exists on a Windows PATH. */
+function lookupOnPath(
+	env: Record<string, string | undefined>,
+	exists: (path: string) => boolean,
+): string | undefined {
+	const raw = env.PATH ?? env.Path ?? env.path ?? "";
+	for (const dir of raw.split(";")) {
+		if (dir.trim() === "") continue;
+		const candidate = windowsJoin(dir, "bash.exe");
+		if (exists(candidate)) return candidate;
+	}
+	return undefined;
+}
+
+export interface BashShellResolution {
+	platform?: NodeJS.Platform;
+	/** Explicit override: pi's `shellPath` setting (dashboard → Shell path). */
+	configured?: string;
+	/**
+	 * `vscode.env.shell` — the extension host's detected default shell, which
+	 * `terminal.integrated.defaultProfile.<platform>` overrides. This is how a
+	 * user's Git Bash profile gets picked up on Windows.
+	 */
+	defaultShell?: string;
+	env?: Record<string, string | undefined>;
+	exists?: (path: string) => boolean;
+}
+
+/**
+ * Pick the shell for the hidden terminal, preferring what the user actually
+ * configured over anything we would guess:
+ *
+ *   1. pi's `shellPath` setting (explicit override),
+ *   2. the VS Code default shell, when it is a bash (Windows: the Git Bash
+ *      profile the user set up),
+ *   3. the well-known Git for Windows install locations, then PATH,
+ *   4. `/bin/bash` on POSIX (the historical behavior).
+ *
+ * Returns undefined only on Windows with no reachable bash — the caller turns
+ * that into an actionable error instead of spawning the wrong shell.
+ *
+ * Pure on purpose (platform/env/exists are injected) so the Windows paths are
+ * unit-testable from any host.
+ */
+export function resolveBashShell(
+	deps: BashShellResolution = {},
+): BashShell | undefined {
+	const platform = deps.platform ?? process.platform;
+	const env = deps.env ?? process.env;
+	const exists = deps.exists ?? existsSync;
+
+	const configured = deps.configured?.trim();
+	if (configured) {
+		return { path: configured, args: bashArgsFor(configured, platform) };
+	}
+
+	if (platform === "win32") {
+		const defaultShell = deps.defaultShell?.trim();
+		if (defaultShell && isUsableBash(defaultShell)) {
+			return {
+				path: defaultShell,
+				args: bashArgsFor(defaultShell, platform),
+			};
+		}
+		for (const [rootVar, rest] of GIT_BASH_CANDIDATES) {
+			const root = env[rootVar];
+			if (!root) continue;
+			const candidate = windowsJoin(root, rest, "bin", "bash.exe");
+			if (exists(candidate)) {
+				return { path: candidate, args: GIT_BASH_ARGS };
+			}
+		}
+		const onPath = lookupOnPath(env, exists);
+		if (onPath && isUsableBash(onPath)) {
+			return { path: onPath, args: GIT_BASH_ARGS };
+		}
+		return undefined;
+	}
+
+	// POSIX: unchanged. The default shell is deliberately NOT consulted here —
+	// on macOS it is zsh, and switching shells is a behavior change this fix
+	// has no reason to make.
+	return { path: "/bin/bash", args: POSIX_BASH_ARGS };
+}
+
+/**
+ * Convert a host path into one the resolved shell can redirect to. On Windows
+ * the temp paths are native (`C:\Users\…\out`) and must be handed to Git Bash
+ * with forward slashes, since backslashes are escape characters inside quotes.
+ */
+export function toShellPath(
+	path: string,
+	platform: NodeJS.Platform = process.platform,
+): string {
+	return platform === "win32" ? path.replace(/\\/g, "/") : path;
+}
+
+/** Single-quote a literal path: temp dirs can contain spaces (Windows user
+ * profiles) and quotes/backslashes must survive verbatim. */
+export function shellQuote(path: string): string {
+	return `'${path.replace(/'/g, `'\\''`)}'`;
 }
 
 /**
@@ -426,7 +612,17 @@ function createHiddenTerminal(
  * Follows pi's BashOperations contract: throws Error("timeout:<secs>") on
  * timeout and Error("aborted") on abort (the tool's execute formats them).
  */
-export function createVscodeBashOperations(): BashOperations {
+export interface VscodeBashOperationsOptions {
+	/** Explicit shell override — pi's `shellPath` setting. */
+	shellPath?: string;
+	/** Test seam: bypass `vscode.env.shell`/environment discovery. Its result
+	 * is used verbatim, so returning undefined exercises the no-shell path. */
+	resolveShell?: (vscode: typeof import("vscode")) => BashShell | undefined;
+}
+
+export function createVscodeBashOperations(
+	options: VscodeBashOperationsOptions = {},
+): BashOperations {
 	return {
 		async exec(command, cwd, { onData, signal, timeout }) {
 			if (signal?.aborted) {
@@ -439,8 +635,24 @@ export function createVscodeBashOperations(): BashOperations {
 				);
 			}
 
+			// Resolved per command so a changed default shell/profile is picked
+			// up without restarting the extension host.
+			const shell = options.resolveShell
+				? options.resolveShell(vscode)
+				: resolveBashShell({
+						configured: options.shellPath,
+						defaultShell: (vscode as { env?: { shell?: string } }).env?.shell,
+					});
+			if (!shell) {
+				throw new Error(
+					"No bash shell found. On Windows, install Git for Windows, set pi's " +
+						'"shellPath" setting (CodePi Settings → Behavior → Shell path), or ' +
+						"make Git Bash the VS Code default terminal profile.",
+				);
+			}
+
 			// One hidden terminal per command; disposing it is the kill switch.
-			const terminal = createHiddenTerminal(vscode, cwd);
+			const terminal = createHiddenTerminal(vscode, cwd, shell);
 			let disposed = false;
 			const dispose = () => {
 				if (disposed) return;
@@ -477,7 +689,7 @@ export function createVscodeBashOperations(): BashOperations {
  * `onDidWriteTerminalData` event:
  *
  *   ( <command>
- *   ) > <dir>/out 2>&1; printf '%s' "$?" > <dir>/code
+ *   ) > '<dir>/out' 2>&1; printf '%s' "$?" > '<dir>/code'
  *
  * The subshell keeps `exit`/`cd`/backgrounding scoped to the command, and
  * output is captured verbatim (no echo/prompt noise). Output is streamed by
@@ -500,7 +712,12 @@ async function runWithOutputCapture(
 	const { onData, signal, timeout, dir } = options;
 	const outFile = join(dir, "out");
 	const codeFile = join(dir, "code");
-	const wrapper = `( ${command}\n) > ${outFile} 2>&1; printf '%s' "$?" > ${codeFile}`;
+	// Paths are shell-quoted and (on Windows) slash-converted: a temp dir can
+	// contain spaces or backslashes, and an unquoted path there silently
+	// redirects to the wrong file.
+	const outRef = shellQuote(toShellPath(outFile));
+	const codeRef = shellQuote(toShellPath(codeFile));
+	const wrapper = `( ${command}\n) > ${outRef} 2>&1; printf '%s' "$?" > ${codeRef}`;
 
 	return new Promise((resolve, reject) => {
 		let settled = false;
@@ -749,6 +966,8 @@ export interface CodepiBashToolOptions {
 	cwd: string;
 	/** Execution backend. Default: VS Code terminal. */
 	operations?: BashOperations;
+	/** Shell override for the default backend — pi's `shellPath` setting. */
+	shellPath?: string;
 	/**
 	 * Current approval mode. Default: the bridge's mode (from the codepi-bash
 	 * extension), or "ask" when the extension has not registered yet. Pass a
@@ -772,7 +991,9 @@ export interface CodepiBashToolOptions {
 export function createCodepiBashToolDefinition(
 	options: CodepiBashToolOptions,
 ): ToolDefinition<any, unknown, BashRenderState> {
-	const ops = options.operations ?? createVscodeBashOperations();
+	const ops =
+		options.operations ??
+		createVscodeBashOperations({ shellPath: options.shellPath });
 	const sessionCwd = options.cwd;
 	const getMode =
 		options.getMode ??

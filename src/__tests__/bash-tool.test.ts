@@ -15,7 +15,10 @@ import {
 	createCodepiBashToolDefinition,
 	createVscodeBashOperations,
 	joinCommands,
+	resolveBashShell,
 	resolveCwd,
+	shellQuote,
+	toShellPath,
 	type BashMode,
 } from "../tools/bash";
 import { setBashBridge, type BashApprovalResult } from "../../resources/extensions/bash-bridge";
@@ -449,6 +452,9 @@ describe("bash tool: createVscodeBashOperations", () => {
 		const terminals: any[] = [];
 		const disposed: number[] = [];
 		const vscode = {
+			// `vscode.env.shell` is what resolveBashShell consults on Windows;
+			// pinning it keeps these tests host-independent.
+			env: { shell: "/bin/bash" },
 			window: {
 				createTerminal: vi.fn((options: any) => {
 					const t = {
@@ -467,8 +473,9 @@ describe("bash tool: createVscodeBashOperations", () => {
 	/** Extract the temp out/code file paths from the wrapper sendText wrote. */
 	function filePaths(terminal: any): { out: string; code: string } {
 		const wrapper = terminal.sendText.mock.calls[0][0] as string;
-		const outMatch = wrapper.match(/^\( [\s\S]*?\) > ([^\s]+)\/out 2>&1;/);
-		const codeMatch = wrapper.match(/> ([^\s]+)\/code$/);
+		// The refs are single-quoted (temp dirs can contain spaces).
+		const outMatch = wrapper.match(/^\( [\s\S]*?\) > '([^']+)\/out' 2>&1;/);
+		const codeMatch = wrapper.match(/printf '%s' "\$\?" > '([^']+)\/code'$/);
 		expect(outMatch).not.toBeNull();
 		expect(codeMatch).not.toBeNull();
 		return { out: `${outMatch![1]}/out`, code: `${codeMatch![1]}/code` };
@@ -486,9 +493,9 @@ describe("bash tool: createVscodeBashOperations", () => {
 		await new Promise((r) => setTimeout(r, 20)); // let sendText fire
 		const term = terminals[0];
 
-		// The terminal must be a minimal bash: no rc files, no integration.
+		// The terminal must be a minimal bash: no prompt themes, no integration.
 		expect(term.options.shellPath).toBe("/bin/bash");
-		expect(term.options.shellArgs).toEqual(["--noprofile", "--norc"]);
+		expect(term.options.shellArgs).toContain("--norc");
 		expect(term.options.hideFromUser).toBe(true);
 		expect(term.options.isTransient).toBe(true);
 		expect(term.options.cwd).toBe("/tmp");
@@ -592,6 +599,16 @@ describe("bash tool: createVscodeBashOperations", () => {
 		delete (globalThis as any).__codepiVscode;
 	});
 
+	it("fails with an actionable error when no bash is reachable", async () => {
+		const { vscode } = createVscodeMock();
+		(globalThis as any).__codepiVscode = { vscode };
+		const ops = createVscodeBashOperations({ resolveShell: () => undefined });
+		await expect(
+			ops.exec("echo hi", "/tmp", { onData: () => {} }),
+		).rejects.toThrow(/No bash shell found/);
+		delete (globalThis as any).__codepiVscode;
+	});
+
 	it("cleans up the temp directory after completion", async () => {
 		const { vscode, terminals } = createVscodeMock();
 		(globalThis as any).__codepiVscode = { vscode };
@@ -604,5 +621,123 @@ describe("bash tool: createVscodeBashOperations", () => {
 		await resultP;
 		expect(existsSync(dirname(code))).toBe(false); // dir removed after completion
 		delete (globalThis as any).__codepiVscode;
+	});
+});
+
+// ── Shell resolution (Windows support) ───────────────────────
+
+describe("bash tool: resolveBashShell", () => {
+	const existsAt = (...paths: string[]) => {
+		const set = new Set(paths);
+		return (p: string) => set.has(p);
+	};
+	const GIT_BASH = "C:\\Program Files\\Git\\bin\\bash.exe";
+
+	it("prefers pi's shellPath setting on every platform", () => {
+		expect(
+			resolveBashShell({
+				platform: "win32",
+				configured: "  C:\\Tools\\Git\\bin\\bash.exe  ",
+				defaultShell: GIT_BASH,
+			}),
+		).toEqual({
+			path: "C:\\Tools\\Git\\bin\\bash.exe",
+			args: ["--login", "--norc"],
+		});
+		expect(
+			resolveBashShell({
+				platform: "darwin",
+				configured: "/opt/homebrew/bin/bash",
+			}),
+		).toEqual({
+			path: "/opt/homebrew/bin/bash",
+			args: ["--noprofile", "--norc"],
+		});
+	});
+
+	it("passes no bash-specific flags to a non-bash configured shell", () => {
+		expect(
+			resolveBashShell({ platform: "darwin", configured: "/bin/zsh" }),
+		).toEqual({ path: "/bin/zsh", args: [] });
+	});
+
+	it("uses the VS Code default shell when it is Git Bash", () => {
+		expect(
+			resolveBashShell({ platform: "win32", defaultShell: GIT_BASH }),
+		).toEqual({ path: GIT_BASH, args: ["--login", "--norc"] });
+	});
+
+	it("ignores a non-bash VS Code default shell and looks for Git Bash", () => {
+		expect(
+			resolveBashShell({
+				platform: "win32",
+				defaultShell: "C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+				env: { ProgramFiles: "C:\\Program Files\\" },
+				exists: existsAt(GIT_BASH),
+			}),
+		).toEqual({ path: GIT_BASH, args: ["--login", "--norc"] });
+	});
+
+	it("finds a per-user Git for Windows install", () => {
+		const local = "C:\\Users\\me\\AppData\\Local\\Programs\\Git\\bin\\bash.exe";
+		expect(
+			resolveBashShell({
+				platform: "win32",
+				env: { LOCALAPPDATA: "C:\\Users\\me\\AppData\\Local" },
+				exists: existsAt(local),
+			}),
+		).toEqual({ path: local, args: ["--login", "--norc"] });
+	});
+
+	it("falls back to bash.exe on PATH", () => {
+		expect(
+			resolveBashShell({
+				platform: "win32",
+				env: { Path: "C:\\bin;C:\\tools\\git\\bin" },
+				exists: existsAt("C:\\tools\\git\\bin\\bash.exe"),
+			}),
+		).toEqual({
+			path: "C:\\tools\\git\\bin\\bash.exe",
+			args: ["--login", "--norc"],
+		});
+	});
+
+	it("never falls back to the WSL launcher", () => {
+		expect(
+			resolveBashShell({
+				platform: "win32",
+				env: { PATH: "C:\\Windows\\System32" },
+				exists: existsAt("C:\\Windows\\System32\\bash.exe"),
+			}),
+		).toBeUndefined();
+	});
+
+	it("returns undefined on Windows when nothing is reachable", () => {
+		expect(
+			resolveBashShell({
+				platform: "win32",
+				env: { PATH: "" },
+				exists: () => false,
+			}),
+		).toBeUndefined();
+	});
+
+	it("keeps the historical /bin/bash on POSIX, whatever the default shell is", () => {
+		expect(
+			resolveBashShell({ platform: "darwin", defaultShell: "/bin/zsh" }),
+		).toEqual({ path: "/bin/bash", args: ["--noprofile", "--norc"] });
+		expect(resolveBashShell({ platform: "linux", exists: () => false })).toEqual({
+			path: "/bin/bash",
+			args: ["--noprofile", "--norc"],
+		});
+	});
+
+	it("converts redirect paths for the shell and quotes them", () => {
+		expect(toShellPath("C:\\Users\\a b\\Temp\\out", "win32")).toBe(
+			"C:/Users/a b/Temp/out",
+		);
+		expect(toShellPath("/tmp/codepi/out", "darwin")).toBe("/tmp/codepi/out");
+		expect(shellQuote("C:/Users/a b/Temp/out")).toBe("'C:/Users/a b/Temp/out'");
+		expect(shellQuote("/tmp/it's/out")).toBe("'/tmp/it'\\''s/out'");
 	});
 });

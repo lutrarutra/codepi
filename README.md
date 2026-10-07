@@ -103,6 +103,10 @@ The bundled `codepi-bash` extension runs commands through a hidden VS Code termi
 - `ask` mode with approval, denial, revision, or auto-approve options.
 - `allow` mode for automatic execution.
 - `disabled` mode to block shell commands.
+- Runs in the shell VS Code is configured with (`terminal.integrated.defaultProfile.*`,
+  which is how the Windows Git Bash profile is picked up) or pi's `shellPath`
+  setting; on Windows it additionally finds Git for Windows on its own and never
+  falls back to the WSL launcher.
 - Shell integration, timeouts, output truncation, and temp-file spillover for large output.
 - Toggle with `/codepi-bash-ask`, `/codepi-bash-allow`, and `/codepi-bash-disable`.
 - `codepi-task-run` uses the same terminal backend for saved project tasks.

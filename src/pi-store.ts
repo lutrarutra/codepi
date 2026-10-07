@@ -138,6 +138,21 @@ export function readTerminalPrefs(settings: unknown): TerminalPrefs {
 	return { fontFamily, fontSize };
 }
 
+/**
+ * Read pi's own `shellPath` setting (dashboard → Behavior → Shell path).
+ * CodePi replaces pi's built-in bash tool with its own VS Code-terminal
+ * backend, so without this the setting would be silently ignored — forwarding
+ * it keeps an already user-visible control meaningful (and gives Windows
+ * users a way to point at a specific Git Bash).
+ */
+export function readShellPath(settings: unknown): string | undefined {
+	if (!isRecord(settings)) return undefined;
+	const value = settings.shellPath;
+	return typeof value === "string" && value.trim() !== ""
+		? value.trim()
+		: undefined;
+}
+
 /** Store CodePi's terminal preferences in settings.json (codepi.*). */
 export function updateTerminalPrefs(
 	settingsPath: string,

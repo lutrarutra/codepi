@@ -65,6 +65,7 @@ import {
 	migrateLegacyCodePiStorage,
 	readAutoVerifyMode,
 	readJsonFile,
+	readShellPath,
 	readTabHandleWidth,
 	readTerminalPrefs,
 	seedAskModeAllowedToolsIfMissing,
@@ -1806,6 +1807,7 @@ async function startTuiBackend(state: SessionState): Promise<void> {
 			createCodepiBashToolDefinition({
 				sessionId,
 				cwd: opts.cwd,
+				shellPath: readShellPath(settings),
 				getMode: bashApprovalEnabled
 					? () => getBashBridge(sessionId)?.getMode() ?? "ask"
 					: () => "auto",
