@@ -14,6 +14,9 @@ import { getBashBridge } from "../resources/extensions/bash-bridge";
 import { disposeDiagnosticsCache } from "./tools/diagnostics";
 import { installAutoVerify } from "./auto-verify";
 import { installInspectorUncaughtGuard } from "./uncaught-guard";
+import { applyKeybindingOverrides } from "./tui/keybinding-overrides";
+import { installHostClipboard } from "./host-clipboard";
+import { PROJECT_TRUST_PROMPT, resolveProjectTrust } from "./project-trust";
 import {
 	createActivityBridge,
 	createSessionActivityTracker,
@@ -71,6 +74,7 @@ import {
 	seedAskModeAllowedToolsIfMissing,
 	setAgentDir,
 	isBashExtensionEnabled,
+	isModesExtensionEnabled,
 	isContextExtensionEnabled,
 	DEFAULT_AUTO_VERIFY_MODE,
 } from "./pi-store";
@@ -91,6 +95,7 @@ import {
 	formatLiveContext,
 	trackContextEvents,
 	getRecentFiles,
+	setLastTextEditorProvider,
 } from "./context-snapshot";
 import { createHostContextTools } from "./context-tools";
 import { resolveConfiguredModelScope } from "./model-scope";
@@ -114,6 +119,8 @@ interface SessionState {
 	fcLastHead: string | undefined;
 	/** Tab-title refresh (CodePi-owned — recomputes, never shows the SDK's π). */
 	refreshTitle?: () => void;
+	/** Busy dot on the tab title, driven by the activity tracker. */
+	setWorking?: (working: boolean) => void;
 	/** Sidebar-rename result, applied until the open session sees a /name. */
 	sessionNameOverride?: string;
 }
@@ -138,9 +145,16 @@ function getModeInfoFromSessions(): ModeInfo {
 		try {
 			const branch: readonly unknown[] =
 				state.sessionManager?.getBranch?.() ?? [];
+			// A session records its mode only once the user switches it;
+			// codepi-modes starts every session in Implement.
+			const current =
+				modeFromSessionBranch(branch) ??
+				(isModesExtensionEnabled(readJsonFile(getSettingsPath()) ?? {})
+					? "implement"
+					: undefined);
 			return {
 				active: true,
-				current: modeFromSessionBranch(branch),
+				current,
 				sessionName: state.sessionManager?.getSessionName?.(),
 			};
 		} catch {
@@ -187,6 +201,8 @@ function updateReviewStatusBar(): void {
 		);
 		reviewStatusBar.command = "codepi.openPendingReview";
 	}
+	// Shows "Accept/Reject All Edits" in the Command Palette only when useful.
+	void vscode.commands.executeCommand("setContext", "codepi.hasPendingEdits", pendingHunks > 0);
 	if (pendingHunks > 0) {
 		reviewStatusBar.text = `$(diff) ${pendingFiles} file${pendingFiles === 1 ? "" : "s"} · ${pendingHunks} edit${pendingHunks === 1 ? "" : "s"} pending`;
 		reviewStatusBar.tooltip = "CodePi: review pending edits in the editor";
@@ -293,6 +309,29 @@ export async function activate(context: vscode.ExtensionContext) {
 	// global (same process) — keeping the extension free of relative imports,
 	// mirroring codepi-bash's proven-safe structure. One shared recent-file
 	// cache and git-stats cache for both the host snapshot and the tools.
+	// Remember the last file editor and its selection: CodePi tabs share the
+	// editor group, so the file the user just selected in is usually hidden
+	// (not active, not visible) by the time they type into CodePi.
+	{
+		let last: { document: vscode.TextDocument; selection: vscode.Selection } | undefined;
+		const remember = (editor: vscode.TextEditor | undefined) => {
+			const scheme = editor?.document.uri.scheme;
+			if (editor && (scheme === "file" || scheme === "untitled")) {
+				last = { document: editor.document, selection: editor.selection };
+			}
+		};
+		remember(vscode.window.activeTextEditor);
+		context.subscriptions.push(
+			vscode.window.onDidChangeActiveTextEditor(remember),
+			vscode.window.onDidChangeTextEditorSelection((e) => remember(e.textEditor)),
+			vscode.workspace.onDidCloseTextDocument((doc) => {
+				if (last?.document === doc) last = undefined;
+			}),
+			{ dispose: () => setLastTextEditorProvider(undefined) },
+		);
+		setLastTextEditorProvider(() => last);
+	}
+
 	(globalThis as Record<string, unknown>).__codepiContextCore = {
 		collectEditorContext,
 		collectGitDiffs,
@@ -322,6 +361,12 @@ export async function activate(context: vscode.ExtensionContext) {
 	// Installed only while this process is inspectable; every other error keeps
 	// its existing handling (see src/uncaught-guard.ts).
 	context.subscriptions.push(installInspectorUncaughtGuard());
+
+	// pi's /copy and Ctrl+X: copy through VS Code's clipboard (also local from
+	// Remote-SSH) instead of xclip/xsel or OSC 52 (see src/host-clipboard.ts).
+	context.subscriptions.push({
+		dispose: installHostClipboard((text) => vscode.env.clipboard.writeText(text)),
+	});
 
 	// pi's InteractiveMode ends every quit path (/quit, Ctrl+C/Ctrl+D, signals)
 	// with process.exit(). VS Code's extension host already neutralizes
@@ -482,13 +527,19 @@ export async function activate(context: vscode.ExtensionContext) {
 			new SettingsViewProvider(
 				context.extensionUri,
 				() => {
-					// Settings and bundled-resource toggles apply to new sessions.
+					// Bundled-resource toggles apply to new sessions; the
+					// terminal font applies to open sessions right away.
+					broadcastTerminalFont();
 				},
 				getCanonicalAgentDir(),
 				getCodePiSessionDirForRuntime(),
 			),
 			{ webviewOptions: { retainContextWhenHidden: true } },
 		),
+		// Bound (package.json) to workbench chords that pi uses itself, such
+		// as Ctrl+- (undo), while a session tab has focus: the webview already
+		// handled the key, and the workbench must not act on it too.
+		vscode.commands.registerCommand("codepi.keyHandledByTui", () => {}),
 		vscode.commands.registerCommand("codepi.openSettingsTab", () =>
 			vscode.commands.executeCommand(
 				"setContext",
@@ -1338,10 +1389,13 @@ async function setupSessionPanel(
 	// Tab title is owned by CodePi (computeSessionTitle) — the SDK's own
 	// setTitle pushes ("π - <name> - <cwd>") are discarded and the CodePi
 	// title recomputed from the session. The " ●" progress suffix is
-	// re-applied from the pty's progress notifications. The tab INDICATOR
+	// shown while the activity tracker says pi is working (pi's own terminal
+	// progress reports are off by default, so they cannot drive it alone),
+	// or while pi reports progress. The tab INDICATOR
 	// icon is owned by the session-activity tracker (idle / working /
 	// waiting / error icons) once the backend starts — see startTuiBackend.
 	let progressActive = false;
+	let activityWorking = false;
 	const refreshTitle = () => {
 		// The panel is gone once cleanupSession ran (it drops the session from
 		// `sessions` before disposing the panel), and every VS Code panel
@@ -1359,7 +1413,7 @@ async function setupSessionPanel(
 				sessionManager,
 				state.sessionNameOverride,
 				labelMaxChars,
-			) + (progressActive ? " ●" : "");
+			) + (progressActive || activityWorking ? " ●" : "");
 	};
 	/** Never let a "Webview is disposed" throw escape into an async caller. */
 	const applyTitle = () => {
@@ -1397,6 +1451,11 @@ async function setupSessionPanel(
 	};
 	sessions.set(sessionId, state);
 	state.refreshTitle = applyTitle;
+	state.setWorking = (working) => {
+		if (working === activityWorking) return;
+		activityWorking = working;
+		applyTitle();
+	};
 
 	// Refresh the tab title when the session file changes: the SDK never
 	// pushes a title for the first user message, which is exactly when a new
@@ -1529,6 +1588,13 @@ async function setupSessionPanel(
 			);
 			if (focused) {
 				activeSessionPanel = e.webviewPanel;
+				// Move keyboard focus into the terminal right away, so the
+				// first keystrokes after activating the tab reach pi.
+				try {
+					void e.webviewPanel.webview.postMessage({ command: "tuiFocus" });
+				} catch {
+					/* panel disposed */
+				}
 			} else if (activeSessionPanel === e.webviewPanel) {
 				// This panel lost focus — another panel's event will claim it,
 				// or none is focused anymore.
@@ -1707,7 +1773,14 @@ async function startTuiBackend(state: SessionState): Promise<void> {
 	// factory for more than one new session; each session must see current settings
 	// and bundled-resource toggles rather than activation-time snapshots.
 	const createRuntime: CreateAgentSessionRuntimeFactory = async (opts) => {
-		const settingsManager = pi.SettingsManager.create(opts.cwd, agentDir);
+		// Ask before loading the folder's .pi resources (packages install from
+		// npm, project extensions run as code), as pi's CLI does.
+		const projectTrusted = await resolveSessionProjectTrust(pi, opts.cwd, agentDir, {
+			interactive: true,
+		});
+		const settingsManager = pi.SettingsManager.create(opts.cwd, agentDir, {
+			projectTrusted,
+		});
 		const resourcePaths = buildCurrentPiRuntimeResourcePaths(
 			extensionDir?.fsPath ?? "",
 			agentDir,
@@ -1921,6 +1994,7 @@ async function startTuiBackend(state: SessionState): Promise<void> {
 			} catch {
 				/* webview disposed */
 			}
+			state.setWorking?.(activity === "working");
 		},
 	});
 	emitActivityEvent = activityTracker.emit;
@@ -1948,6 +2022,11 @@ async function startTuiBackend(state: SessionState): Promise<void> {
 		// find, and viewport anchoring itself, so it needs regular mode.
 		tuiMode: "regular",
 	});
+	// Keys that cannot work in a VS Code webview (ctrl+z suspend, ctrl+d
+	// exit) are unbound for CodePi sessions; see keybinding-overrides.ts.
+	if (!applyKeybindingOverrides(state.tui)) {
+		console.warn("[CodePi] could not apply pi keybinding overrides (pi's InteractiveMode changed)");
+	}
 
 	state.isBackendReady = true;
 	state.isBusy = true;
@@ -2041,6 +2120,51 @@ function syncPendingReviewDots(): void {
 function getWorkspaceRoot(): string {
 	const ws = vscode.workspace.workspaceFolders?.[0];
 	return ws?.uri.fsPath ?? os.homedir();
+}
+
+/** Send the configured terminal font to every open session's webview. */
+function broadcastTerminalFont(): void {
+	let prefs: { fontFamily: string; fontSize: number };
+	try {
+		prefs = readTerminalPrefs(readJsonFile(getSettingsPath()) ?? {});
+	} catch {
+		return;
+	}
+	for (const [, st] of sessions) {
+		try {
+			void st.panel.webview.postMessage({ command: "tuiFont", ...prefs });
+		} catch {
+			/* panel disposed */
+		}
+	}
+}
+
+/**
+ * Project trust for a session's folder (see src/project-trust.ts).
+ * `interactive: false` never prompts: an undecided folder is untrusted.
+ */
+async function resolveSessionProjectTrust(
+	pi: typeof import("@earendil-works/pi-coding-agent"),
+	cwd: string,
+	agentDir: string,
+	{ interactive }: { interactive: boolean },
+): Promise<boolean> {
+	const globalSettings = pi.SettingsManager.create(cwd, agentDir, { projectTrusted: false });
+	return resolveProjectTrust(cwd, {
+		hasTrustRequiringProjectResources: pi.hasTrustRequiringProjectResources,
+		store: new pi.ProjectTrustStore(agentDir),
+		defaultProjectTrust: globalSettings.getDefaultProjectTrust(),
+		ask: interactive
+			? async (dir, options) => {
+					const picked = await vscode.window.showWarningMessage(
+						`Trust project folder?\n${dir}`,
+						{ modal: true, detail: PROJECT_TRUST_PROMPT },
+						...options.map((o) => o.label),
+					);
+					return options.find((o) => o.label === picked);
+				}
+			: undefined,
+	});
 }
 
 // ── Panel Status Icon ────────────────────────────────────────

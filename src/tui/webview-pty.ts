@@ -1,4 +1,5 @@
 import type * as vscode from "vscode";
+import type { ProgramStatus } from "@earendil-works/pi-tui";
 import type { TuiTerminal } from "./tui-pty";
 
 /**
@@ -24,6 +25,7 @@ export class WebviewPty implements TuiTerminal {
 	private _rows = 24;
 	private _title: string;
 	private _progress = false;
+	private _programStatus: ProgramStatus | undefined;
 	private ready = false;
 	private readyWaiters: Array<() => void> = [];
 	private pendingWrite: string[] = [];
@@ -143,6 +145,18 @@ export class WebviewPty implements TuiTerminal {
 		if (this.disposed) return;
 		this.onTitleChange(this._title + (active ? " ●" : ""));
 		this.onProgressChange?.(active);
+	}
+
+	setProgramStatus(status: ProgramStatus): void {
+		// pi 1.1+ reports working/blocked/done/failed via OSC 7501 and calls
+		// this unconditionally. xterm.js does not understand OSC 7501, so it
+		// is not forwarded to the webview; the latest status is only recorded.
+		this._programStatus = status.state === "clear" ? undefined : status;
+	}
+
+	/** Latest OSC 7501 program status pi reported, if any. */
+	get programStatus(): ProgramStatus | undefined {
+		return this._programStatus;
 	}
 
 	// ── Webview message handlers ──────────────────────────────

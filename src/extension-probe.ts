@@ -12,6 +12,7 @@ import type {
 	LoadExtensionsResult,
 } from "@earendil-works/pi-coding-agent";
 import type { LoadedExtensionRich } from "./extension-snapshot";
+import { resolveProjectTrust } from "./project-trust";
 
 let sdkPromise:
 	| Promise<typeof import("@earendil-works/pi-coding-agent")>
@@ -36,6 +37,21 @@ export interface ProbeResult {
 }
 
 /**
+ * Project trust without prompting: saved decision or defaultProjectTrust;
+ * an undecided folder with project resources counts as untrusted.
+ */
+export async function probeProjectTrust(cwd: string, agentDir: string): Promise<boolean> {
+	const pi = await getSdk();
+	return resolveProjectTrust(cwd, {
+		hasTrustRequiringProjectResources: pi.hasTrustRequiringProjectResources,
+		store: new pi.ProjectTrustStore(agentDir),
+		defaultProjectTrust: pi.SettingsManager.create(cwd, agentDir, {
+			projectTrusted: false,
+		}).getDefaultProjectTrust(),
+	});
+}
+
+/**
  * Load extensions exactly like a fresh session would (same loader options,
  * same bundled-path construction, same conflict filtering) but WITHOUT
  * creating a session. Uses public SDK loader APIs only.
@@ -44,7 +60,12 @@ export async function probeExtensions(
 	opts: ProbeOptions,
 ): Promise<ProbeResult> {
 	const pi = await getSdk();
-	const settingsManager = pi.SettingsManager.create(opts.cwd, opts.agentDir);
+	// Loading extensions runs their code: an untrusted (or not yet decided)
+	// project's .pi extensions and packages stay out, as in a session.
+	const projectTrusted = await probeProjectTrust(opts.cwd, opts.agentDir);
+	const settingsManager = pi.SettingsManager.create(opts.cwd, opts.agentDir, {
+		projectTrusted,
+	});
 	const resourcePaths = buildCurrentPiRuntimeResourcePaths(
 		opts.extensionResourcesDir,
 		opts.agentDir,

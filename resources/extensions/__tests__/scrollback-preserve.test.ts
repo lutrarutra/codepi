@@ -1,122 +1,155 @@
 import { describe, expect, it } from "vitest";
 import { Terminal } from "../../../webview-ui/node_modules/@xterm/xterm/lib/xterm.mjs";
-import { createScrollbackClearFilter } from "../../../webview-ui/src/terminal/scrollback";
+import {
+	createFullRedrawWriter,
+	restoreView,
+	snapshotView,
+} from "../../../webview-ui/src/terminal/full-redraw";
 import { createViewportAnchor } from "../../../webview-ui/src/terminal/viewport-anchor";
 
 const drain = (t: Terminal): Promise<void> =>
 	new Promise((resolve) => t.write("", resolve));
 
-describe("createScrollbackClearFilter", () => {
-	it("strips \\x1b[3J and leaves everything else intact", () => {
-		const filter = createScrollbackClearFilter();
-		const input =
-			"\x1b[?2026h\x1b[2J\x1b[H\x1b[3Jline one\r\nline two\x1b[?2026l";
-		expect(filter(input)).toBe(
-			"\x1b[?2026h\x1b[2J\x1b[Hline one\r\nline two\x1b[?2026l",
-		);
-	});
+/** pi-tui's full render: sync block, clear screen + home + clear scrollback, every line. */
+const fullRender = (lines: string[]): string =>
+	`\x1b[?2026h\x1b[2J\x1b[H\x1b[3J${lines.join("\r\n")}\x1b[?2026l`;
+const transcript = (n: number): string[] =>
+	Array.from({ length: n }, (_, i) => `line-${String(i).padStart(3, "0")}`);
+const allText = (t: Terminal): string[] => {
+	const b = t.buffer.active;
+	return Array.from({ length: b.length }, (_, y) => b.getLine(y)?.translateToString(true) ?? "");
+};
+const topLine = (t: Terminal): string =>
+	t.buffer.active.getLine(t.buffer.active.viewportY)?.translateToString(true) ?? "";
 
-	it("keeps output without 3J unchanged", () => {
-		const filter = createScrollbackClearFilter();
-		const input = "hello \x1b[31mred\x1b[0m\n";
-		expect(filter(input)).toBe(input);
-	});
-
-	it("catches \\x1b[3J split across two chunks", () => {
-		const filter = createScrollbackClearFilter();
-		expect(filter("\x1b[2J\x1b[")).toBe("\x1b[2J");
-		expect(filter("3Jrest")).toBe("rest");
-	});
-
-	it("holds a trailing ESC and catches the 3J after it", () => {
-		const filter = createScrollbackClearFilter();
-		expect(filter("plain")).toBe("plain");
-		expect(filter("\x1b")).toBe(""); // held: lone ESC starts a sequence
-		expect(filter("[3Jx")).toBe("x"); // split ESC+[3J caught
-	});
-
-	// xterm's ED handler switches on the FIRST parameter (params[0]), so any
-	// CSI-J with first param 3 wipes the scrollback — not just the bare
-	// \x1b[3J. Private-mode and multi-parameter variants must be stripped too.
-	it.each([
-		"\x1b[3J",
-		"\x1b[?3J",
-		"\x1b[3;0J",
-		"\x1b[3:0J",
-		"\x1b[?3;0J",
-	])("strips the ED3 variant %j (first param 3 clears scrollback)", (seq) => {
-		const filter = createScrollbackClearFilter();
-		expect(filter(seq)).toBe("");
-		expect(filter("x" + seq + "y")).toBe("xy");
-	});
-
-	// Sequences whose first param is NOT 3 (or that don't end in J) are not
-	// scrollback clears — they must pass through untouched.
-	it.each([
-		"\x1b[0J", // ED 0: erase to end of screen
-		"\x1b[2J", // ED 2: erase whole screen (keeps viewport)
-		"\x1b[30J", // first param 30, not 3
-		"\x1b[3A", // cursor up 3
-		"\x1b[3;5m", // SGR
-		"\x1b[3h", // DECSET
-		"\x1b[H", // cursor home
-	])("keeps the non-scrollback sequence %j", (seq) => {
-		const filter = createScrollbackClearFilter();
-		expect(filter(seq)).toBe(seq);
-	});
-
-	it("strips an ED3 variant split across chunks", () => {
-		const filter = createScrollbackClearFilter();
-		expect(filter("\x1b[2J\x1b[")).toBe("\x1b[2J");
-		expect(filter("?3Jx")).toBe("x"); // \x1b[ + ?3J caught across chunks
-	});
-
-	it("strips every ED3 variant from a pi full-render stream", () => {
-		const filter = createScrollbackClearFilter();
-		const input =
-			"\x1b[?2026h\x1b[2J\x1b[H\x1b[3;0Jline one\r\nline two\x1b[?2026l";
-		expect(filter(input)).toBe(
-			"\x1b[?2026h\x1b[2J\x1b[Hline one\r\nline two\x1b[?2026l",
-		);
-	});
-});
-
-describe("pi fullRender while the user is scrolled up (real xterm 6)", () => {
-	// pi-tui's full re-render emits \x1b[2J\x1b[H\x1b[3J on terminal resize
-	// and on content changes above the visible viewport (fires while the
-	// final response streams). \x1b[3J (Erase Saved Lines) resets xterm's
-	// viewport to the top (ydisp=0) and destroys the scrollback.
-
-	it("preserves scroll position and history when the stream is filtered", async () => {
+describe("pi full redraw through createFullRedrawWriter (real xterm 6)", () => {
+	it("leaves exactly one copy of the transcript (no duplicated history)", async () => {
 		const term = new Terminal({ scrollback: 1000, rows: 10, cols: 40 });
-		const filter = createScrollbackClearFilter();
-		let out = "";
-		for (let i = 0; i < 60; i++) out += `line-${String(i).padStart(2, "0")}\n`;
-		term.write(out);
+		const { write } = createFullRedrawWriter(term);
+		write(transcript(60).join("\r\n"));
+		await drain(term);
+		write(fullRender(transcript(65)));
+		await drain(term);
+		const text = allText(term);
+		expect(text.filter((l) => l === "line-005")).toHaveLength(1);
+		expect(text.filter((l) => l === "line-064")).toHaveLength(1);
+	});
+
+	it("puts a reader who scrolled up back on the same content", async () => {
+		const term = new Terminal({ scrollback: 1000, rows: 10, cols: 40 });
+		const { write } = createFullRedrawWriter(term);
+		write(transcript(60).join("\r\n"));
+		await drain(term);
+		term.scrollLines(-20);
+		const before = topLine(term);
+		expect(term.buffer.active.viewportY).toBeLessThan(term.buffer.active.baseY);
+		// The redraw adds output below the reader.
+		write(fullRender(transcript(70)));
+		await drain(term);
+		expect(topLine(term)).toBe(before);
+	});
+
+	it("keeps a reader at the bottom following the output", async () => {
+		const term = new Terminal({ scrollback: 1000, rows: 10, cols: 40 });
+		const { write } = createFullRedrawWriter(term);
+		write(transcript(30).join("\r\n"));
+		await drain(term);
+		write(fullRender(transcript(45)));
 		await drain(term);
 		const b = term.buffer.active;
-		term.scrollLines(-20); // user scrolls up 20 lines
-		const scrolledYdisp = b.viewportY;
-		expect(scrolledYdisp).toBeLessThan(b.baseY);
-		// pi full render while scrolled up
-		term.write(filter("\x1b[?2026h\x1b[2J\x1b[H\x1b[3Jnew screen\x1b[?2026l"));
-		await drain(term);
-		expect(b.viewportY).toBe(scrolledYdisp); // still scrolled up
-		expect(b.baseY).toBeGreaterThan(0); // scrollback survived
+		expect(b.viewportY).toBe(b.baseY);
 	});
 
-	it("documents the bug: unfiltered \\x1b[3J jumps to top and wipes history", async () => {
+	it("handles a redraw split across several writes", async () => {
 		const term = new Terminal({ scrollback: 1000, rows: 10, cols: 40 });
-		let out = "";
-		for (let i = 0; i < 60; i++) out += `line-${String(i).padStart(2, "0")}\n`;
-		term.write(out);
+		const { write } = createFullRedrawWriter(term);
+		write(transcript(60).join("\r\n"));
+		await drain(term);
+		term.scrollLines(-15);
+		const before = topLine(term);
+		const frame = fullRender(transcript(60));
+		// Split inside the clear sequence and in the middle of the lines.
+		const cut1 = frame.indexOf("\x1b[3J") + 3;
+		write(frame.slice(0, cut1));
+		write(frame.slice(cut1, 300));
+		write(frame.slice(300));
+		await drain(term);
+		expect(topLine(term)).toBe(before);
+		expect(allText(term).filter((l) => l === "line-010")).toHaveLength(1);
+	});
+
+	it("finds the reader's line again after a resize re-wrapped it", async () => {
+		const term = new Terminal({ scrollback: 1000, rows: 10, cols: 40 });
+		const { write } = createFullRedrawWriter(term);
+		const items = Array.from({ length: 40 }, (_, i) => `${i}. item number ${i} has a long description that wraps`);
+		// pi wraps to the terminal width itself.
+		const wrap = (cols: number) => items.flatMap((t) => t.match(new RegExp(`.{1,${cols}}`, "g")) ?? []);
+		write(wrap(40).join("\r\n"));
+		await drain(term);
+		term.scrollLines(-30);
+		const before = topLine(term).trim();
+		term.resize(60, 10);
+		write(fullRender(wrap(60)));
+		await drain(term);
+		const after = topLine(term).trim();
+		expect(after.startsWith(before.slice(0, 12)) || before.startsWith(after.slice(0, 12))).toBe(true);
+	});
+
+	it("keeps the reader's place when narrowing splits pi's padded lines", async () => {
+		// pi pads every line to the width with real spaces, so xterm's own
+		// reflow on a narrower resize splits each line in two before pi's
+		// redraw arrives. Look-alike lines elsewhere must not win.
+		const term = new Terminal({ scrollback: 1000, rows: 10, cols: 60 });
+		const { write, beforeResize } = createFullRedrawWriter(term);
+		const items = (cols: number) =>
+			Array.from({ length: 80 }, (_, i) =>
+				`${i % 40}. ${i < 40 ? "bird" : "fish"} entry`.padEnd(cols, " "),
+			);
+		write(items(60).join("\r\n"));
+		await drain(term);
+		term.scrollLines(-15);
+		const before = topLine(term).trim();
+		expect(before).toMatch(/fish/);
+		beforeResize();
+		term.resize(40, 10);
+		write(fullRender(items(40)));
+		await drain(term);
+		expect(topLine(term).trim()).toBe(before);
+	});
+
+	it("falls back to the distance from the end when the text is gone", async () => {
+		const term = new Terminal({ scrollback: 1000, rows: 10, cols: 40 });
+		const { write } = createFullRedrawWriter(term);
+		write(transcript(60).join("\r\n"));
+		await drain(term);
+		term.scrollLines(-20);
+		const fromEnd = term.buffer.active.length - term.buffer.active.viewportY;
+		write(fullRender(transcript(60).map((l) => l.toUpperCase())));
 		await drain(term);
 		const b = term.buffer.active;
+		expect(b.length - b.viewportY).toBe(fromEnd);
+	});
+
+	it("snapshotView / restoreView round-trip without a redraw", async () => {
+		const term = new Terminal({ scrollback: 1000, rows: 10, cols: 40 });
+		term.write(transcript(40).join("\r\n"));
+		await drain(term);
+		term.scrollLines(-8);
+		const snap = snapshotView(term);
+		expect(snap.atBottom).toBe(false);
+		term.scrollToTop();
+		restoreView(term, snap);
+		expect(topLine(term)).toBe(snap.lines[0].text);
+	});
+
+	it("documents xterm: a bare \\x1b[3J jumps a scrolled-up reader to the top", async () => {
+		const term = new Terminal({ scrollback: 1000, rows: 10, cols: 40 });
+		term.write(transcript(60).join("\r\n"));
+		await drain(term);
 		term.scrollLines(-20);
 		term.write("\x1b[2J\x1b[H\x1b[3J");
 		await drain(term);
-		expect(b.viewportY).toBe(0);
-		expect(b.baseY).toBe(0);
+		expect(term.buffer.active.viewportY).toBe(0);
 	});
 });
 

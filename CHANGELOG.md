@@ -2,6 +2,92 @@
 
 All notable changes to CodePi are documented in this file.
 
+## Unreleased
+
+- **Update to pi 1.5.2** (from 1.0.4). `@earendil-works/pi-coding-agent` is
+  now pinned exactly, like `pi-tui`, so the patch always matches the installed
+  version and pi's own packages (pinned exactly upstream since 1.3.0) can no
+  longer mix versions.
+  - The host-integration patch keeps its four files, and adds two for the
+    fixes below (clipboard hook, startup hints). 1.5.2 still neither
+    declares nor forwards `baseToolsOverride` in `createAgentSession`, and
+    `createToolDefinitionFromAgentTool` still drops prompt metadata and
+    renderers. The default-tool hunk moved to `defaultToolNames`: since 1.1.0
+    `--tools +name/-name` modifiers apply on top of that default, so the
+    override keys replace the default rather than the final active set.
+  - pi-tui 1.1 requires `Terminal.setProgramStatus()` (OSC 7501
+    working/blocked/done/failed status) and calls it unconditionally. The
+    webview terminal records the latest status instead of forwarding it to
+    xterm.js, which has no use for it.
+  - pi 1.2 also fires `before_agent_start` for runs started by an
+    extension's `sendMessage(..., { triggerTurn: true })`, such as the
+    after-implement task nudge. The live editor context is now attached to
+    user prompts only. The mode and task system-prompt sections still apply
+    to every run.
+  - Settings: the `cacheWarming` help text notes that `"idle"` is now pi's
+    default.
+  - Packaging: the allowlist adds `lovely-mermaid` (replaces `grok-mermaid`),
+    `marked-cjk-friendly`, `@isaacs/nonrecursive-glob-match`, `minimatch` and
+    `undici`, which pi 1.5 hoists to the root. `.env` files are kept out of
+    the vsix.
+  - pi 1.5.2 needs Node ≥ 22.19.0. VS Code 1.105, the oldest supported
+    release, ships exactly 22.19.0.
+  - Behaviour from upstream worth knowing: `/resume` of a session whose
+    folder no longer exists now offers Continue / Fork / Cancel, and tool
+    argument validation runs on pi-schema instead of TypeBox (CodePi's
+    tools use only JSON-Schema features).
+- **Scrolling**
+  - Fix the scrollback filling with copies of the session: pi's full redraw
+    (resize, changes above the viewport) clears the scrollback and rewrites
+    the whole transcript, and stripping the clear appended a complete second
+    copy each time. The clear now goes through, and a reader who had scrolled
+    up is put back on the same lines afterwards.
+  - Sending a message (Enter, Alt+Enter) scrolls to the bottom, so its answer
+    is visible even when you had scrolled up to read.
+  - A wheel scroll down that ends near the end (within a third of the
+    viewport) snaps to the bottom and follows output again; before, xterm
+    stopped following a few lines short while pi was streaming.
+  - A "↓ Latest" button appears while scrolled up and lights up when new
+    output arrives below.
+- **Keys**
+  - Ctrl+Z no longer kills the session: pi's suspend stopped the TUI and
+    signalled the extension host's process group, then waited forever.
+    Suspend, exit (Ctrl+D) and clear (Ctrl+C) are unbound for CodePi
+    sessions; the webview already kept Ctrl+D and Ctrl+C (copy) from pi.
+    The startup help no longer lists them: the patch makes pi's header
+    skip hints for unbound keys instead of printing " to suspend".
+  - Ctrl+- is pi's undo again instead of zooming VS Code out (a CodePi
+    keybinding takes the chord while a session tab has focus).
+  - Keystrokes typed right after switching to a CodePi tab are no longer
+    lost: the terminal takes focus when its tab becomes active, and keys that
+    still land on the page are forwarded to it.
+- `/copy` and Ctrl+X copy through VS Code's clipboard, so they work without
+  xclip/xsel on Linux and copy to the local machine from Remote-SSH and
+  containers. pi's own fallback (OSC 52) went to the extension host's
+  stdout, which VS Code does not let an extension redirect, so the patch
+  gains a fifth file: `copyToClipboard` calls a host clipboard hook
+  (`globalThis.__piHostClipboardWrite`) when one is registered.
+- **Project trust:** a folder whose `.pi` settings declare packages or
+  extensions now asks "Trust project folder?" with pi's five choices before
+  anything loads, and saves the answer in `~/.pi/agent/trust.json` as pi
+  does. Before, project packages were installed and run without asking. The
+  Extensions view never loads an undecided project's extensions.
+- **Packages:** the Extensions view can install (npm, git or a path), update
+  and remove pi packages through pi's own package manager.
+- The agent now gets the editor selection even when its file is hidden
+  behind the CodePi tab in the same editor group (CodePi remembers the last
+  file editor and its selection).
+- The agent is told when bash is disabled or re-enabled
+  (`/codepi-bash-*`), as it is for Ask/Plan/Implement.
+- The tab title shows "●" while pi works, independent of pi's
+  terminal-progress setting (off by default).
+- Terminal font changes in Settings apply to open sessions right away.
+- The Extensions view shows "Implement mode active" for sessions that never
+  switched modes, instead of "mode unknown".
+- The Command Palette offers Open Session, the Sessions / Settings /
+  Extensions views, and — while edits are pending — Open Pending Review and
+  Accept / Reject All Edits.
+
 ## 0.8.0
 
 - **Update to pi 1.0.4** (from 0.87.1). The SDK API is unchanged for our

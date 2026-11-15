@@ -10,7 +10,8 @@ import {
 	createOsc8LinkHandler,
 	createTerminalLinkProvider,
 } from "./links";
-import { createScrollbackClearFilter } from "./scrollback";
+import { createFullRedrawWriter } from "./full-redraw";
+import { createJumpButton } from "./jump";
 import { createViewportAnchor } from "./viewport-anchor";
 import { createFindWidget } from "./find";
 // The modifier+arrow chord table is shared with the extension's source tree
@@ -265,6 +266,29 @@ function hideLoading(): void {
 		// repaints or xterm's overflow behavior.
 		const viewportAnchor = createViewportAnchor(term);
 
+		// Follow the output again: Enter / Alt+Enter, the jump button, or a
+		// wheel-down that ended next to the end. xterm only follows while the
+		// viewport is exactly at the last line, and scrollOnUserInput is off
+		// (typing must not move the view), so these are the ways back.
+		const jumpButton = createJumpButton(term, container, () => {
+			jumpToBottom();
+			term.focus();
+		});
+		function jumpToBottom(): void {
+			term.scrollToBottom();
+			viewportAnchor.release();
+			jumpButton.update();
+		}
+
+		// Output: extension → webview. pi-tui's full re-renders clear the
+		// scrollback and rewrite the whole transcript; the writer lets that
+		// through (stripping the clear duplicated the session on every
+		// redraw) and puts the reader back on the same content afterwards.
+		const redraw = createFullRedrawWriter(term, () => {
+			viewportAnchor.reanchor();
+			jumpButton.update();
+		});
+
 		const find = createFindWidget(
 			term,
 			container,
@@ -321,6 +345,12 @@ function hideLoading(): void {
 			const prevCols = term.cols;
 			const prevRows = term.rows;
 			try {
+				const next = fit.proposeDimensions();
+				if (next && (next.cols !== prevCols || next.rows !== prevRows)) {
+					// xterm reflows before pi's redraw arrives; remember the
+					// reader's place in the layout they were reading.
+					redraw.beforeResize();
+				}
 				fit.fit();
 			} catch {
 				return; // layout not ready yet
@@ -448,6 +478,21 @@ function hideLoading(): void {
 				}
 				return false;
 			}
+			if (e.ctrlKey && !e.altKey && !e.metaKey && (e.key === "-" || e.code === "Minus")) {
+				// pi's undo is ctrl+- (\x1f). xterm sends nothing for it. The
+				// webview host still forwards the keydown to the workbench, so
+				// package.json unbinds VS Code's zoom-out while a CodePi tab
+				// has focus.
+				e.preventDefault();
+				if (e.type === "keydown") term.input("\x1f", true);
+				return false;
+			}
+			if (e.type === "keydown" && e.key === "Enter" && !e.ctrlKey && !e.metaKey) {
+				// Submitting (Enter) or queueing (Alt+Enter) a message: show
+				// its answer even when the reader had scrolled up. Let the key
+				// through to pi.
+				jumpToBottom();
+			}
 			if (e.key === "Backspace" && !e.altKey && !e.shiftKey && (e.ctrlKey || e.metaKey)) {
 				// pi's TUI has no binding for ctrl+backspace (the \x08 it would
 				// otherwise receive is dropped as an unknown control char), so
@@ -496,10 +541,6 @@ function hideLoading(): void {
 			true,
 		);
 
-		// Output: extension → webview. pi-tui's full re-renders emit
-		// \x1b[3J (clear scrollback), which would jump the viewport to the
-		// top and destroy the user's history — strip it from the stream.
-		const scrollbackFilter = createScrollbackClearFilter();
 		let firstDataHandled = false;
 		window.addEventListener("message", (e: MessageEvent) => {
 			const msg = e.data as {
@@ -511,7 +552,7 @@ function hideLoading(): void {
 			switch (msg.command) {
 				case "tuiData":
 					if (typeof msg.data === "string") {
-						term.write(scrollbackFilter(msg.data));
+						redraw.write(msg.data);
 						// The loading overlay is dismissed on the FIRST terminal
 						// output as well as on tuiLoadingDone: output only flows
 						// once the backend is live, so first-data is the definitive
@@ -528,6 +569,31 @@ function hideLoading(): void {
 				case "tuiClipboardData":
 					clipboardReadResolver?.(typeof msg.text === "string" ? msg.text : "");
 					break;
+				case "tuiFont": {
+					// Settings view changed the terminal font: apply it to this
+					// open session (the new size reflows pi via the refit).
+					const family = (e.data as { fontFamily?: unknown }).fontFamily;
+					const size = Number((e.data as { fontSize?: unknown }).fontSize);
+					if (typeof family === "string" && family.trim()) {
+						term.options.fontFamily = family.trim();
+					}
+					if (Number.isFinite(size)) {
+						term.options.fontSize = Math.min(40, Math.max(8, Math.round(size)));
+					}
+					const apply = (): void => {
+						term.refresh(0, term.rows - 1);
+						scheduleFit();
+					};
+					void document.fonts
+						?.load(`${term.options.fontSize}px ${term.options.fontFamily}`)
+						.then(apply, apply);
+					break;
+				}
+				case "tuiFocus":
+					// The panel became the active editor: take keyboard focus
+					// so the first keystrokes reach pi (see body keydown below).
+					if (!find.isOpen()) term.focus();
+					break;
 				case "tuiLoadingDone":
 					// Backend is live — fade out the startup overlay (PI logo + dots).
 					hideLoading();
@@ -538,9 +604,9 @@ function hideLoading(): void {
 		// ── Viewport content-anchor wiring ────────────────────────────────
 		//
 		// Hard guarantee: no content change may ever yank the user's scroll
-		// position to the top. The scrollback filter above strips pi's
-		// \x1b[3J, but other events can still move the viewport under the
-		// user — a stray ED3 variant, a resize-trim clamp (fit() reflows and
+		// position to the top. Full redraws are handled by the redraw writer
+		// above, but other events can still move the viewport under the
+		// user — a resize-trim clamp (fit() reflows and
 		// can reduce ydisp to 0 when the buffer is near its limit), or
 		// xterm's overflow content-following once the scrollback fills
 		// (every recycled line decrements ydisp). While the user is scrolled
@@ -562,9 +628,26 @@ function hideLoading(): void {
 			container.querySelector(".xterm-scrollable-element") ??
 			container.querySelector(".xterm-viewport");
 		// Re-anchor on wheel (trackpad/mouse) — every notch is user intent.
-		scrollSurface?.addEventListener("wheel", viewportAnchor.noteUserScroll, {
-			passive: true,
-		});
+		scrollSurface?.addEventListener(
+			"wheel",
+			(e: Event) => {
+				viewportAnchor.noteUserScroll();
+				// A scroll DOWN that ends near the end means "back to the latest":
+				// snap, or xterm stops following a few lines short. "Near" is a
+				// third of the screen, because pi keeps adding lines while the
+				// user scrolls (a 2-line margin missed by 12 lines while
+				// streaming). Scrolling up is never affected.
+				if ((e as WheelEvent).deltaY > 0) {
+					requestAnimationFrame(() => {
+						const b = term.buffer.active;
+						const near = Math.max(3, Math.floor(term.rows / 3));
+						if (b.viewportY < b.baseY && b.baseY - b.viewportY <= near) jumpToBottom();
+					});
+				}
+				jumpButton.update();
+			},
+			{ passive: true },
+		);
 		// Re-anchor while a scrollbar drag is in progress (the drag moves the
 		// viewport without wheel events).
 		scrollSurface?.addEventListener("mousedown", viewportAnchor.beginDrag, {
@@ -581,6 +664,8 @@ function hideLoading(): void {
 		window.addEventListener("pointerup", viewportAnchor.endDrag);
 		term.onWriteParsed(viewportAnchor.keepAnchored);
 		term.onResize(viewportAnchor.keepAnchored);
+		term.onScroll(jumpButton.update);
+		term.onWriteParsed(jumpButton.update);
 
 		// Resize handling: observe the container AND the body — webview layout
 		// changes (editor resize, sidebar toggles, tab switch) must re-fit.
@@ -678,7 +763,22 @@ function hideLoading(): void {
 			if (ctrlLike && isF) {
 				e.preventDefault();
 				find.open();
+				return;
 			}
+			// Keys that land on the page body (right after the tab was
+			// activated, before xterm's textarea has focus) used to be
+			// dropped: move focus to the terminal and deliver them.
+			if (e.target === term.textarea || ctrlLike || e.altKey) return;
+			if (e.target instanceof Element && e.target.closest("button, input, textarea, select")) return;
+			const forwarded =
+				e.key.length === 1
+					? e.key
+					: ({ Enter: "\r", Backspace: "\x7f", Tab: "\t", Escape: "\x1b" } as Record<string, string>)[e.key];
+			if (forwarded === undefined) return;
+			e.preventDefault();
+			term.focus();
+			if (e.key === "Enter") jumpToBottom();
+			term.input(forwarded, true);
 		});
 
 		// Announce readiness; the extension starts the TUI only after both ready

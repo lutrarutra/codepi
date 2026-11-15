@@ -1,0 +1,31 @@
+/* "Jump to latest" button — bottom-right above the xterm grid while the
+   viewport is scrolled up; accented once new output arrives below.
+   Colors resolve live from VS Code theme variables. */
+.codepi-jump {
+	position: absolute;
+	right: 18px;
+	bottom: 12px;
+	z-index: 25;
+	padding: 3px 10px;
+	border: 1px solid var(--vscode-editorWidget-border, #454545);
+	border-radius: 12px;
+	background: var(--vscode-editorWidget-background, #252526);
+	color: var(--vscode-foreground, #cccccc);
+	box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+	font-family: var(--vscode-font-family, sans-serif);
+	font-size: 12px;
+	cursor: pointer;
+	opacity: 0.85;
+}
+.codepi-jump[hidden] {
+	display: none;
+}
+.codepi-jump:hover {
+	opacity: 1;
+}
+.codepi-jump.codepi-jump-new {
+	background: var(--vscode-button-background, #0e639c);
+	border-color: var(--vscode-button-background, #0e639c);
+	color: var(--vscode-button-foreground, #ffffff);
+	opacity: 1;
+}

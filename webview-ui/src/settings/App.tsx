@@ -160,7 +160,7 @@ function TerminalPrefsCard({ prefs }: { prefs: TerminalPrefs }): JSX.Element {
 		<section className="settings-card" aria-labelledby="terminal-title">
 			<h2 id="terminal-title">Terminal</h2>
 			<p className="settings-help">
-				Font used in CodePi chat panels. Changes apply to new sessions.
+				Font used in CodePi chat panels. Changes apply to open sessions right away.
 			</p>
 			<div className="settings-field-row">
 				<label className="settings-field-label" htmlFor="terminal-font-family">

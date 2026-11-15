@@ -143,13 +143,28 @@ async function requestBashApproval(
 	return { decision: "deny" };
 }
 
+const MODE_CHANGE_CUSTOM_TYPE = "codepi-bash:changed";
+/** What the agent is told when the user changes the bash mode. */
+export const BASH_MODE_NOTICE: Record<BashMode, string> = {
+	ask: "## BASH TOOL: ENABLED (ASK)\n\nThe user changed the bash mode: the `bash` tool is available again; each command needs the user's approval. Any earlier note that bash is disabled no longer applies.",
+	auto: "## BASH TOOL: ENABLED (AUTO-APPROVE)\n\nThe user changed the bash mode: the `bash` tool is available and commands run without asking. Any earlier note that bash is disabled no longer applies.",
+	disabled: "## BASH TOOL: DISABLED\n\nThe user disabled the `bash` tool: commands are rejected until the user re-enables it with /codepi-bash-ask or /codepi-bash-allow. Do not call bash; explain what you would run instead.",
+};
+
 // ── Extension factory (safety switch only — no tool registration) ──
 
 export default function (pi: ExtensionAPI) {
 	let currentMode: BashMode = "ask";
 
-	/** Persist a mode change: footer status, session entry, notification. */
+	/**
+	 * Persist a mode change: footer status, session entry, notification, and
+	 * a notice to the agent. The session entry is invisible to the model, so
+	 * a model told earlier that bash was disabled kept refusing after it was
+	 * re-enabled; the notice (queued for the next turn, hidden from the
+	 * transcript) tells it, like codepi-modes does for Ask/Plan/Implement.
+	 */
 	function setMode(mode: BashMode, ctx: ExtensionContext): void {
+		const changed = mode !== currentMode;
 		currentMode = mode;
 		ctx.ui.setStatus(STATUS_KEY, mode);
 		pi.appendEntry(MODE_ENTRY_TYPE, { mode, timestamp: Date.now() });
@@ -159,6 +174,16 @@ export default function (pi: ExtensionAPI) {
 			disabled: "Bash tool disabled — commands are rejected until re-enabled.",
 		};
 		ctx.ui.notify(messages[mode]);
+		if (changed) {
+			pi.sendMessage(
+				{
+					customType: MODE_CHANGE_CUSTOM_TYPE,
+					content: BASH_MODE_NOTICE[mode],
+					display: false,
+				},
+				{ deliverAs: "nextTurn" },
+			);
+		}
 	}
 
 	// Recover the persisted mode (also fires on session reload/fork) and make

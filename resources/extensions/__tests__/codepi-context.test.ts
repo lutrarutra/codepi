@@ -281,15 +281,23 @@ describe("codepi-context factory", () => {
 		});
 		(globalThis as any).__codepiVscode = { vscode };
 
+		// A run started by an extension's custom message → nothing injected,
+		// and the next user prompt still gets the context.
+		const custom = await handler(
+			{ messageType: "custom", message: { customType: "nudge" } },
+			createCtx(),
+		);
+		expect(custom).toBeUndefined();
+
 		// First turn: selection present → inject.
-		const first = await handler({ prompt: "x" }, createCtx());
+		const first = await handler({ messageType: "user", prompt: "x" }, createCtx());
 		expect(first?.message?.content[0].text).toContain("<live_editor_context>");
 		expect(first?.message?.content[0].text).toContain("active: src/foo.ts");
 		expect(first?.message?.content[0].text).toContain("selection:");
 		expect(first?.message?.display).toBe(false);
 
 		// Second turn: unchanged → nothing injected.
-		const second = await handler({ prompt: "y" }, createCtx());
+		const second = await handler({ messageType: "user", prompt: "y" }, createCtx());
 		expect(second).toBeUndefined();
 
 		// Selection changes → injects again.
@@ -299,7 +307,7 @@ describe("codepi-context factory", () => {
 			active: { line: 41, character: 5 },
 			isEmpty: false,
 		};
-		const third = await handler({ prompt: "z" }, createCtx());
+		const third = await handler({ messageType: "user", prompt: "z" }, createCtx());
 		expect(third?.message?.content[0].text).toContain("selection:");
 	});
 

@@ -187,6 +187,17 @@ describe("WebviewPty", () => {
 		expect(onProgressChange).toHaveBeenNthCalledWith(1, true);
 		expect(onProgressChange).toHaveBeenNthCalledWith(2, false);
 	});
+
+	it("records the OSC 7501 program status without writing to xterm", () => {
+		const { pty, posted } = makePty();
+		pty.markReady();
+		expect(pty.programStatus).toBeUndefined();
+		pty.setProgramStatus({ state: "blocked", kind: "permission" });
+		expect(pty.programStatus).toEqual({ state: "blocked", kind: "permission" });
+		pty.setProgramStatus({ state: "clear" });
+		expect(pty.programStatus).toBeUndefined();
+		expect(posted).toEqual([]);
+	});
 });
 
 describe("setTitle", () => {

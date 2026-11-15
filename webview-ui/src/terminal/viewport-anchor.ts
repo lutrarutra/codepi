@@ -28,6 +28,16 @@ export interface ViewportAnchor {
 	 * the content they were reading, restore it.
 	 */
 	keepAnchored: () => void;
+	/**
+	 * The view jumped to the bottom on purpose (Enter, jump-to-latest, a
+	 * wheel-down that ended next to the end): drop the anchor.
+	 */
+	release: () => void;
+	/**
+	 * Content was rewritten under the viewport (a full redraw) and the view
+	 * was put back on purpose: point the marker at the restored top line.
+	 */
+	reanchor: () => void;
 	dispose: () => void;
 }
 
@@ -100,6 +110,15 @@ export function createViewportAnchor(term: Terminal): ViewportAnchor {
 			if (!anchor || anchor.line < 0) return; // no anchor (history wiped)
 			if (b.viewportY === anchor.line) return; // still on the content
 			term.scrollToLine(anchor.line);
+		},
+		release(): void {
+			anchor?.dispose();
+			anchor = null;
+			lastAnchorRow = -1;
+		},
+		reanchor(): void {
+			lastAnchorRow = -1;
+			refreshAnchor();
 		},
 		dispose(): void {
 			anchor?.dispose();

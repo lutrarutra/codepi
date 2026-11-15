@@ -4,3 +4,4 @@ resources/extensions/dist
 *.vsix
 submodules/
 .pi-subagents/
+.env

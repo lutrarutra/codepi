@@ -38,6 +38,14 @@ export interface ModeInfo {
 	sessionName?: string;
 }
 
+/** A pi package from settings.json `packages` (user) or .pi/settings.json (project). */
+export interface PackageEntry {
+	source: string;
+	scope: "user" | "project";
+	/** Installed on disk (npm/git packages are installed by pi on load). */
+	installed: boolean;
+}
+
 export interface ExtensionsSnapshot {
 	generatedAt: number;
 	cwd: string;
@@ -47,14 +55,21 @@ export interface ExtensionsSnapshot {
 	extensions: ExtensionEntry[];
 	core: { commands: CommandEntry[]; tools: ToolEntry[] };
 	loadErrors: Array<{ path: string; error: string }>;
+	/** Configured pi packages (absent from older hosts). */
+	packages?: PackageEntry[];
 }
 
 export type ExtensionsMessage =
 	| { type: "getSnapshot" }
 	| { type: "refresh" }
 	| { type: "openSessions" }
-	| { type: "openSettings" };
+	| { type: "openSettings" }
+	| { type: "installPackage"; source: string }
+	| { type: "removePackage"; source: string; scope: "user" | "project" }
+	| { type: "updatePackages"; source?: string };
 
 export type ExtensionsReply =
 	| { type: "snapshot"; snapshot: ExtensionsSnapshot }
-	| { type: "error"; message: string };
+	| { type: "error"; message: string }
+	| { type: "packageBusy"; message: string }
+	| { type: "packageDone"; ok: boolean; message: string };

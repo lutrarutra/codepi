@@ -272,6 +272,12 @@ export default function (pi: ExtensionAPI) {
 	// nothing, keeping the token cost near zero.
 	let lastLiveSignature: string | undefined;
 	pi.on("before_agent_start", async (event, ctx) => {
+		// Since pi 1.2 this also fires for runs started by an extension's
+		// sendMessage(..., { triggerTurn: true }) (e.g. the after-implement
+		// nudge). Live editor context is about what the user just selected, so
+		// attach it to user prompts only; the signature stays unchanged and the
+		// next user prompt still gets it.
+		if (event.messageType !== "user") return;
 		const core = getContextCore();
 		const vscode = await getVscode();
 		if (!core || !vscode?.window) return;

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { SnapshotTree } from "./SnapshotTree";
+import { PackagesPanel } from "./PackagesPanel";
 import type {
 	ExtensionsMessage,
 	ExtensionsReply,
@@ -79,10 +80,22 @@ export function ExtensionsApp() {
 	const [error, setError] = useState<string | undefined>();
 	const [query, setQuery] = useState("");
 	const [busy, setBusy] = useState(true);
+	const [pkgBusy, setPkgBusy] = useState(false);
+	const [pkgStatus, setPkgStatus] = useState<{ ok: boolean; message: string }>();
 
 	useEffect(() => {
 		const listener = (event: MessageEvent<ExtensionsReply>) => {
 			const msg = event.data;
+			if (msg.type === "packageBusy") {
+				setPkgBusy(true);
+				setPkgStatus({ ok: true, message: msg.message });
+				return;
+			}
+			if (msg.type === "packageDone") {
+				setPkgBusy(false);
+				setPkgStatus(msg.message ? { ok: msg.ok, message: msg.message } : undefined);
+				return;
+			}
 			if (msg.type === "snapshot") {
 				setSnapshot(msg.snapshot);
 				setError(undefined);
@@ -154,6 +167,14 @@ export function ExtensionsApp() {
 					<span className="loading-spinner" aria-hidden="true" />
 					<span>Scanning extensions…</span>
 				</div>
+			)}
+			{snapshot && (
+				<PackagesPanel
+					packages={snapshot.packages ?? []}
+					busy={pkgBusy}
+					status={pkgStatus}
+					post={(m) => vscode.postMessage(m)}
+				/>
 			)}
 			{snapshot && (
 				<SnapshotTree snapshot={snapshot} query={query.trim().toLowerCase()} />

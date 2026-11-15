@@ -11,7 +11,7 @@ const CORE_DIR = path.resolve(
 	"node_modules/@earendil-works/pi-coding-agent/dist/core",
 );
 
-describe("SDK host-integration patch (1.0.4)", () => {
+describe("SDK host-integration patch (1.5.2)", () => {
 	it("threads options.terminal into createInteractiveTui", () => {
 		const js = fs.readFileSync(
 			path.join(DIST_DIR, "interactive-mode.js"),
@@ -41,18 +41,21 @@ describe("SDK host-integration patch (1.0.4)", () => {
 		);
 	});
 
-	describe("SDK baseToolsOverride exposure patch (1.0.4)", () => {
+	describe("SDK baseToolsOverride exposure patch (1.5.2)", () => {
 		it("passes baseToolsOverride through createAgentSession", () => {
 			const js = fs.readFileSync(path.join(CORE_DIR, "sdk.js"), "utf8");
 			expect(js).toMatch(/baseToolsOverride: options\.baseToolsOverride/);
 		});
 		it("derives the default active tool set from the override keys", () => {
-			// 1.0 computes the active set in createAgentSession (AgentSession's own
+			// createAgentSession computes the active set (AgentSession's own
 			// defaultActiveToolNames derivation is bypassed by the explicit
 			// initialActiveToolNames argument), so the patch has to seed it there.
+			// Since 1.1.0 `+name`/`-name` tool modifiers apply on top of
+			// `defaultToolNames`, so the override keys replace that default rather
+			// than the final active set.
 			const js = fs.readFileSync(path.join(CORE_DIR, "sdk.js"), "utf8");
 			expect(js).toMatch(
-				/defaultActiveToolNames = options\.baseToolsOverride\n\s*\? Object\.keys\(options\.baseToolsOverride\)/,
+				/defaultToolNames = options\.noTools\n\s*\? \[\]\n\s*: options\.baseToolsOverride\n\s*\? Object\.keys\(options\.baseToolsOverride\)/,
 			);
 		});
 		it("declares baseToolsOverride on CreateAgentSessionOptions", () => {
@@ -60,7 +63,7 @@ describe("SDK host-integration patch (1.0.4)", () => {
 			expect(dts).toMatch(/baseToolsOverride\?: Record<string, Tool>/);
 		});
 		it("imports the Tool type used by the option", () => {
-			// 1.0.4 re-exports Tool from its package root but does not bind it
+			// 1.5.2 re-exports Tool from its package root but does not bind it
 			// locally in sdk.d.ts, so the patch must add the import itself
 			// (skipLibCheck would hide the dangling reference — assert the import
 			// explicitly).
@@ -98,12 +101,13 @@ describe("SDK host-integration patch (1.0.4)", () => {
 	});
 });
 
-describe("SDK patch scope (1.0.4)", () => {
+describe("SDK patch scope (1.5.2)", () => {
 	// The patch exists only for what upstream still lacks: the baseToolsOverride
-	// exposure, the prompt-metadata/renderer pass-through, and the CJS `require`
-	// export condition. The interactive-mode `terminal` option has been native
-	// since 0.87.0, so a leftover hunk for that file would fail to apply on the
-	// next bump — guard the patch's scope, not just the installed tree.
+	// exposure, the prompt-metadata/renderer pass-through, the CJS `require`
+	// export condition, the host clipboard hook, and startup hints that skip
+	// unbound keys. The interactive-mode `terminal` option has been native
+	// since 0.87.0, so a leftover hunk for it would fail to apply on the next
+	// bump — guard the patch's scope, not just the installed tree.
 	const PATCH_DIR = path.resolve(process.cwd(), "patches");
 
 	function piPatches(): string[] {
@@ -114,18 +118,19 @@ describe("SDK patch scope (1.0.4)", () => {
 
 	it("ships exactly one patch, for the pinned pi version", () => {
 		expect(piPatches()).toEqual([
-			"@earendil-works+pi-coding-agent+1.0.4.patch",
+			"@earendil-works+pi-coding-agent+1.5.2.patch",
 		]);
 	});
 
-	it("does not patch interactive-mode (native since 0.87.0)", () => {
+	it("does not patch interactive-mode's terminal option (native since 0.87.0)", () => {
 		for (const file of piPatches()) {
 			const text = fs.readFileSync(path.join(PATCH_DIR, file), "utf8");
-			expect(text).not.toMatch(/dist\/modes\/interactive\//);
+			expect(text).not.toMatch(/options\.terminal \?\? new ProcessTerminal/);
+			expect(text).not.toMatch(/^\+\+?\s+terminal\?:/m);
 		}
 	});
 
-	it("still patches the baseToolsOverride exposure and the CJS export map", () => {
+	it("still patches the baseToolsOverride exposure, the CJS export map, the host clipboard hook and the startup hints", () => {
 		const text = fs.readFileSync(
 			path.join(PATCH_DIR, piPatches()[0]),
 			"utf8",
@@ -133,5 +138,8 @@ describe("SDK patch scope (1.0.4)", () => {
 		expect(text).toMatch(/baseToolsOverride/);
 		expect(text).toMatch(/promptSnippet: tool\.promptSnippet/);
 		expect(text).toMatch(/"require": "\.\/dist\/index\.js"/);
+		expect(text).toMatch(/globalThis\.__piHostClipboardWrite/);
+		// Startup hints of actions CodePi unbinds are left out.
+		expect(text).toMatch(/\+\s+const bound = \(\.\.\.keybindings\) =>/);
 	});
 });

@@ -2,6 +2,8 @@
 src
 webview-ui/src
 webview-ui/node_modules
+.env
+.env.*
 # node_modules: the extension host requires pi's full production dependency
 # closure at runtime, so it has to ship. pi 1.0 hoists that closure to the root
 # (0.87.x nested it under pi-coding-agent), which is why every production
@@ -16,6 +18,7 @@ node_modules
 !node_modules/@babel/**
 !node_modules/@earendil-works/**
 !node_modules/@google/**
+!node_modules/@isaacs/nonrecursive-glob-match/**
 !node_modules/@protobufjs/**
 !node_modules/@smithy/**
 !node_modules/@stablelib/**
@@ -53,8 +56,11 @@ node_modules
 !node_modules/jwa/**
 !node_modules/jws/**
 !node_modules/long/**
+!node_modules/lovely-mermaid/**
 !node_modules/lru-cache/**
 !node_modules/marked/**
+!node_modules/marked-cjk-friendly/**
+!node_modules/minimatch/**
 !node_modules/ms/**
 !node_modules/node-domexception/**
 !node_modules/node-fetch/**
@@ -74,6 +80,7 @@ node_modules
 !node_modules/ts-algebra/**
 !node_modules/tslib/**
 !node_modules/typebox/**
+!node_modules/undici/**
 !node_modules/undici-types/**
 !node_modules/web-streams-polyfill/**
 !node_modules/which/**

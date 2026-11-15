@@ -276,7 +276,37 @@ export function getRecentFiles(): string[] {
  * Test-only: clear the module-level tracker and git-stats caches so tests
  * don't leak state between cases.
  */
+/**
+ * The last text editor the user worked in (document + its selection at the
+ * time), supplied by the host. CodePi opens as a tab in the current editor
+ * group, so clicking it usually HIDES the file the user just selected in:
+ * activeTextEditor is undefined and the file is not among the visible
+ * editors. Without this the agent got no editor context at all in that very
+ * common layout.
+ */
+let lastTextEditorProvider: (() => VscodeTextEditorLike | undefined) | undefined;
+
+export function setLastTextEditorProvider(
+	provider: (() => VscodeTextEditorLike | undefined) | undefined,
+): void {
+	lastTextEditorProvider = provider;
+}
+
+/** The remembered editor, only when no text editor is active. */
+function rememberedEditor(
+	vscode: VscodeLike | undefined,
+): VscodeTextEditorLike | undefined {
+	if (vscode?.window?.activeTextEditor?.document?.uri?.fsPath) return undefined;
+	try {
+		const editor = lastTextEditorProvider?.();
+		return editor?.document?.uri?.fsPath ? editor : undefined;
+	} catch {
+		return undefined;
+	}
+}
+
 export function __resetContextStateForTests(): void {
+	lastTextEditorProvider = undefined;
 	recentFiles.length = 0;
 	tracking = false;
 	gitStatsCache.clear();
@@ -543,7 +573,7 @@ function collectSelections(
 	const seen = new Set<string>();
 	const activeEditor = vscode?.window?.activeTextEditor;
 	const visible = vscode?.window?.visibleTextEditors ?? [];
-	const editors = [activeEditor, ...visible].filter(
+	const editors = [activeEditor, ...visible, rememberedEditor(vscode)].filter(
 		(editor): editor is VscodeTextEditorLike =>
 			!!editor?.document?.uri?.fsPath,
 	);
@@ -583,7 +613,8 @@ function collectSelections(
 
 /**
  * The primary editor for the `active:` line: the active one, else the first
- * visible editor that holds a selection (panel-focused case).
+ * visible editor that holds a selection (panel-focused case), else the last
+ * text editor the user worked in (hidden behind the CodePi tab).
  */
 function pickPrimaryEditor(
 	vscode: VscodeLike | undefined,
@@ -591,11 +622,13 @@ function pickPrimaryEditor(
 ): VscodeTextEditorLike | undefined {
 	const active = vscode?.window?.activeTextEditor;
 	if (active?.document?.uri?.fsPath) return active;
-	if (selections.length === 0) return undefined;
+	const remembered = rememberedEditor(vscode);
+	if (selections.length === 0) return remembered;
 	const path = selections[0].file;
 	const visible = vscode?.window?.visibleTextEditors ?? [];
-	return visible.find(
-		(editor) => editor?.document?.uri?.fsPath === path,
+	return (
+		visible.find((editor) => editor?.document?.uri?.fsPath === path) ??
+		(remembered?.document?.uri?.fsPath === path ? remembered : undefined)
 	);
 }
 

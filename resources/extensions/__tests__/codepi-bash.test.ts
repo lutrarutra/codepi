@@ -65,7 +65,11 @@ function createMockPi() {
 	const commands = new Map<string, { handler: CommandHandler }>();
 	const entries: Array<{ customType: string; data: unknown }> = [];
 	const tools: unknown[] = [];
+	const messages: Array<{ message: { customType: string; content: string; display: boolean }; options: unknown }> = [];
 	const api = {
+		sendMessage: (message: { customType: string; content: string; display: boolean }, options?: unknown) => {
+			messages.push({ message, options });
+		},
 		on(event: string, handler: Handler) {
 			const list = handlers.get(event) ?? [];
 			list.push(handler);
@@ -81,7 +85,7 @@ function createMockPi() {
 			tools.push(tool);
 		},
 	};
-	return { api, handlers, commands, entries, tools };
+	return { api, handlers, commands, entries, tools, messages };
 }
 
 function createBranchEntry(customType: string, data: unknown) {
@@ -366,6 +370,23 @@ describe("codepi-bash: commands", () => {
 			expect.stringContaining("already in disabled"),
 			"info",
 		);
+	});
+
+	it("tells the agent about each mode change (hidden, next turn)", async () => {
+		const mock = load();
+		await startSession(mock, []);
+		expect(mock.messages).toHaveLength(0); // restoring the mode is not a change
+		await runCommand(mock, "codepi-bash-disable", []);
+		await runCommand(mock, "codepi-bash-allow", []);
+		await runCommand(mock, "codepi-bash-allow", []); // already auto: no notice
+		expect(mock.messages.map((m) => m.message.content.split("\n")[0])).toEqual([
+			"## BASH TOOL: DISABLED",
+			"## BASH TOOL: ENABLED (AUTO-APPROVE)",
+		]);
+		for (const m of mock.messages) {
+			expect(m.message.display).toBe(false);
+			expect(m.options).toEqual({ deliverAs: "nextTurn" });
+		}
 	});
 
 	it("switches the in-memory mode before session_start (bridge appears later)", async () => {

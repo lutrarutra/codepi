@@ -98,7 +98,8 @@
       },
       {
         "command": "codepi.openSession",
-        "title": "Open Session"
+        "title": "Open Session",
+        "category": "CodePi"
       },
       {
         "command": "codepi.renameSession",
@@ -177,10 +178,6 @@
     "menus": {
       "commandPalette": [
         {
-          "command": "codepi.openSession",
-          "when": "false"
-        },
-        {
           "command": "codepi.renameSession",
           "when": "false"
         },
@@ -214,31 +211,19 @@
         },
         {
           "command": "codepi.acceptAllEdits",
-          "when": "false"
+          "when": "codepi.hasPendingEdits"
         },
         {
           "command": "codepi.rejectAllEdits",
-          "when": "false"
+          "when": "codepi.hasPendingEdits"
         },
         {
           "command": "codepi.openDiff",
           "when": "false"
         },
         {
-          "command": "codepi.openSettingsTab",
-          "when": "false"
-        },
-        {
-          "command": "codepi.openSessionsTab",
-          "when": "false"
-        },
-        {
-          "command": "codepi.openExtensionsTab",
-          "when": "false"
-        },
-        {
           "command": "codepi.openPendingReview",
-          "when": "false"
+          "when": "codepi.hasPendingEdits"
         },
         {
           "command": "codepi.setModel",
@@ -268,6 +253,11 @@
         "key": "ctrl+n",
         "mac": "cmd+n",
         "when": "codepi.webviewFocused"
+      },
+      {
+        "command": "codepi.keyHandledByTui",
+        "key": "ctrl+-",
+        "when": "codepi.webviewFocused && !inputFocus && !panelFocus && !sideBarFocus && !auxiliaryBarFocus"
       }
     ]
   },
@@ -286,8 +276,8 @@
     "postinstall": "patch-package"
   },
   "dependencies": {
-    "@earendil-works/pi-coding-agent": "^1.0.4",
-    "@earendil-works/pi-tui": "1.0.4",
+    "@earendil-works/pi-coding-agent": "1.5.2",
+    "@earendil-works/pi-tui": "1.5.2",
     "@vscode/ripgrep-universal": "^1.18.0",
     "get-east-asian-width": "1.6.0",
     "marked": "18.0.5",

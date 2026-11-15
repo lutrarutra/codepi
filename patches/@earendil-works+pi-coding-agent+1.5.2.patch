@@ -1,0 +1,157 @@
+diff --git a/node_modules/@earendil-works/pi-coding-agent/dist/core/sdk.d.ts b/node_modules/@earendil-works/pi-coding-agent/dist/core/sdk.d.ts
+index 14be55d..4e76c75 100644
+--- a/node_modules/@earendil-works/pi-coding-agent/dist/core/sdk.d.ts
++++ b/node_modules/@earendil-works/pi-coding-agent/dist/core/sdk.d.ts
+@@ -7,6 +7,7 @@ import type { ResourceLoader } from "./resource-loader.ts";
+ import { SessionManager } from "./session-manager.ts";
+ import { SettingsManager } from "./settings-manager.ts";
+ import { createBashTool, createCodingTools, createEditTool, createFindTool, createGrepTool, createLsTool, createPowerShellTool, createReadOnlyTools, createReadTool, createWriteTool, withFileMutationQueue } from "./tools/index.ts";
++import type { Tool } from "./tools/index.ts";
+ export interface CreateAgentSessionOptions {
+     /** Working directory for project-local discovery. Default: process.cwd() */
+     cwd?: string;
+@@ -52,6 +53,16 @@ export interface CreateAgentSessionOptions {
+      * provided, MCP tools included.
+      */
+     excludeTools?: string[];
++    /**
++     * Optional override of the base (built-in) tool set.
++     *
++     * When provided, pi's built-in tools (read, bash, edit, write, grep, find, ls)
++     * are REPLACED entirely by the tools in this map (instead of being layered
++     * beneath custom tools), and the default tool selection is the map's keys.
++     * Pass an empty object `{}` to register no built-in tools at all — only
++     * extension/custom tools remain.
++     */
++    baseToolsOverride?: Record<string, Tool>;
+     /** Custom tools to register (in addition to built-in tools). */
+     customTools?: ToolDefinition[];
+     /** Resource loader. When omitted, DefaultResourceLoader is used. */
+diff --git a/node_modules/@earendil-works/pi-coding-agent/dist/core/sdk.js b/node_modules/@earendil-works/pi-coding-agent/dist/core/sdk.js
+index d616902..eaf7c9e 100644
+--- a/node_modules/@earendil-works/pi-coding-agent/dist/core/sdk.js
++++ b/node_modules/@earendil-works/pi-coding-agent/dist/core/sdk.js
+@@ -145,7 +145,11 @@ export async function createAgentSession(options = {}) {
+     const toolListError = options.tools ? getToolListError(options.tools) : undefined;
+     if (toolListError)
+         throw new Error(`Invalid tools option: ${toolListError}`);
+-    const defaultToolNames = options.noTools ? [] : (settingsManager.getDefaultTools() ?? DEFAULT_TOOL_NAMES);
++    const defaultToolNames = options.noTools
++        ? []
++        : options.baseToolsOverride
++            ? Object.keys(options.baseToolsOverride)
++            : (settingsManager.getDefaultTools() ?? DEFAULT_TOOL_NAMES);
+     // A `tools` list of only `+name`/`-name` entries changes the default selection instead of
+     // replacing it, like the `defaultTools` setting.
+     const toolModifiers = options.tools?.some(isToolModifier) ? options.tools : undefined;
+@@ -316,6 +320,7 @@ export async function createAgentSession(options = {}) {
+         defaultToolModifiers: toolModifiers,
+         allowedToolNames,
+         excludedToolNames,
++        baseToolsOverride: options.baseToolsOverride,
+         extensionRunnerRef,
+         sessionStartEvent: options.sessionStartEvent,
+     });
+diff --git a/node_modules/@earendil-works/pi-coding-agent/dist/core/tools/tool-definition-wrapper.js b/node_modules/@earendil-works/pi-coding-agent/dist/core/tools/tool-definition-wrapper.js
+index 6b9c06c..229693b 100644
+--- a/node_modules/@earendil-works/pi-coding-agent/dist/core/tools/tool-definition-wrapper.js
++++ b/node_modules/@earendil-works/pi-coding-agent/dist/core/tools/tool-definition-wrapper.js
+@@ -32,6 +32,11 @@ export function createToolDefinitionFromAgentTool(tool) {
+         constrainedSampling: tool.constrainedSampling,
+         prepareArguments: tool.prepareArguments,
+         executionMode: tool.executionMode,
++        promptSnippet: tool.promptSnippet,
++        promptGuidelines: tool.promptGuidelines,
++        renderShell: tool.renderShell,
++        renderCall: tool.renderCall,
++        renderResult: tool.renderResult,
+         execute: async (toolCallId, params, signal, onUpdate) => tool.execute(toolCallId, params, signal, onUpdate),
+     };
+ }
+diff --git a/node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/interactive-mode.js b/node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/interactive-mode.js
+index d4e4b09..2cb2151 100644
+--- a/node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/interactive-mode.js
++++ b/node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/interactive-mode.js
+@@ -756,16 +756,21 @@ export class InteractiveMode {
+                 return `${top} ${theme.fg("dim", `v${this.version}`)}\n${bottom} ${hints}`;
+             };
+             // Build startup instructions using keybinding hint helpers
+-            const hint = (keybinding, description) => keyHint(keybinding, description);
++            // Host integration (CodePi): a host may unbind keys it cannot support (suspend, exit);
++            // leave their hints out instead of showing a description without a key.
++            const bound = (...keybindings) => keybindings.every((k) => keyText(k));
++            const hint = (keybinding, description) => (bound(keybinding) ? keyHint(keybinding, description) : "");
+             const expandedInstructions = () => [
+                 hint("app.interrupt", "to interrupt"),
+                 hint("app.clear", "to clear"),
+-                rawKeyHint(`${keyText("app.clear")} twice`, "to exit"),
++                bound("app.clear") ? rawKeyHint(`${keyText("app.clear")} twice`, "to exit") : "",
+                 hint("app.exit", "to exit (empty)"),
+                 hint("app.suspend", "to suspend"),
+                 keyHint("tui.editor.deleteToLineEnd", "to delete to end"),
+                 hint("app.thinking.cycle", "to cycle thinking level"),
+-                rawKeyHint(`${keyText("app.model.cycleForward")}/${keyText("app.model.cycleBackward")}`, "to cycle models"),
++                bound("app.model.cycleForward", "app.model.cycleBackward")
++                    ? rawKeyHint(`${keyText("app.model.cycleForward")}/${keyText("app.model.cycleBackward")}`, "to cycle models")
++                    : "",
+                 hint("app.model.select", "to select model"),
+                 hint("app.tools.expand", "to expand tools"),
+                 hint("app.thinking.toggle", "to expand thinking"),
+@@ -777,14 +782,20 @@ export class InteractiveMode {
+                 hint("app.message.dequeue", "to edit all queued messages"),
+                 hint("app.clipboard.pasteImage", "to paste files on macOS, images, or text"),
+                 rawKeyHint("drop files", "to attach"),
+-            ].join("\n");
++            ]
++                .filter(Boolean)
++                .join("\n");
+             const compactInstructions = () => [
+                 hint("app.interrupt", "interrupt"),
+-                rawKeyHint(`${keyText("app.clear")}/${keyText("app.exit")}`, "clear/exit"),
++                bound("app.clear", "app.exit")
++                    ? rawKeyHint(`${keyText("app.clear")}/${keyText("app.exit")}`, "clear/exit")
++                    : hint("app.clear", "clear") || hint("app.exit", "exit"),
+                 rawKeyHint("/", "commands"),
+                 rawKeyHint("!", "bash"),
+                 hint("app.tools.expand", "more"),
+-            ].join(theme.fg("muted", " · "));
++            ]
++                .filter(Boolean)
++                .join(theme.fg("muted", " · "));
+             const compactOnboarding = () => theme.fg("dim", `Press ${keyText("app.tools.expand")} to show full startup help${showDetails ? " and loaded resources" : ""}.`);
+             const onboarding = () => theme.fg("dim", `Pi can explain its own features and look up its docs. Ask it how to use or extend Pi.`);
+             const header = new BuiltInHeader(() => `${withLogo(compactInstructions())}\n${compactOnboarding()}\n\n${onboarding()}`, () => `${withLogo(expandedInstructions())}\n\n${onboarding()}`, this.getStartupExpansionState(), 1, 0);
+diff --git a/node_modules/@earendil-works/pi-coding-agent/dist/utils/clipboard.js b/node_modules/@earendil-works/pi-coding-agent/dist/utils/clipboard.js
+index ea1c3c6..161bc08 100644
+--- a/node_modules/@earendil-works/pi-coding-agent/dist/utils/clipboard.js
++++ b/node_modules/@earendil-works/pi-coding-agent/dist/utils/clipboard.js
+@@ -85,6 +85,15 @@ export async function readClipboardFilePaths() {
+     return paths?.length ? paths : null;
+ }
+ export async function copyToClipboard(text) {
++    // Host integration (CodePi): an embedding host that owns the user's clipboard,
++    // e.g. a VS Code extension (vscode.env.clipboard, also local from remote hosts),
++    // registers globalThis.__piHostClipboardWrite. It replaces native tools and OSC 52,
++    // which cannot reach the user's clipboard from inside such a host.
++    const hostWrite = globalThis.__piHostClipboardWrite;
++    if (typeof hostWrite === "function") {
++        await hostWrite(text);
++        return;
++    }
+     const p = platform();
+     const env = process.env;
+     let copied = false;
+diff --git a/node_modules/@earendil-works/pi-coding-agent/package.json b/node_modules/@earendil-works/pi-coding-agent/package.json
+index eb98197..a209c76 100644
+--- a/node_modules/@earendil-works/pi-coding-agent/package.json
++++ b/node_modules/@earendil-works/pi-coding-agent/package.json
+@@ -14,7 +14,8 @@
+ 	"exports": {
+ 		".": {
+ 			"types": "./dist/index.d.ts",
+-			"import": "./dist/index.js"
++			"import": "./dist/index.js",
++			"require": "./dist/index.js"
+ 		},
+ 		"./rpc-entry": {
+ 			"import": "./dist/bundle/rpc-entry.js"

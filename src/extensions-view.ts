@@ -5,7 +5,8 @@ import {
 	readJsonFile,
 } from "./pi-store";
 import { buildSnapshot, CORE_SLASH_COMMANDS } from "./extension-snapshot";
-import { probeExtensions } from "./extension-probe";
+import { probeExtensions, probeProjectTrust } from "./extension-probe";
+import { listPackages, runPackageAction, type PackageAction } from "./package-actions";
 import type {
 	ExtensionsMessage,
 	ExtensionsReply,
@@ -72,6 +73,14 @@ export class ExtensionsViewProvider implements vscode.WebviewViewProvider {
 				).clearExtensionCache?.();
 				this.snapshot = undefined;
 			}
+			if (
+				msg.type === "installPackage" ||
+				msg.type === "removePackage" ||
+				msg.type === "updatePackages"
+			) {
+				await this.packageAction(msg);
+				return;
+			}
 			if (msg.type === "getSnapshot" || msg.type === "refresh") {
 				this.snapshot ??= await this.build();
 				this.post({ type: "snapshot", snapshot: this.snapshot });
@@ -82,6 +91,51 @@ export class ExtensionsViewProvider implements vscode.WebviewViewProvider {
 				message: err instanceof Error ? err.message : String(err),
 			});
 		}
+	}
+
+	private async packageAction(
+		msg: Extract<ExtensionsMessage, { type: "installPackage" | "removePackage" | "updatePackages" }>,
+	): Promise<void> {
+		const action: PackageAction =
+			msg.type === "installPackage"
+				? { type: "install", source: msg.source }
+				: msg.type === "removePackage"
+					? { type: "remove", source: msg.source, scope: msg.scope }
+					: { type: "update", source: msg.source };
+		if (action.type === "remove") {
+			const where = action.scope === "project" ? "this project's .pi/settings.json" : "your pi settings";
+			const ok = await vscode.window.showWarningMessage(
+				`Remove the pi package ${action.source}?`,
+				{ modal: true, detail: `It is removed from ${where} and uninstalled.` },
+				"Remove",
+			);
+			if (ok !== "Remove") {
+				this.post({ type: "packageDone", ok: false, message: "" });
+				return;
+			}
+		}
+		const verb = action.type === "install" ? "Installing" : action.type === "remove" ? "Removing" : "Updating";
+		const what = action.source ?? "all packages";
+		this.post({ type: "packageBusy", message: `${verb} ${what}…` });
+		const sdk = await getSdk();
+		const cwd = this.getCwd();
+		const ctx = { cwd, agentDir: this.agentDir, projectTrusted: await probeProjectTrust(cwd, this.agentDir) };
+		try {
+			const summary = await vscode.window.withProgress(
+				{ location: vscode.ProgressLocation.Notification, title: `pi: ${verb} ${what}` },
+				(progress) => runPackageAction(sdk, ctx, action, (message) => progress.report({ message })),
+			);
+			const message = `${summary} Run /reload in open sessions to apply it; new sessions load it automatically.`;
+			this.post({ type: "packageDone", ok: true, message });
+			void vscode.window.showInformationMessage(`pi: ${message}`);
+		} catch (err) {
+			const message = err instanceof Error ? err.message : String(err);
+			this.post({ type: "packageDone", ok: false, message });
+			void vscode.window.showErrorMessage(`pi: ${verb} ${what} failed: ${message}`);
+		}
+		(sdk as unknown as { clearExtensionCache?: () => void }).clearExtensionCache?.();
+		this.snapshot = await this.build();
+		this.post({ type: "snapshot", snapshot: this.snapshot });
 	}
 
 	private async build(): Promise<ExtensionsSnapshot> {
@@ -120,7 +174,17 @@ export class ExtensionsViewProvider implements vscode.WebviewViewProvider {
 					"Execute bash commands in a VS Code terminal with output truncation (CodePi host implementation).",
 			},
 		];
-		return buildSnapshot({
+		let packages: ExtensionsSnapshot["packages"] = [];
+		try {
+			packages = listPackages(await getSdk(), {
+				cwd,
+				agentDir,
+				projectTrusted: await probeProjectTrust(cwd, agentDir),
+			});
+		} catch {
+			/* settings unreadable — the inventory below still shows what loaded */
+		}
+		const snapshot = buildSnapshot({
 			bundledDir,
 			agentDir,
 			cwd,
@@ -151,6 +215,7 @@ export class ExtensionsViewProvider implements vscode.WebviewViewProvider {
 				description?: string;
 			}>,
 		});
+		return { ...snapshot, packages };
 	}
 
 	private post(msg: ExtensionsReply): void {

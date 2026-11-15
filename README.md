@@ -185,10 +185,12 @@ package resources, including commands, tools, and load errors.
 
 ## Commands
 
-The Command Palette provides session, review, and dashboard commands, including
-**CodePi: Start new session**, **New Session**, **Open Session**, **Rename
-Session**, **Delete Session**, **Refresh Sessions**, edit accept/reject actions,
-**Open Edit Diff**, and the Sessions, Settings, and Extensions tabs.
+The Command Palette provides **CodePi: Start new session**, **CodePi: Open
+Session** (a session picker), **Open CodePi Sessions**, **Open CodePi Settings**
+and **Open CodePi Extensions**, and — while edits are pending — **Open CodePi
+Pending Review**, **CodePi: Accept All Edits** and **CodePi: Reject All Edits**.
+Per-session and per-file actions (rename, delete, accept or reject one file or
+hunk, open a diff) live in the Sessions view, the CodeLens and the status bar.
 
 Pi slash commands are provided by bundled extensions:
 

@@ -471,6 +471,11 @@ export function isContextExtensionEnabled(settings: unknown): boolean {
 	];
 }
 
+/** Whether the codepi-modes bundled extension is enabled in settings */
+export function isModesExtensionEnabled(settings: unknown): boolean {
+	return readBundledResourceConfig(settings).bundledExtensions["codepi-modes"];
+}
+
 /** Return the bundled resources enabled by the current CodePi settings. */
 export function getEnabledBundledResources(
 	settings: unknown,

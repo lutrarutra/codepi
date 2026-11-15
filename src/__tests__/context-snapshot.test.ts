@@ -8,6 +8,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+	setLastTextEditorProvider,
 	collectEditorContext,
 	collectGitDiffs,
 	formatContextSnapshot,
@@ -244,6 +245,53 @@ describe("formatContextSnapshot", () => {
 		expect(text).toContain("active: src/highlighted.ts");
 		expect(text).toContain("selection: src/highlighted.ts L6:3–L10:9 (5 lines)");
 		expect(text).toContain("selection_text: const visible = 2;");
+	});
+
+	it("uses the last editor the user worked in when it is hidden behind the CodePi tab", async () => {
+		// Same editor group: no active editor, no visible editor — only the
+		// remembered one (document + its selection when the user left it).
+		setLastTextEditorProvider(() => ({
+			document: {
+				uri: { fsPath: "/p/hello.txt" },
+				languageId: "plaintext",
+				lineCount: 2,
+				isDirty: false,
+				getText: () => "banana is the first word",
+			},
+			selection: {
+				start: { line: 0, character: 0 },
+				end: { line: 0, character: 24 },
+				active: { line: 0, character: 24 },
+				isEmpty: false,
+			},
+		}));
+		const vscode = makeMockVscode({ folders: ["/p"] });
+		const ctx = await collectEditorContext(vscode, "/p");
+		const text = formatLiveContext(ctx, "/p");
+		expect(text).toContain("active: hello.txt [plaintext]");
+		expect(text).toContain("selection: hello.txt L1:1–L1:25 (1 line)");
+		expect(text).toContain("selection_text: banana is the first word");
+	});
+
+	it("prefers the real active editor over the remembered one", async () => {
+		setLastTextEditorProvider(() => ({
+			document: { uri: { fsPath: "/p/old.ts" }, getText: () => "old" },
+			selection: { start: { line: 0, character: 0 }, end: { line: 3, character: 0 }, active: { line: 3, character: 0 }, isEmpty: false },
+		}));
+		const vscode = makeMockVscode({ folders: ["/p"], active: { path: "/p/src/foo.ts" } });
+		const ctx = await collectEditorContext(vscode, "/p");
+		expect(ctx.active?.path).toBe("/p/src/foo.ts");
+		expect(ctx.selections.map((s) => s.file)).toEqual(["/p/src/foo.ts"]);
+	});
+
+	it("shows the remembered file as active even without a selection", async () => {
+		setLastTextEditorProvider(() => ({
+			document: { uri: { fsPath: "/p/notes.md" }, languageId: "markdown", lineCount: 9, isDirty: false },
+			selection: { start: { line: 4, character: 1 }, end: { line: 4, character: 1 }, active: { line: 4, character: 1 }, isEmpty: true },
+		}));
+		const ctx = await collectEditorContext(makeMockVscode({ folders: ["/p"] }), "/p");
+		expect(ctx.active?.path).toBe("/p/notes.md");
+		expect(ctx.selections).toHaveLength(0);
 	});
 
 	it("collects selections from multiple visible editors, each with its file", async () => {

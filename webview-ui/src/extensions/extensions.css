@@ -242,3 +242,58 @@ body {
 	color: var(--vscode-charts-yellow, #e2c08d);
 	font-style: italic;
 }
+
+/* Packages panel (install / update / remove pi packages) */
+.pkg-panel {
+	margin-bottom: 8px;
+}
+.pkg-list {
+	list-style: none;
+	margin: 0;
+	padding: 0;
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+}
+.pkg-row {
+	align-items: center;
+	gap: 6px;
+}
+.pkg-source {
+	flex: 1;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	font-family: var(--vscode-editor-font-family, monospace);
+}
+.pkg-actions {
+	display: flex;
+	gap: 6px;
+}
+.pkg-link {
+	background: none;
+	border: none;
+	padding: 0;
+	color: var(--vscode-textLink-foreground);
+	cursor: pointer;
+	font-size: inherit;
+}
+.pkg-link:disabled {
+	opacity: 0.5;
+	cursor: default;
+}
+.card-title .pkg-link {
+	margin-left: auto;
+	font-weight: 400;
+}
+.pkg-danger {
+	color: var(--vscode-errorForeground);
+}
+.pkg-status {
+	font-size: 11px;
+	color: var(--vscode-descriptionForeground);
+}
+.pkg-status-error {
+	color: var(--vscode-errorForeground);
+}
