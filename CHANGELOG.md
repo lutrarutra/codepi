@@ -2,7 +2,7 @@
 
 All notable changes to CodePi are documented in this file.
 
-## Unreleased
+## 0.9.0
 
 - **Update to pi 1.5.2** (from 1.0.4). `@earendil-works/pi-coding-agent` is
   now pinned exactly, like `pi-tui`, so the patch always matches the installed
